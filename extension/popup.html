@@ -5,6 +5,10 @@
   <main>
     <div class="mh-brand">MessageHelper</div>
     <p class="mh-subtitle">Translate messages. Write with confidence.</p>
+    <label for="model">GPT model</label>
+    <select id="model" aria-describedby="model-status" disabled><option value="">Loading models…</option></select>
+    <button id="refresh-models" type="button" class="mh-secondary mh-refresh-models">Refresh models</button>
+    <p id="model-status" class="mh-model-status" role="status" aria-live="polite"></p>
     <label for="language">Translation language</label>
     <select id="language"></select>
     <label for="tone">English writing tone</label>

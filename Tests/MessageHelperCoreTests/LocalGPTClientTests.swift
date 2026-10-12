@@ -116,9 +116,14 @@ private final class MockLocalGPTTransport: LocalGPTTransport {
     var disabledMCPHistory: [[String]] = []
     var bypassToolPolicy = false
     var bypassSandbox = false
+    var configuredModel: String? = "configured-model"
+    var forcedResponseModel: String?
+    var modelPages: [[String: Any]] = [["data": [mockModel("configured-model", isDefault: true)], "nextCursor": NSNull()]]
+    private var modelPageIndex = 0
 
     func start(workingDirectory: URL, disabledMCPServers: [String]) throws {
         isOpen = true
+        modelPageIndex = 0
         disabledMCPHistory.append(disabledMCPServers)
         for name in disabledMCPServers { configuredMCPServers[name]?["enabled"] = false }
     }
@@ -133,9 +138,17 @@ private final class MockLocalGPTTransport: LocalGPTTransport {
         case "account/read": try emit(["id": id, "result": ["account": ["type": accountType], "requiresOpenaiAuth": true]])
         case "config/read":
             let features = Dictionary(uniqueKeysWithValues: LocalGPTToolPolicy.disabledFeatures.map { ($0, bypassToolPolicy) })
-            try emit(["id": id, "result": ["config": ["features": features, "web_search": "disabled", "mcp_servers": configuredMCPServers]]])
+            var config: [String: Any] = ["features": features, "web_search": "disabled", "mcp_servers": configuredMCPServers]
+            if let configuredModel { config["model"] = configuredModel }
+            try emit(["id": id, "result": ["config": config]])
+        case "model/list":
+            let page = modelPages[min(modelPageIndex, modelPages.count - 1)]
+            modelPageIndex += 1
+            try emit(["id": id, "result": page])
         case "thread/start", "thread/resume":
-            try emit(["id": id, "result": ["thread": ["id": resumeID, "status": ["type": "idle"]], "model": "configured-model", "approvalPolicy": "never", "sandbox": ["type": bypassSandbox ? "dangerFullAccess" : "readOnly", "networkAccess": false]]])
+            let requested = (request["params"] as? [String: Any])?["model"] as? String
+            let model = forcedResponseModel ?? requested ?? configuredModel ?? "configured-model"
+            try emit(["id": id, "result": ["thread": ["id": resumeID, "status": ["type": "idle"]], "model": model, "approvalPolicy": "never", "sandbox": ["type": bypassSandbox ? "dangerFullAccess" : "readOnly", "networkAccess": false]]])
         case "turn/start": try onTurn?(request)
         default: break
         }
@@ -148,9 +161,152 @@ private final class MockLocalGPTTransport: LocalGPTTransport {
     }
 }
 
+private func mockModel(_ model: String, displayName: String? = nil, isDefault: Bool = false,
+                       efforts: [String] = ["low", "medium"], defaultEffort: String = "medium") -> [String: Any] {
+    ["model": model, "displayName": displayName ?? model, "isDefault": isDefault,
+     "defaultReasoningEffort": defaultEffort,
+     "supportedReasoningEfforts": efforts.map { ["reasoningEffort": $0, "description": "Advertised effort"] }]
+}
+
 @MainActor
 final class LocalGPTClientTests: XCTestCase {
     private let directory = URL(fileURLWithPath: "/tmp")
+
+    func testModelCatalogTraversesPagesPreservesLabelsAndFiltersNonTextOrHiddenModels() async throws {
+        let mock = MockLocalGPTTransport()
+        var hidden = mockModel("hidden-model")
+        hidden["hidden"] = true
+        var audio = mockModel("audio-model")
+        audio["inputModalities"] = ["audio"]
+        var future = mockModel("gpt-2099-future", displayName: "Future Model 2099", efforts: ["adaptive"], defaultEffort: "adaptive")
+        future["inputModalities"] = ["text", "image"]
+        mock.modelPages = [
+            ["data": [mockModel("configured-model", displayName: "Current Label", isDefault: true), hidden], "nextCursor": "page-two"],
+            ["data": [audio, future], "nextCursor": NSNull()]
+        ]
+        let client = LocalGPTClient(transport: mock)
+        let catalog = try await client.listModels(workingDirectory: directory)
+        XCTAssertEqual(catalog.models.map(\.model), ["configured-model", "gpt-2099-future"])
+        XCTAssertEqual(catalog.models.map(\.displayName), ["Current Label", "Future Model 2099"])
+        XCTAssertEqual(catalog.models[1].supportedReasoningEfforts, ["adaptive"])
+        XCTAssertEqual(catalog.defaultModel, "configured-model")
+        let pages = mock.sent.filter { $0["method"] as? String == "model/list" }
+        XCTAssertEqual(pages.count, 2)
+        XCTAssertEqual((pages[0]["params"] as? [String: Any])?["includeHidden"] as? Bool, false)
+        XCTAssertEqual((pages[1]["params"] as? [String: Any])?["cursor"] as? String, "page-two")
+        XCTAssertFalse(mock.sent.contains { ["thread/start", "turn/start"].contains($0["method"] as? String ?? "") })
+        XCTAssertFalse(mock.isOpen)
+        XCTAssertNil(client.connection)
+    }
+
+    func testModelCatalogRequiresVerifiedToolPolicyAndDisablesMCPWithoutStartingThread() async throws {
+        let mock = MockLocalGPTTransport()
+        mock.configuredMCPServers = ["tool-server": [:]]
+        let client = LocalGPTClient(transport: mock)
+        _ = try await client.listModels(workingDirectory: directory)
+        XCTAssertEqual(mock.disabledMCPHistory, [[], ["tool-server"]])
+        XCTAssertFalse(mock.sent.contains { $0["method"] as? String == "thread/start" })
+        mock.bypassToolPolicy = true
+        do { _ = try await client.listModels(workingDirectory: directory); XCTFail() }
+        catch { XCTAssertTrue(error is LocalGPTError) }
+        XCTAssertFalse(mock.isOpen)
+        XCTAssertEqual(mock.sent.filter { $0["method"] as? String == "model/list" }.count, 1)
+    }
+
+    func testModelCatalogRejectsRepeatedCursorAndMalformedMetadata() async throws {
+        let mock = MockLocalGPTTransport()
+        mock.modelPages = [["data": [mockModel("configured-model")], "nextCursor": "same"]]
+        let client = LocalGPTClient(transport: mock)
+        do { _ = try await client.listModels(workingDirectory: directory); XCTFail() }
+        catch { XCTAssertTrue(error.localizedDescription.contains("cursor")) }
+        XCTAssertFalse(mock.isOpen)
+        mock.modelPages = [["data": [mockModel("bad\nmodel")]]]
+        do { _ = try await client.listModels(workingDirectory: directory); XCTFail() }
+        catch { XCTAssertTrue(error.localizedDescription.contains("metadata")) }
+        XCTAssertFalse(mock.isOpen)
+    }
+
+    func testSelectedFutureModelPropagatesAndUsesAdvertisedReasoningDefault() async throws {
+        let mock = MockLocalGPTTransport()
+        mock.modelPages = [["data": [mockModel("future-model", efforts: ["standard", "adaptive"], defaultEffort: "adaptive")]]]
+        let client = LocalGPTClient(transport: mock)
+        let connection = try await client.connect(threadID: nil, workingDirectory: directory, model: "future-model")
+        XCTAssertEqual(connection.model, "future-model")
+        let start = try XCTUnwrap(mock.sent.first { $0["method"] as? String == "thread/start" })
+        XCTAssertEqual((start["params"] as? [String: Any])?["model"] as? String, "future-model")
+        mock.onTurn = { request in
+            XCTAssertEqual((request["params"] as? [String: Any])?["effort"] as? String, "adaptive")
+            try mock.emit(["id": request["id"]!, "result": ["turn": ["id": "turn", "status": "completed", "items": [["id": "answer", "type": "agentMessage", "text": "Polished"]]]]])
+        }
+        _ = try await client.answer(prompt: "Draft", requestID: UUID(), onDelta: { _ in })
+        await client.disconnect()
+    }
+
+    func testReasoningEffortPrefersLowThenSupportedDefaultThenFirstOrOmission() async throws {
+        for (efforts, advertisedDefault, expected) in [
+            (["medium", "low"], "medium", "low" as String?),
+            (["adaptive", "balanced"], "balanced", "balanced"),
+            (["adaptive", "balanced"], "unavailable", "adaptive"),
+            ([], "unavailable", nil)
+        ] {
+            let mock = MockLocalGPTTransport()
+            mock.modelPages = [["data": [mockModel("future", efforts: efforts, defaultEffort: advertisedDefault)]]]
+            let client = LocalGPTClient(transport: mock)
+            _ = try await client.connect(threadID: nil, workingDirectory: directory, model: "future")
+            mock.onTurn = { request in
+                XCTAssertEqual((request["params"] as? [String: Any])?["effort"] as? String, expected)
+                try mock.emit(["id": request["id"]!, "result": ["turn": ["id": "turn", "status": "completed", "items": [["id": "answer", "type": "agentMessage", "text": "Text"]]]]])
+            }
+            _ = try await client.answer(prompt: "Draft", requestID: UUID(), onDelta: { _ in })
+            await client.disconnect()
+        }
+    }
+
+    func testMissingOrRemovedSelectedModelCannotStartInferenceOrFallBack() async throws {
+        let mock = MockLocalGPTTransport()
+        mock.modelPages = [["data": [mockModel("future-model")]]]
+        let client = LocalGPTClient(transport: mock)
+        _ = try await client.listModels(workingDirectory: directory)
+        mock.modelPages = [["data": [mockModel("configured-model")]]]
+        do {
+            _ = try await client.connect(threadID: nil, workingDirectory: directory, model: "future-model")
+            XCTFail("A removed selection must fail")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("choose another model or Local default")) }
+        XCTAssertFalse(mock.sent.contains { ["thread/start", "turn/start"].contains($0["method"] as? String ?? "") })
+        XCTAssertFalse(mock.isOpen)
+        XCTAssertEqual(mock.sent.filter { $0["method"] as? String == "model/list" }.count, 2)
+    }
+
+    func testWrongModelConfirmationCannotStartTurn() async throws {
+        let mock = MockLocalGPTTransport()
+        mock.modelPages = [["data": [mockModel("future-model")]]]
+        mock.forcedResponseModel = "configured-model"
+        let client = LocalGPTClient(transport: mock)
+        do { _ = try await client.connect(threadID: nil, workingDirectory: directory, model: "future-model"); XCTFail() }
+        catch { XCTAssertTrue(error.localizedDescription.contains("selected model")) }
+        XCTAssertFalse(mock.sent.contains { $0["method"] as? String == "turn/start" })
+        XCTAssertNil(client.connection)
+    }
+
+    func testEmptySelectedModelPreservesDesktopDefaultWithoutModelOverride() async throws {
+        let mock = MockLocalGPTTransport()
+        let client = LocalGPTClient(transport: mock)
+        _ = try await client.connect(threadID: nil, workingDirectory: directory, model: "")
+        let start = try XCTUnwrap(mock.sent.first { $0["method"] as? String == "thread/start" })
+        XCTAssertNil((start["params"] as? [String: Any])?["model"])
+        await client.disconnect()
+    }
+
+    func testMalformedSelectedModelIsRejectedWithoutOpeningService() async {
+        for value in ["bad\nmodel", " ", String(repeating: "a", count: 201)] {
+            let mock = MockLocalGPTTransport()
+            let client = LocalGPTClient(transport: mock)
+            do { _ = try await client.connect(threadID: nil, workingDirectory: directory, model: value); XCTFail() }
+            catch { XCTAssertTrue(error.localizedDescription.contains("valid ID")) }
+            XCTAssertTrue(mock.sent.isEmpty)
+            XCTAssertFalse(mock.isOpen)
+        }
+    }
 
     func testIdleEOFClearsConnectionAndNotifiesExactlyOnce() async throws {
         let mock = MockLocalGPTTransport()

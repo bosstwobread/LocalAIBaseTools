@@ -62,7 +62,7 @@ public enum NativeFrameEncoder {
 }
 
 public struct HelperRequest: Decodable, Sendable {
-    public enum Action: String, Decodable, Sendable { case ping, translate, polish }
+    public enum Action: String, Decodable, Sendable { case ping, listModels, translate, polish }
     public static let languages = ["zh-CN", "zh-TW", "en", "ja", "ko", "fr", "de", "es", "pt", "it"]
     public static let tones = ["professional", "friendly", "concise"]
     public static let maximumTextCharacters = 24_000
@@ -71,10 +71,12 @@ public struct HelperRequest: Decodable, Sendable {
     public let text: String?
     public let targetLanguage: String?
     public let tone: String?
+    public let model: String?
 
-    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil) {
+    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil) {
         self.id = id; self.action = action; self.text = text
         self.targetLanguage = targetLanguage; self.tone = tone
+        self.model = model
     }
 
     public func validate() throws {
@@ -87,7 +89,10 @@ public struct HelperRequest: Decodable, Sendable {
         if let tone, !Self.tones.contains(tone) {
             throw MessageHelperError.invalid("Choose a supported polishing tone.")
         }
-        guard action != .ping else { return }
+        if let model, !model.isEmpty, !LocalGPTModel.validIdentifier(model) {
+            throw MessageHelperError.invalid("Choose a model with a valid ID of at most 200 bytes.")
+        }
+        guard action != .ping, action != .listModels else { return }
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MessageHelperError.invalid("The message is empty.")
         }
@@ -117,14 +122,21 @@ public struct HelperResponse: Encodable, Sendable {
     public let text: String?
     public let version: String?
     public let model: String?
+    public let models: [LocalGPTModel]?
+    public let defaultModel: String?
     public let error: String?
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "1.0.0"; error = nil
+        version = "1.1.0"; error = nil; models = nil; defaultModel = nil
+    }
+    public init(id: String, catalog: LocalGPTModelCatalog) {
+        self.id = id; ok = true; text = nil; model = nil; version = "1.1.0"; error = nil
+        models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {
         self.id = id; ok = false; text = nil; model = nil; version = nil; self.error = error
+        models = nil; defaultModel = nil
     }
 }
 

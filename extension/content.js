@@ -103,7 +103,7 @@
       trigger.disabled = true;
       try {
         const preferences = await MessageHelper.settings();
-        if (state.cached?.source === capturedText && state.cached?.language === preferences.targetLanguage) {
+        if (state.cached?.source === capturedText && state.cached?.language === preferences.targetLanguage && state.cached?.model === preferences.model) {
           const hidden = !panel.hidden;
           panel.hidden = hidden;
           trigger.textContent = hidden ? 'Translate' : 'Hide translation';
@@ -116,7 +116,8 @@
         const title = element('div', 'mh-result-label', MessageHelper.languages[preferences.targetLanguage]);
         const result = element('div', 'mh-result', response.text);
         panel.replaceChildren(title, result);
-        state.cached = {source: capturedText, language: preferences.targetLanguage};
+        if (response.model) panel.append(element('div', 'mh-model-label', 'Model: ' + response.model));
+        state.cached = {source: capturedText, language: preferences.targetLanguage, model: preferences.model};
         trigger.textContent = 'Hide translation';
       } catch (error) {
         if (generation !== state.generation || !node.isConnected) return;
@@ -156,7 +157,7 @@
       throw new Error('The editor could not apply the result. Copy the preview into your draft manually.');
     }
   }
-  function previewPolish(state, source, output) {
+  function previewPolish(state, source, output, resolvedModel) {
     const title = element('div', 'mh-result-label', 'Polished draft');
     const result = element('div', 'mh-result mh-polished-text', output);
     const actions = element('div', 'mh-actions');
@@ -221,6 +222,7 @@
     const cancel = button('mh-button mh-cancel', 'Cancel', () => state.preview.replaceChildren());
     actions.append(apply, cancel);
     const nodes = [title, result];
+    if (resolvedModel) nodes.push(element('div', 'mh-model-label', 'Model: ' + resolvedModel));
     if (richFormatting(state.editor)) nodes.push(element('div', 'mh-format-note', 'Applying replaces this draft with plain text. Undo can restore the original formatting.'));
     nodes.push(actions, status, original);
     state.preview.replaceChildren(...nodes);
@@ -260,9 +262,10 @@
       try {
         MessageHelper.validateText(captured.text);
         showStatus(preview, 'Polishing your draft…');
-        const response = await MessageHelper.request('polish', captured.text);
+        const preferences = await MessageHelper.settings();
+        const response = await MessageHelper.request('polish', captured.text, preferences);
         if (!editor.isConnected || generation !== state.generation || captured.key !== conversationKey()) return;
-        previewPolish(state, captured, response.text);
+        previewPolish(state, captured, response.text, response.model);
       } catch (error) {
         if (editor.isConnected && generation === state.generation) showStatus(preview, error.message, true);
       } finally {

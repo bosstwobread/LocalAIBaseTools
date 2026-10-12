@@ -16,7 +16,7 @@ function deferred() {
   return {promise, resolve};
 }
 
-function fixture(t, response = async request => ({ok: true, text: request.action === 'translate' ? '谢谢你的更新。' : polished})) {
+function fixture(t, response = async request => ({ok: true, text: request.action === 'translate' ? '谢谢你的更新。' : polished}), storedSettings = {}) {
   const dom = new JSDOM(`<!doctype html><body>
     <section><div class="client-name">Synthetic Client</div><div data-mh-message><p>Thanks for the update.</p><p>Please keep Friday's deadline.</p><span class="end-of-message">NOT MESSAGE TEXT</span></div></section>
     <form data-mh-composer><div data-mh-editor contenteditable="true" role="textbox">${initialDraft}</div><div class="toolbar"><button data-mh-send type="submit">Send</button></div></form>
@@ -39,12 +39,12 @@ function fixture(t, response = async request => ({ok: true, text: request.action
   };
   window.TextEncoder = TextEncoder;
   window.chrome = {
-    storage: {local: {get: async defaults => ({...defaults})}},
+    storage: {local: {get: async defaults => ({...defaults, ...storedSettings})}},
     runtime: {sendMessage: async request => { requests.push({...request}); return response(request); }}
   };
   for (const script of scripts) window.eval(script);
   t.after(() => window.close());
-  return {window, document, editor, requests, events,
+  return {window, document, editor, requests, events, storedSettings,
     click: selector => {
       const node = document.querySelector(selector);
       assert.ok(node, `Missing control: ${selector}`);
@@ -93,6 +93,25 @@ test('recycled message nodes discard stale translation and request new source wi
   assert.equal(f.document.querySelectorAll('.mh-translate').length, 1);
   assert.equal(f.document.querySelector('.mh-translation img'), null);
   assert.match(f.document.querySelector('.mh-translation').textContent, /<img/);
+  assertNoDelivery(f);
+});
+
+test('model choice is forwarded to both operations and isolates the translation cache', async t => {
+  const stored = {model: 'future-translation-model-A'};
+  const f = fixture(t, async request => ({ok: true, text: request.action === 'translate' ? `译文 ${request.model}` : polished}), stored);
+  f.click('.mh-translate'); await tick();
+  assert.equal(f.requests[0].model, stored.model);
+  f.click('.mh-translate'); await tick();
+  f.click('.mh-translate'); await tick();
+  assert.equal(f.requests.length, 1);
+  stored.model = 'future-translation-model-B';
+  f.click('.mh-translate'); await tick();
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests[1].model, stored.model);
+  assert.match(f.document.querySelector('.mh-translation .mh-result').textContent, /model-B/);
+  f.click('.mh-polish'); await tick();
+  assert.equal(f.requests[2].action, 'polish');
+  assert.equal(f.requests[2].model, stored.model);
   assertNoDelivery(f);
 });
 

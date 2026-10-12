@@ -35,6 +35,12 @@ final class NativeProtocolTests: XCTestCase {
 
     func testMessagesAndOptionsAreValidatedBeforeInference() {
         XCTAssertNoThrow(try HelperRequest(id: "ping", action: .ping).validate())
+        XCTAssertNoThrow(try HelperRequest(id: "catalog", action: .listModels).validate())
+        XCTAssertNoThrow(try HelperRequest(id: "catalog", action: .listModels, model: "").validate())
+        XCTAssertNoThrow(try HelperRequest(id: "new", action: .polish, text: "Hello", model: "gpt-2099-future").validate())
+        for model in ["bad\nmodel", " ", String(repeating: "a", count: 201)] {
+            XCTAssertThrowsError(try HelperRequest(id: "a", action: .polish, text: "Hello", model: model).validate())
+        }
         for text in ["", " \n\t", String(repeating: "a", count: 24_001), "text\0"] {
             XCTAssertThrowsError(try HelperRequest(id: "a", action: .polish, text: text).validate())
         }

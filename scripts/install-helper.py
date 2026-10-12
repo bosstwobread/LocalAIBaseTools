@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 HOST_NAME = "com.messagehelper.gpt"
@@ -25,8 +26,17 @@ def main():
     destination.mkdir(parents=True, exist_ok=True)
     destination.chmod(0o700)
     installed_binary = destination / "message-helper-host"
-    shutil.copy2(args.binary, installed_binary)
-    installed_binary.chmod(0o700)
+    # Replace the executable atomically so a connected browser can finish using
+    # the old process safely. Reloading the extension starts the new executable.
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".message-helper-host-", dir=destination)
+    os.close(descriptor)
+    temporary_binary = Path(temporary_name)
+    try:
+        shutil.copy2(args.binary, temporary_binary)
+        temporary_binary.chmod(0o700)
+        os.replace(temporary_binary, installed_binary)
+    finally:
+        temporary_binary.unlink(missing_ok=True)
     config = destination / "allowed-extension-ids.json"
     config.write_text(json.dumps([args.extension_id]) + "\n")
     config.chmod(0o600)

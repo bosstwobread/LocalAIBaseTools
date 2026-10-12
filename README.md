@@ -42,9 +42,17 @@ Open MessageHelper’s toolbar popup and click **Test helper connection**. A suc
 
 If you edit the draft or change conversations while polishing is in progress, MessageHelper prevents an old suggestion from overwriting the changed draft. Undo also checks that the applied text is still present before restoring the original.
 
+## Choosing a GPT model
+
+Open the extension popup and use **GPT model** to choose the model for both translation and polishing. **Desktop default** uses the installed backend’s default; choosing a named model applies only to MessageHelper requests and does not change the desktop app’s global configuration.
+
+The dropdown retrieves the current model catalog from the installed Codex backend every time the popup opens. **Refresh models** fetches it again. Model IDs, display names, and ordering come from the backend rather than a hard-coded list. New models can therefore appear without an extension update as long as the backend’s catalog protocol stays compatible. Your selection is saved locally and retained when the catalog refreshes.
+
+If a selected model is retired or otherwise unavailable, MessageHelper keeps the saved selection and reports the problem. It does not silently use a different model. Open the popup and choose an available model or **Desktop default**. Model discovery does not submit any conversation text for inference. While a translation or polishing request is running, wait for it to finish before refreshing the catalog.
+
 ## Permissions and data
 
-The extension requests `nativeMessaging` to communicate with the Mac helper and `storage` to save language/tone preferences. Its content scripts run only on the two supported Upwork routes. It does not request access to other websites or Upwork’s messaging API. Message translation and polishing happen only after you click the relevant button. The source text is sent through your authenticated GPT connection for that request; inference requires internet access and uses your account’s available usage.
+The extension requests `nativeMessaging` to communicate with the Mac helper and `storage` to save language, tone, and model preferences. Its content scripts run only on the two supported Upwork routes. It does not request access to other websites or Upwork’s messaging API. Message translation and polishing happen only after you click the relevant button. The source text is sent through your authenticated GPT connection for that request; inference requires internet access and uses your account’s available usage.
 
 ## Updates and reinstalling
 
@@ -58,17 +66,21 @@ npm test
 swift test
 swift build -c release
 python3 scripts/test-native.py
+python3 scripts/test-native.py --catalog
 python3 scripts/test-native.py --live
+python3 scripts/test-native.py --live --model MODEL_ID_FROM_CATALOG
 ```
 
-The JavaScript regressions use synthetic conversation/editor fixtures with Send-event sentinels. Native smoke tests check framing, connectivity, invalid request rejection, and optionally live translation/polishing of a synthetic fixture with a fake client name and an `example.invalid` URL. The live smoke test checks Chinese translation and preservation of the name, date, amount and URL while polishing. These tests do not send anything on Upwork.
+The JavaScript regressions use synthetic conversation/editor fixtures with Send-event sentinels. Popup tests use future model names supplied by a mock backend and check discovery on each open, manual refresh, saved selection, and unavailable-selection handling. Requests and translation caches are checked for model isolation. Native smoke tests check framing, connectivity, and invalid request rejection. `--catalog` discovers models without inference. `--live` optionally translates and polishes a synthetic fixture with a fake client name and an `example.invalid` URL; `--model` checks that both operations use the explicitly selected model. The live smoke test checks Chinese translation and preservation of the name, date, amount and URL while polishing. These tests do not send anything on Upwork.
 
 Upwork can change its page structure. If buttons stop appearing after an Upwork update, the extension’s page adapter may need updating. Use the private test page to distinguish a page integration issue from a helper connection issue.
 
 ### Verified installation on this Mac — October 12, 2026
 
-- MessageHelper 1.0.0 is enabled in Microsoft Edge, with the helper installed and registered for Edge and Chrome.
-- 29 Swift tests and 14 JavaScript regressions pass. Live tests on the installed helper translate synthetic text to Chinese and polish English while preserving a name, date, amount, and URL.
+- MessageHelper 1.1.0 is enabled in Microsoft Edge, with the helper installed and registered for Edge and Chrome.
+- 38 Swift tests and 25 JavaScript regressions pass. Tests cover dynamic catalogs, future model IDs, pagination, selected-model routing, effort compatibility, removed models, and the existing draft safeguards.
+- The installed Model dropdown retrieves all seven models currently listed by the desktop service. Selected models survive catalog refresh and reopening the popup. Synthetic browser translation and polishing confirmed that choosing GPT-6-Luna uses `gpt-6-luna`. Desktop default was restored after testing.
+- Live tests on the installed helper translate synthetic text to Chinese and polish English with the explicitly selected model while preserving a name, date, amount, and URL.
 - The installed browser extension connects to the helper. Real GPT translation, polishing, Apply, and Undo pass in the safe test page.
 - The proposal conversation frame and the main Messages page both display Translate controls and Polish immediately before Send. Live proposal-message translation and polishing preview/Cancel pass; the pre-existing `ddd` draft is preserved.
 - Live Upwork draft insertion was intentionally left to the user; Apply/Undo were tested in the sandbox. No Upwork messages were sent during testing.

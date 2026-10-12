@@ -61,7 +61,8 @@ test('unsupported actions and invalid inputs never reach the helper', async () =
   const bg = background();
   for (const invalid of [
     {action: 'send'}, {action: 'execute'}, {text: ''}, {text: ' '.repeat(2)},
-    {text: 'a'.repeat(24001)}, {targetLanguage: 'not-a-language'}, {tone: 'not-a-tone'}
+    {text: 'a'.repeat(24001)}, {targetLanguage: 'not-a-language'}, {tone: 'not-a-tone'},
+    {model: ['invalid']}, {model: 'future\nmodel'}, {model: 'm'.repeat(201)}, {model: '   '}
   ]) {
     const response = await bg.send(request(invalid)).promise;
     assert.equal(response.ok, false);
@@ -100,6 +101,9 @@ test('a second AI request is rejected while an inference is active', async () =>
   const second = await bg.send(request({action: 'translate'})).promise;
   assert.equal(second.ok, false);
   assert.match(second.error, /wait/);
+  const catalog = await bg.send(request({action: 'listModels', text: ''})).promise;
+  assert.equal(catalog.ok, false);
+  assert.match(catalog.error, /wait/);
   assert.equal(bg.sent.length, 1);
   bg.reply({id: bg.sent[0].id, ok: true, text: 'Completed first request.'});
   assert.equal((await first.promise).ok, true);
@@ -112,4 +116,76 @@ test('malformed native response fails instead of displaying non-text data', asyn
   const response = await operation.promise;
   assert.equal(response.ok, false);
   assert.match(response.error, /invalid response/);
+});
+
+test('future model identifiers are forwarded without a static model allowlist', async () => {
+  const bg = background();
+  for (const action of ['translate', 'polish']) {
+    const operation = bg.send(request({action, model: 'future-model-2040-custom'}));
+    assert.equal(bg.sent.at(-1).model, 'future-model-2040-custom');
+    bg.reply({id: bg.sent.at(-1).id, ok: true, text: 'Synthetic answer.', model: 'future-model-2040-custom'});
+    const response = await operation.promise;
+    assert.equal(response.ok, true);
+    assert.equal(response.model, 'future-model-2040-custom');
+  }
+});
+
+test('catalog discovery needs no message text and is correlated independently of a ping', async () => {
+  const bg = background();
+  const ping = bg.send(request({action: 'ping', text: ''}));
+  const discovery = bg.send(request({action: 'listModels', text: ''}));
+  assert.equal(bg.sent.length, 2);
+  const model = {model: 'future-catalog-model', displayName: 'Future catalog label', isDefault: true,
+    defaultReasoningEffort: 'high', supportedReasoningEfforts: ['low', 'high'], ignoredPrivateField: 'do not forward'};
+  bg.reply({id: bg.sent[1].id, ok: true, models: [model], defaultModel: model.model});
+  const response = await discovery.promise;
+  assert.equal(response.ok, true);
+  assert.equal(response.models.length, 1);
+  assert.equal(response.models[0].model, model.model);
+  assert.equal(response.models[0].displayName, model.displayName);
+  assert.equal(response.models[0].ignoredPrivateField, undefined);
+  assert.equal(response.defaultModel, model.model);
+  bg.reply({id: bg.sent[0].id, ok: true, text: 'Completed.'});
+  assert.equal((await ping.promise).ok, true);
+});
+
+test('malformed model catalog does not become selectable models', async () => {
+  const bg = background();
+  const discovery = bg.send(request({action: 'listModels', text: ''}));
+  bg.reply({id: bg.sent[0].id, ok: true, models: [{model: ['invalid'], displayName: 'Invalid', isDefault: true}]});
+  const response = await discovery.promise;
+  assert.equal(response.ok, false);
+  assert.match(response.error, /catalog|invalid|model/i);
+});
+
+test('catalog size, model metadata controls and duplicate identities are bounded before forwarding', async () => {
+  const bg = background();
+  const entry = {model: 'future-bounded-model', displayName: 'Future model', isDefault: false, supportedReasoningEfforts: []};
+  for (const models of [
+    [{...entry, displayName: 'x'.repeat(513)}],
+    [{...entry, model: 'future\u202emodel'}],
+    [entry, {...entry}],
+    [],
+    Array.from({length: 257}, (_, n) => ({...entry, model: `future-${n}`})),
+    Array.from({length: 256}, (_, n) => ({...entry, model: `future-${n}`, displayName: 'x'.repeat(512),
+      supportedReasoningEfforts: Array.from({length: 16}, (_, effort) => `effort-${effort}-`.padEnd(64, 'x'))}))
+  ]) {
+    const discovery = bg.send(request({action: 'listModels', text: ''}));
+    bg.reply({id: bg.sent.at(-1).id, ok: true, models});
+    const response = await discovery.promise;
+    assert.equal(response.ok, false);
+    assert.match(response.error, /catalog|model/i);
+  }
+});
+
+test('a larger future catalog remains supported within the protocol bound', async () => {
+  const bg = background();
+  const models = Array.from({length: 201}, (_, n) => ({model: `future-catalog-${n}`,
+    displayName: `Future backend name ${n}`, isDefault: n === 0, supportedReasoningEfforts: []}));
+  const discovery = bg.send(request({action: 'listModels', text: ''}));
+  bg.reply({id: bg.sent[0].id, ok: true, models});
+  const response = await discovery.promise;
+  assert.equal(response.ok, true);
+  assert.equal(response.models.length, 201);
+  assert.equal(response.models[200].displayName, 'Future backend name 200');
 });

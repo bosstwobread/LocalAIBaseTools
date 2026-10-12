@@ -10,6 +10,7 @@ button.mh-polish { margin-right: 10px; }
 .mh-translation, .mh-preview { background: #1b2720; border: 1px solid #455e4b; border-radius: 8px; padding: 12px 14px; margin-top: 8px; max-width: 100%; }
 .mh-preview { margin: 10px 12px 12px; }
 .mh-result-label { font-size: 11px; font-weight: 600; color: #a9d9b6; margin-bottom: 5px; }
+.mh-model-label { font-size: 11px; color: #9bb5a3; margin-top: 7px; overflow-wrap: anywhere; }
 .mh-result { white-space: pre-wrap; overflow-wrap: anywhere; color: #ecf1ed; font-size: 13px; line-height: 1.55; }
 .mh-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 button.mh-primary { background: #28653e; border-color: #619f73; color: #fff; }

@@ -292,6 +292,7 @@ public final class LocalGPTClient {
     private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
     private var requestTimers: [Int: Task<Void, Never>] = [:]
     private var isConnecting = false
+    private var reasoningEffort: String?
     private var active: ActiveAnswer?
     private let requestTimeout: TimeInterval
     private let answerTimeout: TimeInterval
@@ -330,22 +331,35 @@ public final class LocalGPTClient {
         }
     }
 
-    public func connect(threadID: String?, workingDirectory: URL) async throws -> LocalGPTConnection {
+    /// Refreshes the signed-in account's visible, text-capable models without inference.
+    public func listModels(workingDirectory: URL) async throws -> LocalGPTModelCatalog {
         guard !isConnecting, active == nil else { throw LocalGPTError.busy }
-        if let connection, connection.threadID == threadID { return connection }
+        failConnection(LocalGPTError.disconnected)
+        isConnecting = true
+        defer {
+            isConnecting = false
+            failConnection(LocalGPTError.disconnected)
+        }
+        let config = try await initializeVerifiedServer(workingDirectory: workingDirectory)
+        return try await readModelCatalog(config: config)
+    }
+
+    public func connect(threadID: String?, workingDirectory: URL, model selectedModel: String? = nil) async throws -> LocalGPTConnection {
+        guard !isConnecting, active == nil else { throw LocalGPTError.busy }
+        let selected = selectedModel?.isEmpty == false ? selectedModel : nil
+        if let selected, !LocalGPTModel.validIdentifier(selected) {
+            throw LocalGPTError.unavailable("Choose a model with a valid ID of at most 200 bytes.")
+        }
+        if selected == nil, let connection, connection.threadID == threadID { return connection }
         failConnection(LocalGPTError.disconnected)
         isConnecting = true
         defer { isConnecting = false }
         do {
-            var config = try await initializeServer(workingDirectory: workingDirectory, disabledMCPServers: [])
-            let servers = LocalGPTToolPolicy.enabledMCPServerNames(config)
-            if !servers.isEmpty {
-                // Thread creation has not happened yet, so restarting cannot duplicate an inference.
-                transport.close()
-                decoder = LocalGPTLineDecoder()
-                config = try await initializeServer(workingDirectory: workingDirectory, disabledMCPServers: servers)
+            let config = try await initializeVerifiedServer(workingDirectory: workingDirectory)
+            let catalog = try await readModelCatalog(config: config)
+            if let selected, !catalog.models.contains(where: { $0.model == selected }) {
+                throw LocalGPTError.unavailable("The selected model is no longer available. Refresh models and choose another model or Local default.")
             }
-            try LocalGPTToolPolicy.verify(config)
             var parameters: [String: Any] = [
                 "cwd": workingDirectory.path,
                 "approvalPolicy": "never",
@@ -353,6 +367,8 @@ public final class LocalGPTClient {
                 "config": LocalGPTToolPolicy.threadOverrides(config),
                 "developerInstructions": Self.answerInstructions
             ]
+            // An empty selection preserves the model configured in the local desktop app.
+            if let selected { parameters["model"] = selected }
             let method: String
             if let threadID, !threadID.isEmpty {
                 method = "thread/resume"
@@ -372,14 +388,18 @@ public final class LocalGPTClient {
             }
             guard let thread = response["thread"] as? [String: Any],
                   let id = thread["id"] as? String, !id.isEmpty,
-                  let model = response["model"] as? String, !model.isEmpty,
+                  let model = response["model"] as? String, LocalGPTModel.validIdentifier(model),
                   threadID == nil || threadID?.isEmpty == true || threadID == id else {
                 throw LocalGPTError.protocolViolation("The server did not confirm the requested conversation.")
+            }
+            guard selected == nil || selected == model else {
+                throw LocalGPTError.protocolViolation("The server did not confirm the selected model. Refresh models and choose another model or Local default.")
             }
             if let status = thread["status"] as? [String: Any], status["type"] as? String == "active" {
                 throw LocalGPTError.busy
             }
             let connected = LocalGPTConnection(threadID: id, model: model)
+            reasoningEffort = catalog.models.first(where: { $0.model == model })?.messageReasoningEffort
             connection = connected
             return connected
         } catch {
@@ -412,14 +432,15 @@ public final class LocalGPTClient {
                 Task { [weak self, weak session] in
                     guard let self, let session else { return }
                     do {
-                        let response = try await self.request("turn/start", [
+                        var parameters: [String: Any] = [
                             "threadId": connection.threadID,
                             "clientUserMessageId": requestID.uuidString,
                             "input": [["type": "text", "text": prompt]],
                             "approvalPolicy": "never",
-                            "sandboxPolicy": ["type": "readOnly", "networkAccess": false],
-                            "effort": "low"
-                        ])
+                            "sandboxPolicy": ["type": "readOnly", "networkAccess": false]
+                        ]
+                        if let effort = self.reasoningEffort { parameters["effort"] = effort }
+                        let response = try await self.request("turn/start", parameters)
                         guard self.active === session else { return }
                         guard let turn = response["turn"] as? [String: Any],
                               let id = turn["id"] as? String, !id.isEmpty else {
@@ -466,7 +487,7 @@ public final class LocalGPTClient {
     private func initializeServer(workingDirectory: URL, disabledMCPServers: [String]) async throws -> [String: Any] {
         try transport.start(workingDirectory: workingDirectory, disabledMCPServers: disabledMCPServers)
         _ = try await request("initialize", [
-            "clientInfo": ["name": "message_helper", "title": "MessageHelper", "version": "1.0.0"],
+            "clientInfo": ["name": "message_helper", "title": "MessageHelper", "version": "1.1.0"],
             "capabilities": ["experimentalApi": false]
         ])
         try send(["method": "initialized"])
@@ -480,7 +501,67 @@ public final class LocalGPTClient {
         return config
     }
 
+    private func initializeVerifiedServer(workingDirectory: URL) async throws -> [String: Any] {
+        var config = try await initializeServer(workingDirectory: workingDirectory, disabledMCPServers: [])
+        let servers = LocalGPTToolPolicy.enabledMCPServerNames(config)
+        if !servers.isEmpty {
+            // No thread or inference has happened, so this restart cannot duplicate work.
+            transport.close()
+            decoder = LocalGPTLineDecoder()
+            config = try await initializeServer(workingDirectory: workingDirectory, disabledMCPServers: servers)
+        }
+        try LocalGPTToolPolicy.verify(config)
+        return config
+    }
+
+    private func readModelCatalog(config: [String: Any]) async throws -> LocalGPTModelCatalog {
+        var models: [LocalGPTModel] = []
+        var seenModels: Set<String> = []
+        var seenCursors: Set<String> = []
+        var cursor: String?
+        var pages = 0
+        repeat {
+            try Task.checkCancellation()
+            pages += 1
+            guard pages <= 32 else {
+                throw LocalGPTError.protocolViolation("The model catalog exceeded its page limit.")
+            }
+            var parameters: [String: Any] = ["includeHidden": false, "limit": 100]
+            if let cursor { parameters["cursor"] = cursor }
+            let response = try await request("model/list", parameters)
+            guard let entries = response["data"] as? [[String: Any]], entries.count <= 100 else {
+                throw LocalGPTError.protocolViolation("The server did not return a bounded model catalog page.")
+            }
+            for entry in entries {
+                guard let model = try LocalGPTModel.parse(entry) else { continue }
+                if seenModels.insert(model.model).inserted { models.append(model) }
+                guard models.count <= 256 else {
+                    throw LocalGPTError.protocolViolation("The model catalog exceeded its model limit.")
+                }
+            }
+            if let next = response["nextCursor"], !(next is NSNull) {
+                guard let value = next as? String, !value.isEmpty, value.utf8.count <= 4096,
+                      !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                      seenCursors.insert(value).inserted else {
+                    throw LocalGPTError.protocolViolation("The model catalog returned an invalid or repeated page cursor.")
+                }
+                cursor = value
+            } else { cursor = nil }
+        } while cursor != nil
+        guard !models.isEmpty else {
+            throw LocalGPTError.unavailable("The local service currently lists no text-capable models.")
+        }
+        let configuredModel = config["model"] as? String
+        let defaultModel = configuredModel.flatMap { LocalGPTModel.validIdentifier($0) ? $0 : nil }
+        let catalog = LocalGPTModelCatalog(models: models, defaultModel: defaultModel)
+        guard try JSONEncoder().encode(catalog).count <= 192 * 1024 else {
+            throw LocalGPTError.protocolViolation("The model catalog exceeded its message size limit.")
+        }
+        return catalog
+    }
+
     private func request(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
+        try Task.checkCancellation()
         nextID += 1
         let id = nextID
         return try await withCheckedThrowingContinuation { continuation in
@@ -551,6 +632,7 @@ public final class LocalGPTClient {
     private func failConnection(_ error: Error) {
         let wasConnected = connection != nil
         connection = nil
+        reasoningEffort = nil
         transport.close()
         decoder = LocalGPTLineDecoder()
         let requests = pending.values

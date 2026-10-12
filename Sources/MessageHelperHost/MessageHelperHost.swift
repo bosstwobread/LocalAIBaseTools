@@ -98,11 +98,17 @@ private final class NativeHost {
         activeTask = Task { [weak self] in
             guard let self else { return }
             do {
-                // Never resume another message's thread or share client context.
-                let connection = try await self.client.connect(threadID: nil, workingDirectory: self.workingDirectory)
-                try Task.checkCancellation()
-                let result = try await self.client.answer(prompt: request.prompt(), requestID: UUID(), onDelta: { _ in })
-                if !self.ended { self.write(.init(id: request.id, text: result.text, model: connection.model)) }
+                if request.action == .listModels {
+                    let catalog = try await self.client.listModels(workingDirectory: self.workingDirectory)
+                    if !self.ended { self.write(.init(id: request.id, catalog: catalog)) }
+                } else {
+                    // Never resume another message's thread or share client context.
+                    let connection = try await self.client.connect(threadID: nil, workingDirectory: self.workingDirectory,
+                                                                   model: request.model)
+                    try Task.checkCancellation()
+                    let result = try await self.client.answer(prompt: request.prompt(), requestID: UUID(), onDelta: { _ in })
+                    if !self.ended { self.write(.init(id: request.id, text: result.text, model: connection.model)) }
+                }
             } catch {
                 if !self.ended { self.write(.init(id: request.id, error: error.localizedDescription)) }
             }
