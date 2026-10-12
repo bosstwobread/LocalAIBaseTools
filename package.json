@@ -1,0 +1,14 @@
+{
+  "name": "message-helper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Upwork message translation and English polishing through a local native messaging helper.",
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "test:native": "python3 scripts/test-native.py",
+    "test:live": "python3 scripts/test-native.py --live"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

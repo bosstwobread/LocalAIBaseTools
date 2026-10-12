@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+.swiftpm/
+node_modules/
+work/
+dist/
+*.log
+__pycache__/

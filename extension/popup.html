@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MessageHelper</title><link rel="stylesheet" href="pages.css"></head>
+<body class="mh-popup">
+  <main>
+    <div class="mh-brand">MessageHelper</div>
+    <p class="mh-subtitle">Translate messages. Write with confidence.</p>
+    <label for="language">Translation language</label>
+    <select id="language"></select>
+    <label for="tone">English writing tone</label>
+    <select id="tone"></select>
+    <p class="mh-note">Settings save automatically. Text is sent to your Mac helper only when you click Translate or Polish.</p>
+    <button id="connection" type="button">Test helper connection</button>
+    <p id="status" role="status" aria-live="polite"></p>
+    <button id="sandbox" type="button" class="mh-secondary">Open safe test page</button>
+    <p class="mh-note">MessageHelper suggests text in a preview. You decide when to apply it and send it.</p>
+  </main>
+  <script src="shared.js"></script><script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+.mh-message-tools, .mh-preview { font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #dfe8e1; text-align: left; box-sizing: border-box; }
+.mh-message-tools { margin: 7px 0 10px; display: block; clear: both; }
+button.mh-button { appearance: none; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #52675a; border-radius: 7px; background: #1c3025; color: #d8f6e0; font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 5px 10px; margin: 0; cursor: pointer; min-height: 28px; box-shadow: none; text-transform: none; letter-spacing: normal; white-space: nowrap; }
+button.mh-button:hover { background: #294b36; border-color: #90c69f; }
+button.mh-button:focus-visible { outline: 2px solid #95dfaa; outline-offset: 2px; }
+button.mh-button:disabled { opacity: .55; cursor: default; }
+button.mh-polish { margin-right: 10px; }
+.mh-translation:empty, .mh-preview:empty { display: none; }
+.mh-translation[hidden] { display: none !important; }
+.mh-translation, .mh-preview { background: #1b2720; border: 1px solid #455e4b; border-radius: 8px; padding: 12px 14px; margin-top: 8px; max-width: 100%; }
+.mh-preview { margin: 10px 12px 12px; }
+.mh-result-label { font-size: 11px; font-weight: 600; color: #a9d9b6; margin-bottom: 5px; }
+.mh-result { white-space: pre-wrap; overflow-wrap: anywhere; color: #ecf1ed; font-size: 13px; line-height: 1.55; }
+.mh-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+button.mh-primary { background: #28653e; border-color: #619f73; color: #fff; }
+.mh-status, .mh-format-note { font-size: 12px; line-height: 1.5; color: #b5c7ba; }
+.mh-actions + .mh-status { margin-top: 8px; }
+.mh-format-note { margin-top: 10px; }
+.mh-original { margin-top: 10px; }
+.mh-original-label { cursor: pointer; color: #a9d9b6; font-size: 12px; }
+.mh-original .mh-result { margin-top: 8px; }
+.mh-error { color: #ffc9bc; }
+@media (prefers-color-scheme: light) {
+  .mh-translation, .mh-preview { background: #f0f7f2; border-color: #b0c5b6; }
+  .mh-result { color: #182d20; }
+  .mh-result-label { color: #326a43; }
+  .mh-status, .mh-format-note { color: #49624f; }
+  .mh-error { color: #ab3120; }
+}
