@@ -7,11 +7,13 @@ Private registry settings stay outside this repository and use login stdin.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import datetime as dt
 import hashlib
 import inspect
 import io
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -19,6 +21,8 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
+import time
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
@@ -425,11 +429,56 @@ def archive(files: list[tuple[Path, str]]) -> bytes:
     return output.getvalue()
 
 
-def remote(target: str, command: list[str], *, data: bytes | None = None, quiet: bool = False) -> None:
-    # Do not inherit a stale desktop ControlMaster socket for a deployment.
-    # Each operation still uses the configured key and normal host verification.
-    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
-                             "-o", "ControlMaster=no", "-o", "ControlPath=none", target, shlex.join(command)],
+@contextmanager
+def deployment_ssh(target: str):
+    """One private authenticated connection; only command-free setup retries."""
+    # A short path also fits macOS's Unix-domain socket length limit.
+    with tempfile.TemporaryDirectory(prefix="market-ssh-", dir="/tmp") as directory:
+        os.chmod(directory, 0o700)
+        control = str(Path(directory) / "control")
+        options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1",
+                   "-o", "ControlPath=" + control, "-o", "ControlPersist=60",
+                   "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"]
+        try:
+            for attempt in range(3):
+                try:
+                    result = subprocess.run(["ssh", "-M", "-N", "-f", "-o", "ControlMaster=yes"] + options + [target],
+                                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
+                    if result.returncode == 0:
+                        check = subprocess.run(["ssh", "-O", "check", "-o", "ControlMaster=no"] + options + [target],
+                                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                        if check.returncode == 0:
+                            break
+                except subprocess.TimeoutExpired:
+                    pass
+                # This closes only our socket if setup partially succeeded.
+                try:
+                    subprocess.run(["ssh", "-O", "exit", "-o", "ControlMaster=no"] + options + [target],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                if attempt == 2:
+                    raise RuntimeError("Could not establish the private deployment SSH connection after three attempts; no remote command was run.")
+                time.sleep(1)
+            yield control
+        finally:
+            try:
+                subprocess.run(["ssh", "-O", "exit", "-o", "ControlMaster=no"] + options + [target],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                # Preserve the original deployment/rollback exception.
+                pass
+
+
+def remote(target: str, command: list[str], *, data: bytes | None = None, quiet: bool = False,
+           control_path: str | None = None) -> None:
+    options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ControlMaster=no",
+               "-o", "ControlPath=" + (control_path or "none")]
+    if control_path:
+        # Mux-only: if this master dies, do not silently establish a new TCP
+        # connection and risk an ambiguous repeat of a deployment operation.
+        options += ["-o", "ProxyCommand=false"]
+    result = subprocess.run(["ssh"] + options + [target, shlex.join(command)],
                             input=data, stdout=subprocess.PIPE if quiet else None,
                             stderr=subprocess.PIPE if quiet else None)
     if result.returncode:
@@ -497,21 +546,22 @@ def main() -> None:
     lock_token = tag + "-" + str(__import__("os").getpid())
     config["lockToken"] = lock_token
     bootstrap = """import os,sys\nfrom pathlib import Path\nbase=Path('/root/extension-market');base.mkdir(mode=0o700,exist_ok=True)\nlock=base/'.deploy-lock';lock.mkdir(mode=0o700)\n(lock/'owner').write_text(sys.argv[2])\nrelease=base/'releases'/sys.argv[1]\nif sys.argv[3]=='publish':\n release.mkdir(mode=0o700,parents=True,exist_ok=False)\n (release/'build').mkdir(mode=0o700)\nelif not (release/'deployment.json').is_file():\n raise RuntimeError('The rollback release was not found.')\n"""
-    try:
-        remote(target, ["python3", "-c", bootstrap, tag, lock_token, "rollback" if args.rollback else "publish"])
-        if not args.rollback:
-            remote(target, ["tar", "xzf", "-", "--no-same-owner", "-C", plan["releaseDirectory"] + "/build"], data=archive(files))
-            password = settings.get("DOCKER_PASSWORD")
-            if password:
-                remote(target, ["docker", "login", "docker.io", "--username", namespace, "--password-stdin"],
-                       data=(password + "\n").encode(), quiet=True)
-        remote(target, ["python3", "-c", remote_program(), json.dumps(config, separators=(",", ":"))])
-    finally:
-        cleanup = """from pathlib import Path\nimport os,sys\nlock=Path('/root/extension-market/.deploy-lock')\nif (lock/'owner').is_file() and (lock/'owner').read_text()==sys.argv[1]:\n if (lock/'pid').is_file():\n  try:os.kill(int((lock/'pid').read_text()),0)\n  except ProcessLookupError:pass\n  else:raise RuntimeError('The remote transaction is still cleaning up; its lock was preserved.')\n  (lock/'pid').unlink()\n (lock/'owner').unlink();lock.rmdir()\n"""
+    with deployment_ssh(target) as control:
         try:
-            remote(target, ["python3", "-c", cleanup, lock_token], quiet=True)
-        except Exception:
-            print("Deployment lock cleanup needs review on the server.", file=sys.stderr)
+            remote(target, ["python3", "-c", bootstrap, tag, lock_token, "rollback" if args.rollback else "publish"], control_path=control)
+            if not args.rollback:
+                remote(target, ["tar", "xzf", "-", "--no-same-owner", "-C", plan["releaseDirectory"] + "/build"], data=archive(files), control_path=control)
+                password = settings.get("DOCKER_PASSWORD")
+                if password:
+                    remote(target, ["docker", "login", "docker.io", "--username", namespace, "--password-stdin"],
+                           data=(password + "\n").encode(), quiet=True, control_path=control)
+            remote(target, ["python3", "-c", remote_program(), json.dumps(config, separators=(",", ":"))], control_path=control)
+        finally:
+            cleanup = """from pathlib import Path\nimport os,sys\nlock=Path('/root/extension-market/.deploy-lock')\nif (lock/'owner').is_file() and (lock/'owner').read_text()==sys.argv[1]:\n if (lock/'pid').is_file():\n  try:os.kill(int((lock/'pid').read_text()),0)\n  except ProcessLookupError:pass\n  else:raise RuntimeError('The remote transaction is still cleaning up; its lock was preserved.')\n  (lock/'pid').unlink()\n (lock/'owner').unlink();lock.rmdir()\n"""
+            try:
+                remote(target, ["python3", "-c", cleanup, lock_token], quiet=True, control_path=control)
+            except Exception:
+                print("Deployment lock cleanup needs review on the server.", file=sys.stderr)
 
 
 if __name__ == "__main__":

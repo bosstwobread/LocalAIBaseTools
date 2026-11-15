@@ -9,12 +9,116 @@ import tarfile
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 
 DEPLOY = runpy.run_path(str(Path(__file__).resolve().parents[1] / "ExtensionMarket-website/deploy.py"))
 
 
 class MarketplaceDeployTests(unittest.TestCase):
+    def test_private_master_reuses_one_short_socket_then_closes_and_removes_it(self):
+        calls = []
+        def run(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            if "-M" in arguments:
+                path = next(value.split("=", 1)[1] for value in arguments if value.startswith("ControlPath="))
+                self.assertEqual(Path(path).parent.stat().st_mode & 0o777, 0o700)
+                self.assertLess(len(path.encode()), 100)
+                self.assertEqual(arguments[-1], "voca-server")
+                self.assertIn("-N", arguments)
+                self.assertIn("-f", arguments)
+                self.assertIn("ControlPersist=60", arguments)
+                self.assertIn("ServerAliveInterval=15", arguments)
+                self.assertIn("ServerAliveCountMax=2", arguments)
+                self.assertFalse(any("StrictHostKeyChecking=" in value for value in arguments))
+            return SimpleNamespace(returncode=0)
+        with mock.patch.object(DEPLOY["subprocess"], "run", side_effect=run):
+            with DEPLOY["deployment_ssh"]("voca-server") as control:
+                DEPLOY["remote"]("voca-server", ["true"], control_path=control)
+                DEPLOY["remote"]("voca-server", ["docker", "login", "--password-stdin"], data=b"private fixture", quiet=True, control_path=control)
+                self.assertTrue(Path(control).parent.is_dir())
+        stages = [(args, options) for args, options in calls if "-M" not in args and "-O" not in args]
+        self.assertEqual(len(stages), 2)
+        for arguments, _ in stages:
+            self.assertIn("ControlPath=" + control, arguments)
+            self.assertIn("ControlMaster=no", arguments)
+            self.assertIn("ProxyCommand=false", arguments)
+        self.assertEqual(stages[-1][1]["input"], b"private fixture")
+        self.assertNotIn("private fixture", " ".join(stages[-1][0]))
+        self.assertIn("exit", calls[-1][0])
+        self.assertFalse(Path(control).parent.exists())
+
+    def test_only_command_free_master_establishment_retries_up_to_three_times(self):
+        for success in [True, False]:
+            calls, entered = [], []
+            def run(arguments, **kwargs):
+                calls.append(arguments)
+                if "-O" in arguments and "exit" in arguments:
+                    raise DEPLOY["subprocess"].TimeoutExpired(arguments, 5)
+                masters = sum("-M" in call for call in calls)
+                return SimpleNamespace(returncode=0 if "-M" not in arguments or (success and masters == 3) else 255)
+            with mock.patch.object(DEPLOY["subprocess"], "run", side_effect=run), mock.patch.object(DEPLOY["time"], "sleep"):
+                if success:
+                    with DEPLOY["deployment_ssh"]("voca-server"):
+                        entered.append(True)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "three attempts"):
+                        with DEPLOY["deployment_ssh"]("voca-server"):
+                            entered.append(True)
+            masters = [arguments for arguments in calls if "-M" in arguments]
+            self.assertEqual(len(masters), 3)
+            self.assertTrue(all("-N" in arguments and arguments[-1] == "voca-server" for arguments in masters))
+            self.assertTrue(all("-M" in arguments or "-O" in arguments for arguments in calls))
+            self.assertEqual(bool(entered), success)
+            control = next(value.split("=", 1)[1] for value in masters[0] if value.startswith("ControlPath="))
+            self.assertFalse(Path(control).parent.exists())
+
+    def test_stage_failure_is_not_retried_and_master_close_preserves_original_error(self):
+        calls = []
+        def run(arguments, **kwargs):
+            calls.append(arguments)
+            if "-O" in arguments and "exit" in arguments:
+                raise DEPLOY["subprocess"].TimeoutExpired(arguments, 5)
+            return SimpleNamespace(returncode=0 if "-M" in arguments or "-O" in arguments else 255)
+        with mock.patch.object(DEPLOY["subprocess"], "run", side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, "remote deployment operation failed"):
+                with DEPLOY["deployment_ssh"]("voca-server") as control:
+                    DEPLOY["remote"]("voca-server", ["deploy-once"], control_path=control)
+        self.assertEqual(sum("deploy-once" in arguments for arguments in calls), 1)
+        self.assertIn("exit", calls[-1])
+        self.assertFalse(Path(control).parent.exists())
+
+    def test_main_establishes_master_before_bootstrap_and_cleans_lock_before_master_exit(self):
+        events, controls = [], []
+        def ssh(arguments, **kwargs):
+            events.append("master-open" if "-M" in arguments else "master-close" if "exit" in arguments else "master-check")
+            return SimpleNamespace(returncode=0)
+        def remote(target, command, **kwargs):
+            controls.append(kwargs["control_path"])
+            stage = ["bootstrap", "transaction", "lock-cleanup"][len(controls) - 1]
+            events.append(stage)
+            if stage == "transaction": raise RuntimeError("original stage failure")
+        namespace = DEPLOY["main"].__globals__
+        with mock.patch.dict(namespace, {"remote": remote, "private_settings": lambda _: {}}), \
+             mock.patch.object(DEPLOY["subprocess"], "run", side_effect=ssh), \
+             mock.patch.object(DEPLOY["subprocess"], "check_output", return_value="a" * 40), \
+             mock.patch.object(DEPLOY["signal"], "signal"), \
+             mock.patch.object(DEPLOY["sys"], "argv", ["deploy.py", "--deploy", "--rollback", "fixture-release"]), \
+             mock.patch("sys.stdout", new_callable=io.StringIO):
+            with self.assertRaisesRegex(RuntimeError, "original stage failure"):
+                DEPLOY["main"]()
+        self.assertEqual(events, ["master-open", "master-check", "bootstrap", "transaction", "lock-cleanup", "master-close"])
+        self.assertEqual(len(set(controls)), 1)
+        self.assertFalse(Path(controls[0]).parent.exists())
+
+    def test_direct_remote_without_control_path_remains_fresh_and_does_not_retry(self):
+        with mock.patch.object(DEPLOY["subprocess"], "run", return_value=SimpleNamespace(returncode=255)) as run:
+            with self.assertRaises(RuntimeError): DEPLOY["remote"]("voca-server", ["single-command"])
+        self.assertEqual(run.call_count, 1)
+        arguments = run.call_args.args[0]
+        self.assertIn("ControlPath=none", arguments)
+        self.assertNotIn("ProxyCommand=false", arguments)
+
     domain = "local-ai-extension.nelson007.com"
     old_managed = """  # BEGIN LocalAIBaseTools ExtensionMarket
   redir /extension-market /extension-market/ 308
