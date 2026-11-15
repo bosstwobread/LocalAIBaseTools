@@ -48,6 +48,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var marketplaceTask: Task<Void, Never>?
     private var pendingMarketplaceError: String?
     private var terminating = false
+    private var browserSupportTask: Task<Void, Never>?
+    private var browserSupportFailure: String?
+    private var browserSupportMenuItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         createMenus()
@@ -72,10 +75,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
         createWindow()
-        if BrowserSupportInstaller.isInstalledApplication(Bundle.main.bundleURL) {
-            do { _ = try BrowserSupportInstaller().install(from: Bundle.main.bundleURL) }
-            catch { showBrowserSupportError(error.localizedDescription) }
-        }
         startupTask = Task { [weak self] in
             guard let self else { return }
             await self.sourceManager.start()
@@ -83,6 +82,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             self.sourceManagerReady = true
             self.processMarketplaceRequests()
         }
+        startBrowserSupportBootstrap()
         // The first Apple open event carries the login launch reason. Do not
         // open a window here: a login launch must remain in the menu bar.
         if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
@@ -123,6 +123,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminating = true
+        browserSupportTask?.cancel()
         marketplaceTask?.cancel()
         marketplaceRequests.removeAll()
         startupTask?.cancel()
@@ -142,7 +143,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu(title: "MacHelper")
         appMenu.addItem(withTitle: "MacHelper Settings…", action: #selector(openExtensions), keyEquivalent: ",").target = self
         appMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
-        appMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "").target = self
+        let appBrowserSupport = appMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "")
+        appBrowserSupport.target = self
+        browserSupportMenuItems.append(appBrowserSupport)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit MacHelper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
@@ -165,7 +168,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         statusMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: "AI Connection…", action: #selector(openAI), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: "General…", action: #selector(openGeneral), keyEquivalent: "").target = self
-        statusMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "").target = self
+        let statusBrowserSupport = statusMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "")
+        statusBrowserSupport.target = self
+        browserSupportMenuItems.append(statusBrowserSupport)
         statusMenu.addItem(.separator())
         statusMenu.addItem(withTitle: "Quit MacHelper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = statusMenu
@@ -327,6 +332,28 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    private func startBrowserSupportBootstrap() {
+        let appURL = Bundle.main.bundleURL
+        guard BrowserSupportInstaller.isInstalledApplication(appURL), browserSupportTask == nil else { return }
+        browserSupportTask = Task { [weak self] in
+            let failure = await Task.detached(priority: .utility) { () -> String? in
+                do { _ = try BrowserSupportInstaller().install(from: appURL); return nil }
+                catch { return error.localizedDescription }
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.browserSupportFailure = failure
+            self.browserSupportTask = nil
+            self.updateBrowserSupportMenus()
+        }
+    }
+
+    private func updateBrowserSupportMenus() {
+        for item in browserSupportMenuItems {
+            item.title = browserSupportFailure == nil ? "Install Browser Support…" : "Browser Support Needs Attention…"
+            item.toolTip = browserSupportFailure
+        }
+    }
+
     @objc private func tabChanged() { showTab(tabs.selectedSegment) }
     @objc private func openExtensions() { showSettings(tab: 1) }
     @objc private func openAI() { showSettings(tab: 0) }
@@ -340,14 +367,21 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         } catch { showMarketplaceError(error.localizedDescription) }
     }
     @objc private func installBrowserSupport() {
+        guard browserSupportTask == nil else { return }
         do {
             _ = try BrowserSupportInstaller().install(from: Bundle.main.bundleURL)
+            browserSupportFailure = nil
+            updateBrowserSupportMenus()
             let alert = NSAlert()
             alert.messageText = "Browser support is ready"
             alert.informativeText = "Chrome and Edge can now connect to MacHelper. Reload an already-open browser extension to use the updated helper."
             alert.addButton(withTitle: "OK")
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
-        } catch { showBrowserSupportError(error.localizedDescription) }
+        } catch {
+            browserSupportFailure = error.localizedDescription
+            updateBrowserSupportMenus()
+            showBrowserSupportError(error.localizedDescription)
+        }
     }
 }

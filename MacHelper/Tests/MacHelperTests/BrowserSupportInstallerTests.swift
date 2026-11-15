@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import Darwin
 @testable import MacHelper
 
 final class BrowserSupportInstallerTests: XCTestCase {
@@ -160,5 +161,52 @@ final class BrowserSupportInstallerTests: XCTestCase {
                      home.appendingPathComponent("Applications/not-an-app")] {
             XCTAssertFalse(BrowserSupportInstaller.isInstalledApplication(path, homeDirectory: home))
         }
+    }
+
+    func testDeniedDirectoryReportsExactOperationPathAndPOSIXError() throws {
+        guard geteuid() != 0 else { throw XCTSkip("POSIX permission denial cannot be simulated as root") }
+        let (home, app, installer) = try fixture()
+        let denied = home.appendingPathComponent("Library/Application Support/Google/Chrome")
+        try FileManager.default.createDirectory(at: denied, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: denied.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: denied.path) }
+        XCTAssertThrowsError(try installer.install(from: app)) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("open directory for search without following links"), message)
+            XCTAssertTrue(message.contains(denied.path), message)
+            XCTAssertTrue(message.contains("macOS error \(EACCES)"), message)
+            XCTAssertTrue(message.contains("Translation can continue"), message)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(helper + "/mac-helper-host").path))
+    }
+
+    func testSemanticFileRejectionDoesNotReportAnUnrelatedStaleErrno() throws {
+        let (home, app, installer) = try fixture()
+        let config = home.appendingPathComponent(helper + "/allowed-extension-ids.json")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try installer.install(from: app)) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("validate file type"), message)
+            XCTAssertTrue(message.contains(config.path), message)
+            XCTAssertTrue(message.contains("Only a regular file"), message)
+            XCTAssertFalse(message.contains("macOS error"), message)
+        }
+    }
+
+    func testBrowserProfileTraversalRequiresSearchPermissionWithoutReadingProfileDirectory() throws {
+        guard geteuid() != 0 else { throw XCTSkip("POSIX permission denial cannot be simulated as root") }
+        let (home, app, installer) = try fixture()
+        let profile = home.appendingPathComponent("Library/Application Support/Google/Chrome")
+        let nativeHosts = profile.appendingPathComponent("NativeMessagingHosts")
+        try FileManager.default.createDirectory(at: nativeHosts, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o111], ofItemAtPath: profile.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: profile.path) }
+        let readHandle = Darwin.open(profile.path, O_RDONLY | O_DIRECTORY)
+        if readHandle >= 0 { Darwin.close(readHandle) }
+        XCTAssertEqual(readHandle, -1, "The fixture must forbid reading/enumerating the browser profile directory")
+        let installed = try installer.install(from: app)
+        XCTAssertEqual(installed.manifestURLs.count, 4)
+        XCTAssertEqual(try manifest(nativeHosts.appendingPathComponent(BrowserSupportInstaller.hostName + ".json"))["path"] as? String,
+                       installed.binaryURL.path)
     }
 }
