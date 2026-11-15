@@ -48,6 +48,54 @@ def candidate_caddy(original: str, domain: str) -> str:
     return site.sub(lambda match: match.group(0) + block, original, count=1)
 
 
+def public_manifest(folder: Path) -> dict:
+    """Hash every extracted public file independently of Docker's caches."""
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError("The public output must be an ordinary directory.")
+    result, total = {}, 0
+    for path in sorted(folder.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("Public image verification does not permit symlinks.")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ValueError("Public image verification requires ordinary files.")
+        relative = path.relative_to(folder).as_posix()
+        if any(ord(char) < 32 or char == "\\" for char in relative):
+            raise ValueError("A public filename cannot be represented safely in a checksum manifest.")
+        sha, size = hashlib.sha256(), 0
+        with path.open("rb") as content:
+            for chunk in iter(lambda: content.read(64 * 1024), b""):
+                size += len(chunk); total += len(chunk)
+                if total > 512 * 1024 * 1024:
+                    raise ValueError("The public output exceeds its verification size limit.")
+                sha.update(chunk)
+        result[relative] = {"sha256": sha.hexdigest(), "size": size}
+        if len(result) > 2048:
+            raise ValueError("The public output exceeds its verification file limit.")
+    if "index.html" not in result:
+        raise ValueError("The public verification manifest is missing index.html.")
+    return result
+
+
+def checksum_input(manifest: dict) -> str:
+    lines = []
+    for relative, record in sorted(manifest.items()):
+        if (not relative or relative.startswith("/") or
+                any(part in ["", ".", ".."] for part in relative.split("/")) or
+                any(ord(char) < 32 or char == "\\" for char in relative) or
+                not re.fullmatch(r"[0-9a-f]{64}", record["sha256"])):
+            raise ValueError("The public checksum manifest contains an unsafe path or digest.")
+        lines.append(record["sha256"] + "  /usr/share/nginx/html/" + relative + "\n")
+    if not lines:
+        raise ValueError("The public checksum manifest cannot be empty.")
+    return "".join(lines)
+
+
+def manifest_digest(manifest: dict) -> str:
+    return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 # This program is sent over SSH, never copied into the Docker build context.
 # All subprocess output is retained in private per-release logs instead of
 # exposing runtime configuration, registry responses, or full proxy configs.
@@ -86,8 +134,8 @@ def step(message):print('STEP '+message,flush=True)
 def digest(data):return hashlib.sha256(data).hexdigest()
 def save_json(path,value):
  path.write_text(json.dumps(value,indent=2)+'\n');path.chmod(0o600)
-def run(args,stage,cwd=None,allow_failure=False):
- result=subprocess.run(args,cwd=cwd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=900)
+def run(args,stage,cwd=None,allow_failure=False,input_text=None):
+ result=subprocess.run(args,cwd=cwd,input=input_text,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=900)
  log=release/(stage+'.log');log.write_text(result.stdout);log.chmod(0o600)
  if result.returncode and not allow_failure:raise RuntimeError(stage+' failed; inspect the private release log.')
  return result
@@ -173,8 +221,12 @@ try:
  candidate_path.write_bytes(candidate);candidate_path.chmod(0o600)
  run(['docker','cp',str(candidate_path),'caddy:'+temporary],'caddy-candidate-copy')
  run(['docker','exec','caddy','caddy','validate','--config',temporary,'--adapter','caddyfile'],'caddy-validate')
+ expected=public_manifest(release/'build'/'dist')
+ if len(expected)!=cfg['publicFileCount'] or manifest_digest(expected)!=cfg['publicManifestSHA256']:
+  raise RuntimeError('The extracted public files do not match the prepared local manifest; no image was published.')
+ save_json(release/'public-files.sha256.json',expected)
  step('Building the isolated linux/amd64 static image')
- run(['docker','build','--build-arg','BUILD_REVISION='+cfg['revision'],'-t',cfg['image'],'.'],'docker-build',cwd=release/'build')
+ run(['docker','build','--no-cache','--build-arg','BUILD_REVISION='+cfg['revision'],'-t',cfg['image'],'.'],'docker-build',cwd=release/'build')
  name='extension-market-candidate-'+cfg['tag']
  common=['--read-only','--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=64m','--cap-drop','ALL','--security-opt','no-new-privileges','--user','101:101','--memory','128m','--cpus','1','--pids-limit','64','--network','voca-net','--log-opt','max-size=10m','--log-opt','max-file=3']
  try:
@@ -184,6 +236,8 @@ try:
    if check.returncode==0 and check.stdout=='ok\n':break
    if attempt==19:raise RuntimeError('The candidate static container failed health verification.')
    time.sleep(1)
+  step('Verifying every public candidate file against the prepared SHA-256 manifest')
+  run(['docker','exec','-i',name,'sha256sum','-c','-'],'candidate-integrity',input_text=checksum_input(expected))
  finally:
   run(['docker','rm','-f',name],'candidate-cleanup',allow_failure=True)
  step('Pushing the verified timestamped image')
@@ -210,7 +264,7 @@ try:
  if digest(get(cfg['origin']+'/extension-market/',body=True))!=cfg['indexSHA256']:
   raise RuntimeError('The public page does not match this release.')
  baselines()
- record={'status':'deployed','tag':cfg['tag'],'image':cfg['image'],'publicURL':cfg['origin']+'/extension-market/','previousContainer':previous,'previousRunning':previous_running,'caddyBeforeSHA256':digest(original),'caddyAfterSHA256':digest(candidate),'revision':cfg['revision']}
+ record={'status':'deployed','tag':cfg['tag'],'image':cfg['image'],'publicURL':cfg['origin']+'/extension-market/','previousContainer':previous,'previousRunning':previous_running,'caddyBeforeSHA256':digest(original),'caddyAfterSHA256':digest(candidate),'revision':cfg['revision'],'publicFileCount':len(expected),'publicManifestSHA256':manifest_digest(expected)}
  save_json(journal,record)
  print(json.dumps(record),flush=True)
 except BaseException:
@@ -229,6 +283,14 @@ except BaseException:
 finally:
  subprocess.run(['docker','exec','caddy','rm','-f',temporary],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 '''
+
+
+def remote_program() -> str:
+    # Helper annotations must not resolve Path before the remote imports run.
+    return "from __future__ import annotations\n" + "\n".join(
+        inspect.getsource(function) for function in
+        [candidate_caddy, public_manifest, checksum_input, manifest_digest]
+    ) + "\n" + REMOTE_TRANSACTION
 
 
 def private_settings(path: Path) -> dict[str, str]:
@@ -269,8 +331,14 @@ def archive(files: list[tuple[Path, str]]) -> bytes:
             if path.is_symlink() or not path.is_file():
                 raise ValueError("A build-context file changed while preparing the archive.")
             info = tarfile.TarInfo(name)
-            info.size = path.stat().st_size
+            metadata = path.stat()
+            info.size = metadata.st_size
             info.mode = 0o644
+            # BuildKit's local-context sync can compare size/mtime metadata
+            # before hashing file contents. Epoch-zero mtimes let same-size
+            # JSON changes reuse stale context bytes, even with --no-cache.
+            info.mtime = metadata.st_mtime_ns // 1_000_000_000
+            info.pax_headers["mtime"] = f"{metadata.st_mtime_ns // 1_000_000_000}.{metadata.st_mtime_ns % 1_000_000_000:09d}"
             with path.open("rb") as content:
                 bundle.addfile(info, content)
     return output.getvalue()
@@ -318,7 +386,12 @@ def main() -> None:
     config = {"tag": tag, "image": image, "revision": revision, "domain": origin.hostname,
               "origin": public_origin, "rollback": bool(args.rollback)}
     if files:
-        config["indexSHA256"] = hashlib.sha256((args.dist / "index.html").read_bytes()).hexdigest()
+        expected = public_manifest(args.dist.absolute())
+        if len(expected) != len(files) - 2:
+            raise ValueError("The public file inventory changed while preparing the deployment.")
+        config["indexSHA256"] = expected["index.html"]["sha256"]
+        config["publicFileCount"] = len(expected)
+        config["publicManifestSHA256"] = manifest_digest(expected)
     plan = {"mode": "deploy" if args.deploy else "dry-run", "operation": "rollback" if args.rollback else "publish",
             "sshAlias": target, "image": image, "publicURL": public_origin + PREFIX,
             "releaseDirectory": "/root/extension-market/releases/" + tag,
@@ -346,10 +419,7 @@ def main() -> None:
             if password:
                 remote(target, ["docker", "login", "docker.io", "--username", namespace, "--password-stdin"],
                        data=(password + "\n").encode(), quiet=True)
-        program = inspect.getsource(candidate_caddy) + "\n" + REMOTE_TRANSACTION
-        # The remote program imports re after its pure helper is defined; name
-        # resolution occurs when the helper runs, after that import.
-        remote(target, ["python3", "-c", program, json.dumps(config, separators=(",", ":"))])
+        remote(target, ["python3", "-c", remote_program(), json.dumps(config, separators=(",", ":"))])
     finally:
         cleanup = """from pathlib import Path\nimport os,sys\nlock=Path('/root/extension-market/.deploy-lock')\nif (lock/'owner').is_file() and (lock/'owner').read_text()==sys.argv[1]:\n if (lock/'pid').is_file():\n  try:os.kill(int((lock/'pid').read_text()),0)\n  except ProcessLookupError:pass\n  else:raise RuntimeError('The remote transaction is still cleaning up; its lock was preserved.')\n  (lock/'pid').unlink()\n (lock/'owner').unlink();lock.rmdir()\n"""
         try:

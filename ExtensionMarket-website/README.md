@@ -37,6 +37,7 @@ python3 scripts/build-apps.py
 python3 ExtensionMarket-website/build.py
 python3 ExtensionMarket-website/verify.py
 node --test ExtensionMarket-website/test.cjs
+python3 -m unittest discover -s test -p marketplace_deploy_test.py -v
 ```
 
 The published MacHelper ZIP is an Apple Silicon developer preview, signed with
