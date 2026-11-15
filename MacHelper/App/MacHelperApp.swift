@@ -43,6 +43,11 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var rootController: NSViewController!
     private var registry: ExtensionRegistry!
     private var pendingSettingsTab: Int?
+    private var sourceManagerReady = false
+    private var marketplaceRequests: [MarketplaceInstallRequest] = []
+    private var marketplaceTask: Task<Void, Never>?
+    private var pendingMarketplaceError: String?
+    private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         createMenus()
@@ -64,9 +69,20 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         extensions = SourceExtensionsViewController(manager: sourceManager)
         nativeExtensions = ExtensionsViewController(registry: registry)
         extensions.onShowNativeExtensions = { [weak self] in self?.showNativeExtensions() }
+        extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
         createWindow()
-        startupTask = Task { [weak self] in await self?.sourceManager.start() }
+        if BrowserSupportInstaller.isInstalledApplication(Bundle.main.bundleURL) {
+            do { _ = try BrowserSupportInstaller().install(from: Bundle.main.bundleURL) }
+            catch { showBrowserSupportError(error.localizedDescription) }
+        }
+        startupTask = Task { [weak self] in
+            guard let self else { return }
+            await self.sourceManager.start()
+            guard !Task.isCancelled, !self.terminating else { return }
+            self.sourceManagerReady = true
+            self.processMarketplaceRequests()
+        }
         // The first Apple open event carries the login launch reason. Do not
         // open a window here: a login launch must remain in the menu bar.
         if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
@@ -92,7 +108,23 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard !terminating else { return }
+        let development = Bundle.main.object(forInfoDictionaryKey: MarketplaceConfiguration.developmentKey) as? Bool == true
+        for url in urls.prefix(8) {
+            do {
+                let request = try MarketplaceInstallRequest(url: url, allowLocalDevelopment: development)
+                guard marketplaceRequests.count < 8 else { break }
+                if !marketplaceRequests.contains(request) { marketplaceRequests.append(request) }
+            } catch { pendingMarketplaceError = error.localizedDescription }
+        }
+        processMarketplaceRequests()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminating = true
+        marketplaceTask?.cancel()
+        marketplaceRequests.removeAll()
         startupTask?.cancel()
         registry?.stopAll()
         guard sourceManager != nil else { return .terminateNow }
@@ -109,6 +141,8 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "MacHelper")
         appMenu.addItem(withTitle: "MacHelper Settings…", action: #selector(openExtensions), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
+        appMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit MacHelper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
@@ -128,8 +162,10 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = "MacHelper · AI connection and extensions"
         let statusMenu = NSMenu()
         statusMenu.addItem(withTitle: "Extensions…", action: #selector(openExtensions), keyEquivalent: "").target = self
+        statusMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: "AI Connection…", action: #selector(openAI), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: "General…", action: #selector(openGeneral), keyEquivalent: "").target = self
+        statusMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "").target = self
         statusMenu.addItem(.separator())
         statusMenu.addItem(withTitle: "Quit MacHelper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = statusMenu
@@ -220,8 +256,98 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         nativeExtensions.refreshDisplay()
     }
 
+    private func processMarketplaceRequests() {
+        guard sourceManagerReady, !terminating, marketplaceTask == nil else { return }
+        guard pendingMarketplaceError != nil || !marketplaceRequests.isEmpty else { return }
+        marketplaceTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.marketplaceTask = nil }
+            while !Task.isCancelled, !self.terminating {
+                if let error = self.pendingMarketplaceError {
+                    self.pendingMarketplaceError = nil
+                    self.showMarketplaceError(error)
+                    continue
+                }
+                guard !self.marketplaceRequests.isEmpty else { break }
+                let request = self.marketplaceRequests.removeFirst()
+                do {
+                    self.showSettings(tab: 1)
+                    let preview = try await self.sourceManager.previewMarketplaceInstall(request)
+                    try Task.checkCancellation()
+                    if self.sourceManager.sourceURL(for: request.extensionID) != nil {
+                        // Website links never replace or re-enable an existing
+                        // editable copy, even if its upstream version changed.
+                        self.showSettings(tab: 1)
+                        self.extensions.selectTool(request.extensionID)
+                        continue
+                    }
+                    guard self.reviewMarketplaceInstall(preview) else { continue }
+                    _ = try await self.sourceManager.installReviewedMarketplaceTool(preview)
+                    try Task.checkCancellation()
+                    self.showSettings(tab: 1)
+                    self.extensions.selectTool(request.extensionID)
+                } catch {
+                    if !Task.isCancelled, !self.terminating { self.showMarketplaceError(error.localizedDescription) }
+                }
+            }
+        }
+    }
+
+    private func reviewMarketplaceInstall(_ preview: MarketplaceInstallPreview) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Install \(preview.manifest.displayName)?"
+        let permissionNames = ["selection.read": "Read selected text across apps", "clipboard.read": "Read clipboard text when you request it",
+                               "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels"]
+        let permissions = preview.manifest.permissions.map { "• " + (permissionNames[$0] ?? $0) }.joined(separator: "\n")
+        let source = preview.request.catalogURL.host.map { $0 + preview.request.catalogURL.path } ?? preview.request.catalogURL.absoluteString
+        alert.informativeText = "\(String(preview.manifest.summary.prefix(360)))\n\nVersion: \(preview.manifest.version)\nCatalog: \(String(source.prefix(360)))\n\nPermissions:\n\(permissions.isEmpty ? "None" : permissions)\n\nInstall source only from publishers you trust. The complete editable source will be downloaded and enabled after you approve."
+        alert.addButton(withTitle: "Install & Enable")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func showMarketplaceError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Marketplace"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func showBrowserSupportError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Browser support could not be installed"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
     @objc private func tabChanged() { showTab(tabs.selectedSegment) }
     @objc private func openExtensions() { showSettings(tab: 1) }
     @objc private func openAI() { showSettings(tab: 0) }
     @objc private func openGeneral() { showSettings(tab: 2) }
+    @objc private func openMarketplace() {
+        do {
+            let url = try MarketplaceConfiguration.websiteURL()
+            guard NSWorkspace.shared.open(url) else {
+                throw MarketplaceError.invalidLink("The marketplace could not be opened in your browser. Try again after checking your default browser.")
+            }
+        } catch { showMarketplaceError(error.localizedDescription) }
+    }
+    @objc private func installBrowserSupport() {
+        do {
+            _ = try BrowserSupportInstaller().install(from: Bundle.main.bundleURL)
+            let alert = NSAlert()
+            alert.messageText = "Browser support is ready"
+            alert.informativeText = "Chrome and Edge can now connect to MacHelper. Reload an already-open browser extension to use the updated helper."
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        } catch { showBrowserSupportError(error.localizedDescription) }
+    }
 }

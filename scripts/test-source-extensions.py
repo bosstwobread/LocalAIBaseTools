@@ -77,6 +77,14 @@ def fixture_files(directory):
         "version": manifest["version"], "summary": manifest["summary"], "files": inventory,
     }]}
     served["/catalog.json"] = json.dumps(catalog).encode()
+    broken = json.loads(json.dumps(catalog))
+    for item in broken["extensions"][0]["files"]:
+        item["url"] = "bad-Translation/" + quote(item["path"], safe="/")
+        served["/bad-Translation/" + item["path"]] = (
+            b"a deliberately corrupted marketplace download" if item["path"] == "main.js"
+            else served["/Translation/" + item["path"]]
+        )
+    served["/broken-catalog.json"] = json.dumps(broken).encode()
     return served, inventory
 
 
@@ -149,7 +157,7 @@ def main():
             with lock:
                 downloads = [path for path in requested if path.startswith("/Translation/")]
             expected = {"/Translation/" + item["path"] for item in inventory}
-            assert set(downloads) == expected and len(downloads) == len(expected), downloads
+            assert set(downloads) == expected and len(downloads) == report.get("sourceDownloadCount", len(expected)), downloads
             for check in report["checks"]:
                 print("PASS " + check)
             print(f"PASS one stable host and {len(report['workerPIDs'])} independent worker generations; all workers reaped")

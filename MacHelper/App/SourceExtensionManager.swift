@@ -192,6 +192,32 @@ final class SourceExtensionManager {
         notify()
     }
 
+    func previewMarketplaceInstall(_ request: MarketplaceInstallRequest) async throws -> MarketplaceInstallPreview {
+        guard !shuttingDown else { throw CancellationError() }
+        return try await MarketplaceReviewLoader.load(request)
+    }
+
+    /// Called only after the native review's explicit Install & Enable action.
+    /// Existing editable copies retain their files, enabled state, and settings.
+    @discardableResult
+    func installReviewedMarketplaceTool(_ preview: MarketplaceInstallPreview) async throws -> Bool {
+        guard !shuttingDown, !Task.isCancelled else { throw CancellationError() }
+        let id = preview.request.extensionID
+        guard sourceURL(for: id) == nil else { return false }
+        let catalog = preview.request.catalogURL.absoluteString
+        guard state.catalogs.contains(catalog) || state.catalogs.count < 32 else {
+            throw MarketplaceError.invalidLink("Too many tool catalogs are configured. Remove an unused catalog before installing another.")
+        }
+        definitions[id] = Definition(entry: preview.entry, base: preview.request.catalogURL)
+        do {
+            try await activate(id, approving: true,
+                expectedFileHashes: Dictionary(uniqueKeysWithValues: preview.entry.files.map { ($0.path, $0.sha256.lowercased()) }))
+        } catch MarketplaceError.existingSourceChanged { notify(); return false }
+        if !state.catalogs.contains(catalog) { state.catalogs.append(catalog); try saveState() }
+        notify()
+        return true
+    }
+
     func stopAll() async {
         shuttingDown = true
         epochs.removeAll()
@@ -249,7 +275,7 @@ final class SourceExtensionManager {
         }
     }
 
-    private func activate(_ id: String, approving: Bool) async throws {
+    private func activate(_ id: String, approving: Bool, expectedFileHashes: [String: String]? = nil) async throws {
         let epoch = UUID(); epochs[id] = epoch
         statuses[id] = sourceURL(for: id) == nil ? "Downloading complete extension source…" : "Validating source…"
         notify()
@@ -260,11 +286,13 @@ final class SourceExtensionManager {
                 catch {
                     // The bundled first-party source seed supports offline first
                     // launch. Remote marketplace packages have no implicit seed.
-                    guard sourceURL(for: id) == nil, id == Self.translationID, let seed = bundledSeedDirectory else { throw error }
+                    guard definition.base == bundledCatalogURL, sourceURL(for: id) == nil,
+                          id == Self.translationID, let seed = bundledSeedDirectory else { throw error }
                     snapshot = try store.importSource(from: seed)
                 }
             } else { snapshot = try store.snapshot(for: id) }
             guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+            if let expectedFileHashes, snapshot.fileHashes != expectedFileHashes { throw MarketplaceError.existingSourceChanged }
             snapshots[id] = snapshot
             let approved = state.permissions[id]
             guard approving || approved.map({ Set(snapshot.manifest.permissions).isSubset(of: Set($0)) }) == true else {
@@ -304,7 +332,8 @@ final class SourceExtensionManager {
             watch(id)
             notify()
         } catch {
-            if epochs[id] == epoch, !shuttingDown, !(error is CancellationError) {
+            if epochs[id] == epoch, !shuttingDown, !(error is CancellationError),
+               (error as? MarketplaceError) != .existingSourceChanged {
                 statuses[id] = active[id] == nil ? "Not running." : "Running the last working version."
                 errors[id] = error.localizedDescription
                 notify()

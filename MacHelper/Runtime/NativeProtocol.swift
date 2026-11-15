@@ -181,10 +181,10 @@ public struct HelperResponse: Encodable, Sendable {
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "4.1.0"; error = nil; models = nil; defaultModel = nil
+        version = "4.2.0"; error = nil; models = nil; defaultModel = nil
     }
     public init(id: String, catalog: LocalGPTModelCatalog) {
-        self.id = id; ok = true; text = nil; model = nil; version = "4.1.0"; error = nil
+        self.id = id; ok = true; text = nil; model = nil; version = "4.2.0"; error = nil
         models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {

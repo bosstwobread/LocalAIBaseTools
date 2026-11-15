@@ -409,6 +409,58 @@ enum SourceExtensionVerification {
             note("reload/restart preserve editable files and never persist selected text or AI results in preferences")
             await restarted.stopAll()
 
+            let market = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                bundledCatalogURL: catalogURL, stateDirectory: workspace.appendingPathComponent("market-state"),
+                sourceDirectory: workspace.appendingPathComponent("market-source"), headless: true,
+                testTransform: { payload in try await probe.transform(payload) })
+            managers.append(market)
+            await market.start()
+            let beforeReview = try await requests(requestLogURL).filter { $0.hasPrefix("/Translation/") }
+            let installRequest = try MarketplaceInstallRequest(catalogURL: catalogURL, extensionID: id, allowLocalDevelopment: true)
+            let preview = try await market.previewMarketplaceInstall(installRequest)
+            let afterReview = try await requests(requestLogURL).filter { $0.hasPrefix("/Translation/") }
+            try check(afterReview.count == beforeReview.count + 1 && afterReview.last == "/Translation/extension.json" &&
+                      market.sourceURL(for: id) == nil && market.workerPID(for: id) == nil,
+                      "Marketplace review installed code or fetched more than its hash-verified manifest.")
+            note("marketplace review fetches only verified metadata and never installs or executes before approval")
+            try check(try await market.installReviewedMarketplaceTool(preview), "An approved marketplace package did not install.")
+            _ = try remember(market.workerPID(for: id))
+            guard let marketSource = market.sourceURL(for: id) else { throw Failure(message: "The approved marketplace source is missing.") }
+            try check(try SourcePackageInspector.snapshot(at: marketSource).fileHashes == expectedHashes,
+                      "The approved marketplace install omitted or changed source files.")
+            note("approving a marketplace tool installs every verified source file and enables its worker")
+            try await market.updateSetting("style", value: "formal", for: id)
+            let marketMain = marketSource.appendingPathComponent("main.js")
+            let customMain = try String(contentsOf: marketMain, encoding: .utf8) + "\n// A user's existing local marketplace customization.\n"
+            try customMain.write(to: marketMain, atomically: true, encoding: .utf8)
+            try await market.setEnabled(false, for: id)
+            try check(!(try await market.installReviewedMarketplaceTool(preview)), "A repeated marketplace click replaced installed source.")
+            try check(try String(contentsOf: marketMain, encoding: .utf8) == customMain &&
+                      market.workerPID(for: id) == nil && (try info(market)).isEnabled == false,
+                      "A repeated marketplace click changed local edits or re-enabled a disabled tool.")
+            let marketSettings = try JSONSerialization.jsonObject(with: Data(contentsOf: workspace.appendingPathComponent("market-state/ExtensionSettings/" + id + "/settings.json"))) as? [String: Any]
+            try check(marketSettings?["style"] as? String == "formal", "A repeated marketplace click reset saved settings.")
+            note("repeated marketplace installation preserves local edits, preferences, and disabled state")
+            await market.stopAll()
+
+            let brokenMarket = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                bundledCatalogURL: catalogURL, bundledSeedDirectory: source,
+                stateDirectory: workspace.appendingPathComponent("broken-market-state"),
+                sourceDirectory: workspace.appendingPathComponent("broken-market-source"), headless: true,
+                testTransform: { payload in try await probe.transform(payload) })
+            managers.append(brokenMarket)
+            await brokenMarket.start()
+            let brokenRequest = try MarketplaceInstallRequest(catalogURL: catalogURL.deletingLastPathComponent().appendingPathComponent("broken-catalog.json"), extensionID: id, allowLocalDevelopment: true)
+            let brokenPreview = try await brokenMarket.previewMarketplaceInstall(brokenRequest)
+            var rejectedBrokenPackage = false
+            do { _ = try await brokenMarket.installReviewedMarketplaceTool(brokenPreview) }
+            catch { rejectedBrokenPackage = true }
+            try check(rejectedBrokenPackage && brokenMarket.sourceURL(for: id) == nil && brokenMarket.workerPID(for: id) == nil,
+                      "A failed reviewed source download installed partial code or silently substituted the bundled seed.")
+            note("a reviewed download hash failure installs nothing and never substitutes the bundled offline seed")
+            await brokenMarket.stopAll()
+            report["sourceDownloadCount"] = try await requests(requestLogURL).filter { $0.hasPrefix("/Translation/") }.count
+
             if args.contains("--live") {
                 let live = makeManager(live: true)
                 await live.start()

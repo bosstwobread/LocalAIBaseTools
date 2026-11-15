@@ -8,6 +8,7 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
     var onShowNativeExtensions: (() -> Void)? {
         didSet { if isViewLoaded { nativeButton.isHidden = onShowNativeExtensions == nil } }
     }
+    var onOpenMarketplace: (() -> Void)?
 
     private let manager: SourceExtensionManager
     private let picker = NSPopUpButton()
@@ -18,6 +19,7 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
     private let permissionStatus = NSTextField(labelWithString: "")
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
     private let installButton = NSButton(title: "Install Source…", target: nil, action: nil)
+    private let marketplaceButton = NSButton(title: "Marketplace…", target: nil, action: nil)
     private let catalogButton = NSButton(title: "Add Catalog…", target: nil, action: nil)
     private let editButton = NSButton(title: "Edit Source", target: nil, action: nil)
     private let reloadButton = NSButton(title: "Reload", target: nil, action: nil)
@@ -40,6 +42,7 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
     private var operations: [QueuedOperation] = []
     private var operationTask: Task<Void, Never>?
     private var workingTitle: String?
+    private var requestedSelectionID: String?
 
     init(manager: SourceExtensionManager) {
         self.manager = manager
@@ -51,6 +54,13 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
 
     override func loadView() {
         view = NSView()
+        marketplaceButton.target = self; marketplaceButton.action = #selector(openMarketplace)
+        let marketplaceNote = NSTextField(labelWithString: "Find tools for your local AI connection.")
+        marketplaceNote.font = .systemFont(ofSize: 12)
+        marketplaceNote.textColor = .secondaryLabelColor
+        let marketplaceRow = NSStackView(views: [marketplaceButton, marketplaceNote])
+        marketplaceRow.spacing = 10
+        marketplaceRow.alignment = .centerY
         let toolbar = NSStackView(views: [installButton, catalogButton, editButton, reloadButton, nativeButton])
         toolbar.spacing = 8
         installButton.target = self; installButton.action = #selector(installSource)
@@ -97,7 +107,7 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
         settingsDocument.addSubview(form)
         errorLabel.font = .systemFont(ofSize: 12)
         errorLabel.textColor = .systemRed
-        let stack = NSStackView(views: [toolbar, selection, summary, status, sourceState, connections, actions, settingsScroll])
+        let stack = NSStackView(views: [marketplaceRow, toolbar, selection, summary, status, sourceState, connections, actions, settingsScroll])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -145,6 +155,15 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
 
     private var busy: Bool { operationTask != nil }
 
+    func selectTool(_ id: String) {
+        requestedSelectionID = id
+        loadViewIfNeeded()
+        view.window?.makeFirstResponder(nil)
+        refreshDisplay()
+    }
+
+    var selectedToolID: String? { selectedID }
+
     func refreshDisplay() {
         guard isViewLoaded else { return }
         let previous = selectedID
@@ -165,6 +184,10 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
             picker.removeAllItems()
             picker.addItems(withTitles: titles)
             if let previous, let index = ids.firstIndex(of: previous) { picker.selectItem(at: index) }
+        }
+        if let requestedSelectionID, let index = ids.firstIndex(of: requestedSelectionID) {
+            picker.selectItem(at: index)
+            self.requestedSelectionID = nil
         }
         let item = tools.first { $0.id == selectedID }
         toggle.state = item?.isEnabled == true ? .on : .off
@@ -332,6 +355,8 @@ final class SourceExtensionsViewController: NSViewController, NSTextFieldDelegat
         view.window?.makeFirstResponder(nil)
         refreshDisplay()
     }
+
+    @objc private func openMarketplace() { onOpenMarketplace?() }
 
     @objc private func toggleEnabled() {
         guard let id = selectedID else { return }

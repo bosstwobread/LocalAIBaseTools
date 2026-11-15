@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Build the static marketplace and complete, hash-verified source downloads."""
+import argparse
+import hashlib
+import json
+import plistlib
+import re
+import shutil
+import subprocess
+import tempfile
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote, urlsplit
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def json_file(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def source_files(folder):
+    """Package every ordinary non-hidden source file, including docs/licenses."""
+    result = {}
+    for path in sorted(folder.rglob("*")):
+        relative = path.relative_to(folder)
+        if any(part.startswith(".") or part in {"node_modules", "__pycache__"} for part in relative.parts):
+            continue
+        if path.is_symlink():
+            raise ValueError("Source downloads cannot contain symbolic links: " + str(relative))
+        if path.is_file():
+            data = path.read_bytes()
+            if len(data) > 512 * 1024:
+                raise ValueError("An extension source file exceeds the package limit: " + str(relative))
+            result[relative.as_posix()] = data
+    if not result or len(result) > 128 or sum(map(len, result.values())) > 4 * 1024 * 1024:
+        raise ValueError("The source inventory is empty or exceeds its package limits: " + folder.name)
+    return result
+
+
+def write_source_zip(path, folder_name, files):
+    """Stable archives make source checksums reproducible across deployments."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for name, data in sorted(files.items()):
+            item = zipfile.ZipInfo(folder_name + "/" + name, date_time=(2026, 1, 1, 0, 0, 0))
+            item.compress_type = zipfile.ZIP_DEFLATED
+            item.external_attr = 0o100644 << 16
+            archive.writestr(item, data)
+
+
+def updated_at(folder):
+    result = subprocess.run(["git", "log", "-1", "--format=%cI", "--", str(folder.relative_to(ROOT))],
+                            cwd=ROOT, text=True, capture_output=True)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().split("T", 1)[0]
+    return datetime.fromtimestamp(max(p.stat().st_mtime for p in folder.rglob("*") if p.is_file()), timezone.utc).date().isoformat()
+
+
+def build(output, app, without_app=False):
+    config = json.loads((HERE / "marketplace.config.json").read_text())
+    base = config["baseUrl"]
+    parsed = urlsplit(base)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or not base.endswith("/"):
+        raise ValueError("The published marketplace baseUrl must be an absolute HTTPS directory URL.")
+    output = output.resolve()
+    if output == HERE or HERE not in output.parents or output.name != "dist":
+        raise ValueError("The build output must be a dist directory inside ExtensionMarket-website.")
+    with tempfile.TemporaryDirectory(prefix=".market-build-", dir=HERE) as temporary:
+        stage = Path(temporary) / "site"
+        stage.mkdir()
+        for filename in ["index.html", "styles.css", "app.js"]:
+            shutil.copy2(HERE / filename, stage / filename)
+        shutil.copytree(HERE / "assets", stage / "assets")
+        shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")
+        catalog = {"schemaVersion": 1, "extensions": []}
+        tools = []
+        known = config.get("tools", {})
+        seen_ids = set()
+        seen_slugs = set()
+        for folder in sorted((ROOT / "Extensions").iterdir()):
+            if not folder.is_dir() or folder.name.startswith("."):
+                continue
+            metadata = known.get(folder.name, {})
+            native_manifest = folder / "extension.json"
+            browser_manifest = folder / "manifest.json"
+            if native_manifest.exists():
+                manifest = json.loads(native_manifest.read_text())
+                if manifest.get("schemaVersion") != 2 or manifest.get("runtime") != "javascript":
+                    raise ValueError("Unsupported marketplace source format: " + folder.name)
+                kind = "mac-source"
+                identifier = manifest["identifier"]
+                name = manifest["displayName"]
+                summary = manifest["summary"]
+                permissions = manifest["permissions"]
+                platforms = ["macOS"]
+            elif browser_manifest.exists():
+                manifest = json.loads(browser_manifest.read_text())
+                kind = "browser"
+                identifier = metadata.get("id", "com.localaibasetools." + folder.name.lower())
+                name = manifest["name"]
+                summary = manifest["description"]
+                permissions = manifest.get("permissions", [])
+                platforms = ["macOS", "Chrome", "Edge"]
+            else:
+                raise ValueError("An extension directory has no supported manifest: " + folder.name)
+            version = manifest["version"]
+            if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
+                raise ValueError("The source version must be a safe semantic version: " + folder.name)
+            if not isinstance(identifier, str) or not re.fullmatch(r"[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+", identifier) or len(identifier) > 128:
+                raise ValueError("The source identifier must use reverse-domain notation: " + folder.name)
+            slug = metadata.get("slug", folder.name.lower())
+            if not slug or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in slug):
+                raise ValueError("The extension slug is not URL-safe: " + slug)
+            if identifier in seen_ids or slug in seen_slugs:
+                raise ValueError("Duplicate extension identifier or slug.")
+            seen_ids.add(identifier); seen_slugs.add(slug)
+            files = source_files(folder)
+            if kind == "mac-source":
+                inventory = []
+                for relative, data in files.items():
+                    url = "packages/" + slug + "/" + quote(version, safe="") + "/" + quote(relative, safe="/")
+                    destination = stage / "packages" / slug / version / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(data)
+                    inventory.append({"path": relative, "url": url, "sha256": digest(data), "size": len(data)})
+                catalog["extensions"].append({
+                    "identifier": identifier, "displayName": name, "version": version,
+                    "summary": summary, "files": inventory,
+                })
+                package_name = "packages/" + slug + "-" + version + ".macsource.zip"
+                write_source_zip(stage / package_name, identifier + ".macsource", files)
+            else:
+                package_name = "packages/" + slug + "-" + version + ".zip"
+                complete = dict(files)
+                complete.setdefault("LICENSE", (ROOT / "LICENSE").read_bytes())
+                complete.setdefault("README.md", ("# " + name + "\n\n" + summary + "\n\n" +
+                    "\n".join(str(i + 1) + ". " + step for i, step in enumerate(metadata.get("installSteps", []))) +
+                    "\n\nComplete source: " + config["sourceUrl"] + "/tree/main/Extensions/" + folder.name + "\n").encode())
+                write_source_zip(stage / package_name, folder.name, complete)
+            item = {
+                "id": identifier, "slug": slug, "name": name, "version": version,
+                "summary": summary, "description": metadata.get("description", summary),
+                "category": metadata.get("category", "Productivity"), "platforms": platforms,
+                "kind": kind, "featured": metadata.get("featured", False),
+                "icon": metadata.get("icon", "assets/mac-helper.png"),
+                "screenshots": metadata.get("screenshots", []), "features": metadata.get("features", []),
+                "permissions": permissions, "installSteps": metadata.get("installSteps", []),
+                "sourceUrl": config["sourceUrl"] + "/tree/main/Extensions/" + quote(folder.name),
+                "packageUrl": package_name, "packageSha256": digest((stage / package_name).read_bytes()),
+                "packageSize": (stage / package_name).stat().st_size,
+                "catalogUrl": "catalog.json" if kind == "mac-source" else None,
+                "license": "MIT", "author": "LocalAIBaseTools contributors", "updatedAt": updated_at(folder),
+            }
+            tools.append(item)
+        mac = dict(config["macHelper"])
+        mac.update({"sourceUrl": config["sourceUrl"], "marketplaceUrl": base,
+                    "downloadUrl": "downloads/MacHelper-macOS-arm64.zip", "available": not without_app})
+        if not without_app:
+            info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            if info.get("CFBundleIdentifier") != "com.localaibasetools.mac-helper" or info.get("CFBundleShortVersionString") != mac["version"]:
+                raise ValueError("Build the matching MacHelper " + mac["version"] + " app before publishing its download.")
+            destination = stage / mac["downloadUrl"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(destination)], check=True)
+            mac["sha256"] = digest(destination.read_bytes())
+            mac["size"] = destination.stat().st_size
+        else:
+            mac["downloadUrl"] = None
+        json_file(stage / "catalog.json", catalog)
+        json_file(stage / "data/extensions.json", {"schemaVersion": 1, "name": config["name"], "extensions": tools, "macHelper": mac})
+        (stage / "robots.txt").write_text("User-agent: *\nAllow: /\n")
+        # A failed build never replaces the last complete website.
+        previous = output.with_name(".previous-market-build")
+        if previous.exists(): shutil.rmtree(previous)
+        if output.exists(): output.rename(previous)
+        try: stage.rename(output)
+        except BaseException:
+            if previous.exists(): previous.rename(output)
+            raise
+        if previous.exists(): shutil.rmtree(previous)
+    return tools, mac
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=HERE / "dist")
+    parser.add_argument("--app", type=Path, default=ROOT / "dist/MacHelper.app")
+    parser.add_argument("--without-app", action="store_true", help="Local website development only; omits the app download.")
+    args = parser.parse_args()
+    try: tools, mac = build(args.output, args.app, args.without_app)
+    except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
+        parser.exit(1, "Marketplace build failed: " + str(error) + "\n")
+    print("Built", args.output, "with", len(tools), "extensions and", len([t for t in tools if t["kind"] == "mac-source"]), "complete native source packages.")
+    print("MacHelper download:", "included" if mac["available"] else "omitted for local development")
+
+
+if __name__ == "__main__":
+    main()

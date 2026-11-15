@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Build MacHelper with generic capabilities and an editable Translation source catalog."""
 import argparse
+import json
 import plistlib
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,7 +42,13 @@ def build(package):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--signing-identity", help="Signing identity; otherwise prefer an existing Apple identity, falling back to ad hoc.")
+    config_path = ROOT / "ExtensionMarket-website/marketplace.config.json"
+    default_marketplace = json.loads(config_path.read_text())["baseUrl"] if config_path.exists() else "https://recite.nelson007.com/extension-market/"
+    parser.add_argument("--marketplace-url", default=default_marketplace, help="Public HTTPS URL opened by MacHelper's Marketplace entry.")
     args = parser.parse_args()
+    market_url = urlsplit(args.marketplace_url)
+    if market_url.scheme != "https" or not market_url.hostname or market_url.username or market_url.password or market_url.query or market_url.fragment:
+        parser.error("The marketplace URL must be a public HTTPS website URL without credentials, query, or fragment.")
     subprocess.run([sys.executable, str(ROOT / "scripts/build-app-icon.py")], check=True)
     identity = signing_identity(args.signing_identity)
     helper_bin = build(ROOT / "MacHelper")
@@ -63,7 +71,9 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "4.1.0", "CFBundleVersion": "411", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "4.2.0", "CFBundleVersion": "420", "CFBundleIconFile": "AppIcon",
+        "MacHelperMarketplaceURL": args.marketplace_url,
+        "CFBundleURLTypes": [{"CFBundleURLName": "com.localaibasetools.marketplace", "CFBundleURLSchemes": ["machelper"], "CFBundleTypeRole": "Viewer"}],
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",
         "NSHighResolutionCapable": True, "LSUIElement": True,
         "NSHumanReadableCopyright": "© 2026 LocalAIBaseTools contributors. MIT License.",

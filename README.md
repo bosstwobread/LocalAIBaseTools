@@ -19,6 +19,7 @@ LocalAIBaseTools/
 │   ├── Translation/              Six editable files: JS, manifest, schema, prompt, README, license
 │   └── MessageHelper-Upwork/     Independent Chrome/Edge extension
 ├── catalog/extensions.json       Source catalog metadata and complete SHA-256 file inventory
+├── ExtensionMarket-website/      Searchable tool marketplace, source packages, Docker deployment
 ├── examples/ExternalGreeting/    Advanced independently built native SDK example
 ├── scripts/                      Build/install and integration checks
 └── test/                         Browser and installer tests with synthetic fixtures
@@ -28,7 +29,7 @@ Source extensions use MacHelper's capability interface for selected text, nearby
 
 ## Requirements
 
-- macOS 14 or later; Swift command-line tools and Python 3 to build/install.
+- macOS 14 or later. Building from source requires Swift command-line tools and Python 3; the prebuilt developer release targets Apple Silicon.
 - A signed-in Codex/ChatGPT installation with its bundled Codex app-server, Ollama with a model downloaded, or LM Studio with a model loaded and its local server running.
 - Chrome/Edge for MessageHelper. Node.js/npm is needed for browser development tests.
 - Accessibility approval for **MacHelper** to read selected text in other apps.
@@ -51,7 +52,7 @@ The build prefers an available Developer ID Application or Apple Development sig
 ## MacHelper settings
 
 - **AI Connection**: provider, current model catalog, local address where relevant, Test Connection, and Save. Models are discovered dynamically; new advertised models can appear without an extension update while the provider protocol remains compatible. Retired selected models produce an error instead of silently choosing another. Ollama/LM Studio require a named model.
-- **Extensions**: enable/disable and configure source tools, **Install Source…**, **Add Catalog…**, **Edit Source**, and **Reload**. A catalog lists available tools without downloading their source; enabling a tool installs its complete source before running it. Existing Translation enablement is retained when migrating. New external tools remain disabled until explicitly enabled. **Native tools…** opens the advanced native SDK interface.
+- **Extensions**: **Marketplace…** opens the tool website; source tools can also use **Install Source…**, **Add Catalog…**, **Edit Source**, and **Reload**. Marketplace installs show a native permissions review before downloading and enabling a complete source package. Existing local copies retain their edits, preferences, and enabled state. **Native tools…** opens the advanced native SDK interface.
 - **General**: launch at login and the system Login Items shortcut. MacHelper registers itself through Apple's ServiceManagement API on its first explicit installed-app launch. It starts in the menu bar when you log in; closing Settings keeps enabled extensions running. A later user disablement is respected.
 
 Shared AI preferences are stored in the MacHelper support folder's `settings.json`; source-tool enablement, permissions, and catalog addresses are in `source-extensions.json`. Source-tool settings live separately under `ExtensionSettings/<identifier>/settings.json`. The advanced native registry retains its own `extensions.json`. These files contain configuration, not selected text or translations.
@@ -70,7 +71,7 @@ Use **Edit Source** to open Translation's installed working folder. Change `main
 
 Create a source folder containing `extension.json`, JavaScript, and the editable resources it needs. Choose **MacHelper → Extensions → Install Source…** to import it, or **Add Catalog…** to list tools from a JSON catalog. Enabling a catalog tool downloads every declared source file with hash/size validation and atomic installation. No additional Mac app is installed.
 
-The source format is the default for the future marketplace; a marketplace website is not included yet. See [Extension Development](docs/Extension-Development.md) and the detailed [source package/catalog contract](docs/Source-Extensions.md).
+Browse the [Extension Market](https://recite.nelson007.com/extension-market/) or use **Marketplace…** in MacHelper. The [website project](ExtensionMarket-website/README.md) serves the catalog and complete source packages through a separate Docker container. See [Extension Development](docs/Extension-Development.md) and the detailed [source package/catalog contract](docs/Source-Extensions.md).
 
 Advanced native `.machextension` bundles remain compatible through **Extensions → Native tools… → Install Extension…** and the [standalone SDK](MacHelper/ExtensionSDK/README.md). They run trusted native code inside MacHelper; replacing loaded native code requires restarting the app. [External Greeting](examples/ExternalGreeting/README.md) demonstrates building outside this repository using only the public SDK header. Native bundles do not support the JavaScript hot-reload workflow.
 

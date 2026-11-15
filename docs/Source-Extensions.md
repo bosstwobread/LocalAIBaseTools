@@ -1,6 +1,6 @@
 # Editable source extensions
 
-MacHelper's JavaScript extension format is designed for a future marketplace: listing an available tool reads catalog metadata; enabling it materializes its complete source package in a writable folder on the user's Mac. The source files are not hidden inside the signed MacHelper app. Each extension runs in its own JavaScript worker, while MacHelper supplies selection detection, floating panels, shared AI, and settings.
+MacHelper's JavaScript extension format powers its marketplace: listing an available tool reads catalog metadata; enabling it materializes its complete source package in a writable folder on the user's Mac. The source files are not hidden inside the signed MacHelper app. Each extension runs in its own JavaScript worker, while MacHelper supplies selection detection, floating panels, shared AI, and settings.
 
 This document describes the version-two source package and catalog contracts. Native version-one bundles remain a separate SDK interface; replacing already-loaded native code still requires restarting the app.
 
@@ -155,4 +155,25 @@ The source-package tests exercise metadata-only catalog loading, complete materi
 swift test --package-path MacHelper --filter 'SourcePackageTests|SourceWatcherTests'
 ```
 
-Catalog JSON is a download/activation interface for the future marketplace; it is not a marketplace website, account system, or payment implementation.
+The [Extension Market](https://recite.nelson007.com/extension-market/) serves this catalog format and complete source packages. Its [website source](../ExtensionMarket-website/README.md) includes search, filters, details, and install/download flows.
+
+## Website install links
+
+MacHelper 4.2 and later handle:
+
+```text
+machelper://install?catalog=<percent-encoded HTTPS catalog URL>&extension=<reverse-domain identifier>
+```
+
+Only the `catalog` and `extension` query parameters are accepted. Opening a link
+checks the catalog and hash-pinned manifest, then presents a native permissions
+review. Approving **Install & Enable** downloads the complete inventory. It does
+not run AI. Download/hash errors leave no partial installed package; a reviewed
+remote failure never substitutes the app's offline seed. Repeat links to an
+existing local package open its settings without replacing files, resetting
+preferences, or re-enabling a disabled tool.
+
+The canonical website URL is embedded as `MacHelperMarketplaceURL` in the app
+bundle. `scripts/build-apps.py --marketplace-url HTTPS_URL` configures a different
+marketplace build. Production builds require HTTPS. Loopback HTTP is accepted
+only by explicitly enabled development/test configurations.

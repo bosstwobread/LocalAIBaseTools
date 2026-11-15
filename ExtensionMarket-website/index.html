@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Discover free, open-source extensions that put your local AI connection to work. Translation for Mac and MessageHelper for Upwork, powered by MacHelper.">
+  <meta name="theme-color" content="#f5f3ed">
+  <title>Extension Market — LocalAI BaseTools</title>
+  <link rel="icon" href="./assets/mac-helper.png" type="image/png">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner shell">
+      <a class="brand" href="#" aria-label="LocalAI BaseTools home">
+        <img src="./assets/mac-helper.png" alt="" width="42" height="42">
+        <span><strong>LocalAI <span>BaseTools</span></strong><small>THE EXTENSION MARKET</small></span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#browse">Explore</a><a href="#how-it-works">How it works</a><a href="#developers">Developers</a>
+      </nav>
+      <a class="button button-small button-blue header-download" href="#get-machelper" data-helper-download>Get MacHelper <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero shell" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="eyebrow-line"></span> SMALL TOOLS. YOUR AI CONNECTION.</p>
+        <h1 id="hero-title">Your AI,<br>put to <em>work.</em></h1>
+        <p class="hero-description">A collection of useful little extensions, built around the AI connection you already have. Open source. Yours to make your own.</p>
+        <div class="hero-actions"><a class="button button-dark" href="#browse">Explore extensions <span aria-hidden="true">↓</span></a><a class="text-link" href="#how-it-works">A simpler way to work <span aria-hidden="true">↗</span></a></div>
+        <p class="hero-note"><span class="tiny-cross" aria-hidden="true">✳</span> Free tools. One shared MacHelper connection.</p>
+      </div>
+      <figure class="hero-stage" aria-label="Illustrated Translation interface preview">
+        <div class="stage-topline"><span>FROM SELECTED TEXT TO A LITTLE CLARITY</span><span aria-hidden="true">↘</span></div>
+        <div class="paper-window" aria-hidden="true">
+          <div class="window-chrome"><i></i><i></i><i></i><span>A note for Friday</span></div>
+          <div class="paper-content"><div class="paper-label">A QUICK UPDATE</div><p>The meeting has moved to Friday.</p><p><mark>Please confirm the new time<br>works for you.</mark><span class="selection-cursor"></span></p><div class="paper-rule"></div><div class="paper-rule short"></div></div>
+          <div class="floating-tool"><span>A</span><span>文</span></div>
+        </div>
+        <div class="preview-popover" aria-hidden="true"><div class="popover-header"><span class="translation-symbol">文</span><strong>简体中文</strong><span class="popover-close">×</span></div><p>会议改到星期五了。<br>请确认新的时间是否合适。</p><div class="popover-footer"><span>MacHelper · shared AI settings</span><span class="copy-illustration">Copy</span></div></div>
+        <div class="stage-brand" aria-hidden="true"><img src="./assets/mac-helper.png" alt="" width="64" height="64"><span>One connection.<br><strong>More possibilities.</strong></span></div>
+        <figcaption>INTERFACE PREVIEW <span>Translation for Mac</span></figcaption>
+      </figure>
+    </section>
+
+    <div class="principles shell" aria-label="Project principles"><span><i aria-hidden="true">↗</i> Open source by design</span><span><i aria-hidden="true">⌘</i> Made for the way you work</span><span><i aria-hidden="true">✳</i> Your prompts, editable</span></div>
+
+    <section class="catalog-section shell" id="browse" aria-labelledby="catalog-title">
+      <div class="section-heading"><div><p class="eyebrow">THE COLLECTION</p><h2 id="catalog-title">Find your next<br><em>small advantage.</em></h2></div><p class="section-intro">Focused tools for everyday moments.<br>Choose one. Make it part of your flow.</p></div>
+      <form id="filters" class="catalog-controls" role="search" aria-label="Find extensions">
+        <label class="search-control"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 4.5 4.5"></path></svg><span class="sr-only">Search extensions</span><input id="search" type="search" placeholder="Search tools, features, platforms…" autocomplete="off"></label>
+        <label class="select-control"><span>Category</span><select id="category"><option value="all">All categories</option></select></label>
+        <label class="select-control"><span>Platform</span><select id="platform"><option value="all">All platforms</option></select></label>
+      </form>
+      <div class="catalog-meta"><p id="result-count" aria-live="polite">Loading the collection…</p><button class="link-button" id="clear-filters" type="button" hidden>Clear filters <span aria-hidden="true">×</span></button><span class="catalog-meta-note">FREE & OPEN SOURCE</span></div>
+      <div id="catalog-error" class="state-panel" role="status" hidden><span class="state-symbol" aria-hidden="true">↻</span><h3>The collection couldn’t load.</h3><p>Check your connection and try again. You can also explore the project on GitHub.</p><div><button id="retry-catalog" class="button button-dark" type="button">Try again</button><a class="text-link" href="https://github.com/bosstwobread/LocalAIBaseTools" target="_blank" rel="noopener noreferrer">View source ↗</a></div></div>
+      <div id="catalog-empty" class="state-panel" hidden><span class="state-symbol" aria-hidden="true">⌕</span><h3>No tools match just yet.</h3><p>Try another search or clear your filters to see the collection.</p><button id="reset-empty" class="button button-dark" type="button">Show all extensions</button></div>
+      <div id="extension-grid" class="extension-grid" aria-busy="true"><div class="loading-note"><span class="loading-dot"></span> Gathering the tools…</div></div>
+    </section>
+
+    <section class="spotlight" id="spotlight" hidden aria-labelledby="spotlight-title"><div class="spotlight-inner shell"><div class="spotlight-copy"><p class="eyebrow">A CLOSER LOOK / TRANSLATION</p><h2 id="spotlight-title">Understand the words.<br><em>Stay in the moment.</em></h2><p>Select text in a supported Mac app, click the little icon, and read the translation right there. No trip to another chat window.</p><ul class="plain-benefits"><li>Results appear as the provider generates them</li><li>Editable JavaScript, prompts, and settings</li><li>One provider and model, managed in MacHelper</li></ul><a class="text-link" href="#extension/translation">Meet Translation <span aria-hidden="true">↗</span></a></div><figure><img src="./assets/translation-preview.svg" alt="Interface preview: selected English text with a nearby Chinese translation" loading="lazy" width="1160" height="720"><figcaption>Interface preview · Example content</figcaption></figure></div></section>
+
+    <section class="how-section shell" id="how-it-works" aria-labelledby="how-title"><div class="section-heading"><div><p class="eyebrow">THE SIMPLE PART</p><h2 id="how-title">One connection.<br><em>A few good tools.</em></h2></div><p class="section-intro">MacHelper is the small app that brings<br>your tools and AI connection together.</p></div><ol class="steps"><li><span class="step-number">01</span><h3>Set up MacHelper</h3><p>Install the Mac app and choose a supported desktop or local AI service in its shared settings.</p><a class="text-link" href="#get-machelper">Get the app ↗</a></li><li><span class="step-number">02</span><h3>Choose your tools</h3><p>Install an editable source tool, or add MessageHelper to Chrome or Edge for your Upwork workflow.</p><a class="text-link" href="#browse">Browse the collection ↗</a></li><li><span class="step-number">03</span><h3>Make the moment easier</h3><p>Click to translate, or review a polished draft. Text is sent to AI when you choose an action.</p><span class="step-footnote">You stay in charge of sending.</span></li></ol></section>
+
+    <section class="get-section shell" id="get-machelper" aria-labelledby="get-title"><div class="get-panel"><div class="get-identity"><img src="./assets/mac-helper.png" width="84" height="84" alt="MacHelper app icon"><span class="eyebrow">THE SHARED CONNECTION</span></div><div class="get-copy"><h2 id="get-title">Start with MacHelper.</h2><p>A quiet home in your menu bar for AI settings and the tools you choose to enable.</p><p class="download-meta" id="helper-meta">macOS 14+ · Apple Silicon</p></div><div class="get-actions"><a class="button button-white" href="#get-machelper" data-helper-download>Download for Mac <span aria-hidden="true">↓</span></a><a class="source-link" href="https://github.com/bosstwobread/LocalAIBaseTools" data-helper-source target="_blank" rel="noopener noreferrer">Or explore the source ↗</a></div></div><p class="provider-note">Tools are free. Your AI provider’s availability and usage limits still apply. A local connection may use cloud models, depending on your provider.</p></section>
+
+    <section class="developer-section shell" id="developers" aria-labelledby="developer-title"><div><p class="eyebrow">BUILT TO BE OPENED</p><h2 id="developer-title">Have a better idea?<br><em>Make it a tool.</em></h2><p>Translation ships as complete, editable source. Change the script or prompt, save, and that tool reloads while MacHelper stays running.</p><a class="button button-outline" href="https://github.com/bosstwobread/LocalAIBaseTools/blob/main/docs/Source-Extensions.md" target="_blank" rel="noopener noreferrer">Read the developer guide <span aria-hidden="true">↗</span></a></div><div class="source-preview" aria-label="Translation source package files"><div class="source-preview-heading"><span class="folder-symbol" aria-hidden="true">⌁</span><strong>Translation/</strong><span>COMPLETE SOURCE</span></div><div class="file-row"><span class="file-type">{ }</span><code>extension.json</code><span>Identity & capabilities</span></div><div class="file-row active"><span class="file-type">JS</span><code>main.js</code><span>Make it yours <i aria-hidden="true">↗</i></span></div><div class="file-row"><span class="file-type">Aa</span><code>prompts/translate.txt</code><span>Your instructions</span></div><div class="file-row"><span class="file-type">{ }</span><code>settings.schema.json</code><span>Settings & defaults</span></div><div class="source-preview-footer"><span class="source-dot" aria-hidden="true"></span> Save a file. Only this tool reloads.</div></div></section>
+  </main>
+
+  <footer class="site-footer shell"><a class="brand footer-brand" href="#"><img src="./assets/mac-helper.png" alt="" width="32" height="32"><strong>LocalAI <span>BaseTools</span></strong></a><p>Small tools. Open possibilities.</p><a href="https://github.com/bosstwobread/LocalAIBaseTools" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a><span class="footer-license">MIT LICENSE</span></footer>
+  <dialog id="tool-dialog" class="tool-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <noscript><div class="noscript-note">Enable JavaScript to browse the live extension catalog. The complete project is available on <a href="https://github.com/bosstwobread/LocalAIBaseTools">GitHub</a>.</div></noscript>
+</body>
+</html>
