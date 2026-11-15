@@ -1,101 +1,124 @@
 # LocalAIBaseTools
 
-LocalAIBaseTools currently contains **MessageHelper**, a browser extension and macOS helper for using your existing desktop AI connection to translate and polish text on Upwork.
+**MacHelper** is one macOS menu-bar app for your AI connection, extensions, and extension settings. **Translation** runs inside MacHelper; it no longer needs a separate app. **MessageHelper — Upwork** remains a Chrome/Edge extension using the same AI connection.
 
-MessageHelper adds a **Translate** button beside Upwork conversation messages and a **Polish** button beside the composer’s Send button. Translation appears below the original message. Polishing shows a preview; **Apply** inserts the suggestion into the draft, **Cancel** keeps the draft, and **Undo** restores the previous draft if it has not been edited again.
+## Structure
 
-MessageHelper never clicks Send, submits a message, or sends an Upwork message automatically. You review the draft and use Upwork’s Send control yourself.
+```text
+LocalAIBaseTools/
+├── MacHelper/
+│   ├── App/                      Menu-bar app, AI/Extensions/General settings, login startup
+│   ├── Runtime/                  AI providers, preferences, framing, extension discovery/lifecycle
+│   ├── Host/                     Browser/native-client stdin/stdout executable
+│   ├── ExtensionSDK/             Standalone public Objective-C/AppKit extension contract
+│   └── Tests/MacHelperTests/
+├── Extensions/
+│   ├── Translation/              Independently built native extension, bundled in MacHelper
+│   └── MessageHelper-Upwork/     Independent Chrome/Edge extension
+├── examples/ExternalGreeting/    Example that can be authored and built outside this repository
+├── scripts/                      Build/install and integration checks
+└── test/                         Browser and installer tests with synthetic fixtures
+```
 
-On Upwork’s **Leave feedback** contract form, each visible public review or private-note field gets **Polish** and **Translate draft** controls. Polishing previews natural English before **Apply**; **Undo** restores the original while it is still unchanged. Draft translation is for reference and never replaces the field. Ratings, contract-ending reasons, and Submit feedback are untouched. MessageHelper never submits feedback. Results exceeding the field’s character limit cannot be applied.
-
-## Components
-
-- `extension/`: Chrome/Edge Manifest V3 extension for `https://www.upwork.com/ab/messages/*`, `https://www.upwork.com/nx/proposals/*`, and `https://www.upwork.com/ab/feedbacks/f/contract/*`.
-- `Sources/MessageHelperHost/`: macOS native messaging host, named `com.messagehelper.gpt`.
-- `Sources/MessageHelperCore/`: GPT transport adapted from JobInterviewRealTime. This copy is independent of that project.
-
-The extension passes only the selected message or current draft to the helper. The helper starts the installed Codex app-server and reuses your existing ChatGPT sign-in. You do not need a separate API key or a second account. GPT inference runs online; “local helper” means the bridge runs on your Mac. Requests use an answer-only conversation with tools disabled. Text from messages and drafts is treated as data, including any instructions embedded within it.
+Extensions do not import the helper's AI implementation. Native extensions implement the public SDK and communicate with the AI helper through framed messages. Their settings view controllers are embedded inside MacHelper. Browser tools still need their browser component installed in Chrome or Edge.
 
 ## Requirements
 
-- macOS 14 or later, with the Codex/ChatGPT desktop app containing the bundled Codex CLI installed and signed in to ChatGPT.
-- Microsoft Edge or Google Chrome.
-- Swift command-line tools to build the helper. Node.js/npm and Python 3 are used only for development and tests.
+- macOS 14 or later; Swift command-line tools and Python 3 to build/install.
+- A signed-in Codex/ChatGPT installation with its bundled Codex app-server, Ollama with a model downloaded, or LM Studio with a model loaded and its local server running.
+- Chrome/Edge for MessageHelper. Node.js/npm is needed for browser development tests.
+- Accessibility approval for **MacHelper** to read selected text in other apps.
 
-## Installation
+ChatGPT processes requests online using the existing sign-in. The helper runs locally; it is not an offline GPT model. Ollama and LM Studio use the service running on this Mac. Remote service addresses and redirects are rejected. There is no automatic fallback between providers.
 
-Run these commands from this project:
+## Build and install
 
 ```sh
-./scripts/build-helper.sh
-python3 scripts/install-helper.py
+python3 scripts/build-apps.py
+python3 scripts/install-apps.py
 ```
 
-The installer copies the helper to `~/Library/Application Support/MessageHelper/message-helper-host` and registers its native messaging manifest for Chrome and Edge. The manifest allows only this extension’s stable ID: `fmhfobfddchbeibojepeocgfemkpcklo`.
+This installs only `~/Applications/LocalAIBaseTools/MacHelper.app`. Translation is a native bundle inside its `Contents/PlugIns` directory. The app includes the AI host executable; the installer also registers a copy under `~/Library/Application Support/LocalAIBaseTools/MacHelper/mac-helper-host` for Chrome/Edge native messaging.
 
-In Edge, open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this project’s `extension` folder. In Chrome, use `chrome://extensions` and the same folder. Keep the folder in place; the browser loads the extension from it.
+On upgrade, the installer retires our earlier standalone Translation app to Trash without removing its preferences. The hosted extension migrates the previous target-language setting. Quit any running older MacHelper before replacing it, then reopen the installed app.
 
-Open MessageHelper’s toolbar popup and click **Test helper connection**. A successful helper connection confirms installation; choose **Open safe test page** for synthetic translation and polishing checks. The browser launches the Mac helper automatically when needed.
+The build prefers an available Developer ID Application or Apple Development signing identity; otherwise it uses ad-hoc signing. Use `--signing-identity` to choose explicitly. A consistent Apple identity gives macOS a stable app requirement across updates. Public distribution still requires the appropriate signing/notarization release workflow.
 
-## Usage
+## MacHelper settings
 
-1. Open a supported Upwork conversation. Reload an already-open page after installing or reloading the extension.
-2. Click **Translate** beside a message. The result appears underneath it. Simplified Chinese is the default; change the target language in the popup.
-3. Write a draft, then click **Polish**. Select **Apply** to use the suggestion or **Cancel** to retain your draft.
-4. Review the result and click Upwork’s Send button yourself when ready.
+- **AI Connection**: provider, current model catalog, local address where relevant, Test Connection, and Save. Models are discovered dynamically; new advertised models can appear without an extension update while the provider protocol remains compatible. Retired selected models produce an error instead of silently choosing another. Ollama/LM Studio require a named model.
+- **Extensions**: install, select, enable/disable, and configure native tools. Translation is bundled and enabled initially. New external extensions are discovered without executing their code, and remain disabled until explicitly enabled.
+- **General**: launch at login and the system Login Items shortcut. MacHelper registers itself through Apple's ServiceManagement API on its first explicit installed-app launch. It starts in the menu bar when you log in; closing Settings keeps enabled extensions running. A later user disablement is respected.
 
-If you edit the draft or change conversations while polishing is in progress, MessageHelper prevents an old suggestion from overwriting the changed draft. Undo also checks that the applied text is still present before restoring the original.
+Shared AI preferences are stored in the MacHelper support folder's `settings.json`; extension enablement in `extensions.json`. Each extension gets a separate preferences directory under `ExtensionSettings`. These files contain configuration, not source text or translations.
 
-## Choosing a GPT model
+### Translation
 
-Open the extension popup and use **GPT model** to choose the model for both translation and polishing. **Desktop default** uses the installed backend’s default; choosing a named model applies only to MessageHelper requests and does not change the desktop app’s global configuration.
+Open **MacHelper → Extensions → Translation**. Choose the target language, then use **Open Accessibility Settings…** to allow **MacHelper** in Privacy & Security. Permission granted to the old Translation app does not grant it to MacHelper.
 
-The dropdown retrieves the current model catalog from the installed Codex backend every time the popup opens. **Refresh models** fetches it again. Model IDs, display names, and ordering come from the backend rather than a hard-coded list. New models can therefore appear without an extension update as long as the backend’s catalog protocol stays compatible. Your selection is saved locally and retained when the catalog refreshes.
+Select text in another app. A small icon appears above/below the selection according to the available screen space. Click it for a nearby translation panel with the actual model name, Copy, and Close. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
 
-If a selected model is retired or otherwise unavailable, MessageHelper keeps the saved selection and reports the problem. It does not silently use a different model. Open the popup and choose an available model or **Desktop default**. Model discovery does not submit any conversation text for inference. While a translation or polishing request is running, wait for it to finish before refreshing the catalog.
+Protected/password fields, images, and apps that do not expose selected text through Accessibility cannot be read automatically. Copy text yourself and use the explicit **Translate Clipboard…** action for those cases. Translation never simulates Copy or changes the clipboard automatically; the result's Copy button requires a click. **Try Demo…** tests the real AI connection with synthetic text without requiring Accessibility.
 
-## Permissions and data
+### Adding extensions developed elsewhere
 
-The extension requests `nativeMessaging` to communicate with the Mac helper and `storage` to save language, tone, and model preferences. Its content scripts run only on the two supported Upwork routes. It does not request access to other websites or Upwork’s messaging API. Message translation and polishing happen only after you click the relevant button. The source text is sent through your authenticated GPT connection for that request; inference requires internet access and uses your account’s available usage.
+Build a `.machextension` bundle implementing the public SDK, then choose **MacHelper → Extensions → Install Extension…**. Its settings appear in the same window after enabling it. Installing a new extension does not require rebuilding MacHelper or installing another Mac application.
 
-## Updates and reinstalling
+External bundles live under `~/Library/Application Support/LocalAIBaseTools/Extensions/`. A changed external executable requires re-enabling, and replacing already-loaded native code requires restarting MacHelper. Native extensions are trusted code inside MacHelper and share its access; this first interface does not sandbox arbitrary third-party code or automatically install downloads.
 
-After helper changes, rerun `./scripts/build-helper.sh` and `python3 scripts/install-helper.py`, then reload the extension in the browser’s extensions page. After extension-only changes, click **Reload** on the extension and refresh the Upwork tab. The stable manifest key keeps its extension ID unchanged. A development build using a different ID must register it explicitly with `python3 scripts/install-helper.py --extension-id YOUR_EXTENSION_ID`.
+See [Extension Development](docs/Extension-Development.md), the [standalone SDK](MacHelper/ExtensionSDK/README.md), and [External Greeting](examples/ExternalGreeting/README.md). The example can be copied to another folder and built using only the public SDK header; it does not depend on this repository's private Swift modules.
+
+### MessageHelper — Upwork
+
+In Edge, use `edge://extensions`; in Chrome, use `chrome://extensions`. Enable Developer mode, choose Load unpacked, and select `Extensions/MessageHelper-Upwork`. Reload an existing installation after source changes, and refresh affected tabs after preserving unsaved drafts.
+
+Supported routes include Upwork messages, proposal conversations, and contract Leave feedback forms. Message Translate shows output below the original. Polish previews English before Apply; Cancel preserves the draft, and Undo restores it while unchanged. Feedback Translate draft is read-only. Ratings and submission controls are untouched. Only the user may send messages or submit feedback.
+
+The popup's AI model list uses the currently selected MacHelper provider. MacHelper default follows shared preferences; a named choice overrides the shared model only for this browser extension. If a provider change makes that override unavailable, select an available model or MacHelper default. Use its safe test page for synthetic Apply/Undo checks.
+
+Native host: `com.localaibasetools.mac_helper`; compatibility alias: `com.messagehelper.gpt`. Both launch the same new host. The stable Upwork extension ID is `fmhfobfddchbeibojepeocgfemkpcklo`. Additional browser clients need explicit registration:
+
+```sh
+python3 scripts/install-helper.py --extension-id ADDITIONAL_32_CHARACTER_EXTENSION_ID
+```
+
+Repeated flags add multiple IDs; existing registrations are preserved, with no wildcard origins.
+
+## Data
+
+Selection alone does not send text for inference. AI requests happen after a translation/polishing action. Source text is treated as data. The ChatGPT client uses isolated answer-only requests with tools disabled; local HTTP providers receive no tool definitions. These tools never send Upwork messages automatically.
+
+The helper does not save source text or results in settings or project logs. AI providers may retain their own diagnostic or service records; an ephemeral ChatGPT thread is not a guarantee that no records exist anywhere. Native extensions must follow the same data-handling rules.
 
 ## Verification
 
 ```sh
 npm ci --ignore-scripts
 npm test
-swift test
-swift build -c release
+swift test --package-path MacHelper
+swift test --package-path Extensions/Translation
+python3 -m unittest discover -s test -p '*_test.py'
+python3 scripts/build-apps.py
 python3 scripts/test-native.py
 python3 scripts/test-native.py --catalog
 python3 scripts/test-native.py --live
-python3 scripts/test-native.py --live --model MODEL_ID_FROM_CATALOG
+python3 scripts/test-extension-plugin.py --host dist/MacHelper.app/Contents/MacOS/MacHelperApp
 ```
 
-The JavaScript regressions use synthetic conversation/editor fixtures with Send-event sentinels. Popup tests use future model names supplied by a mock backend and check discovery on each open, manual refresh, saved selection, and unavailable-selection handling. Requests and translation caches are checked for model isolation. Native smoke tests check framing, connectivity, and invalid request rejection. `--catalog` discovers models without inference. `--live` optionally translates and polishes a synthetic fixture with a fake client name and an `example.invalid` URL; `--model` checks that both operations use the explicitly selected model. The live smoke test checks Chinese translation and preservation of the name, date, amount and URL while polishing. These tests do not send anything on Upwork.
+The optional live native check uses synthetic text only and consumes the configured provider's usage. Add `--model MODEL_ID_FROM_CATALOG` to test an explicit model. Browser tests use synthetic messages/feedback and zero-send/zero-submit sentinels. Swift tests cover the providers, framing, selection lifecycle/geometry, preferences, startup decisions, plugin validation, and real independently compiled native bundles. The external integration check builds outside the repository and runs against isolated extension state; it does not install a test tool into the user's account.
 
-Upwork can change its page structure. If buttons stop appearing after an Upwork update, the extension’s page adapter may need updating. Use the private test page to distinguish a page integration issue from a helper connection issue.
+See [MacHelper Protocol](docs/MacHelper-Protocol.md) for browser and native AI requests.
 
-### Verified installation on this Mac — October 12, 2026
+### Verified on this Mac — November 15, 2026
 
-- MessageHelper 1.1.0 is enabled in Microsoft Edge, with the helper installed and registered for Edge and Chrome.
-- 38 Swift tests and 25 JavaScript regressions pass. Tests cover dynamic catalogs, future model IDs, pagination, selected-model routing, effort compatibility, removed models, and the existing draft safeguards.
-- The installed Model dropdown retrieves all seven models currently listed by the desktop service. Selected models survive catalog refresh and reopening the popup. Synthetic browser translation and polishing confirmed that choosing GPT-6-Luna uses `gpt-6-luna`. Desktop default was restored after testing.
-- Live tests on the installed helper translate synthetic text to Chinese and polish English with the explicitly selected model while preserving a name, date, amount, and URL.
-- The installed browser extension connects to the helper. Real GPT translation, polishing, Apply, and Undo pass in the safe test page.
-- The proposal conversation frame and the main Messages page both display Translate controls and Polish immediately before Send. Live proposal-message translation and polishing preview/Cancel pass; the pre-existing `ddd` draft is preserved.
-- Live Upwork draft insertion was intentionally left to the user; Apply/Undo were tested in the sandbox. No Upwork messages were sent during testing.
-
-### Feedback support verified — October 19, 2026
-
-- MessageHelper 1.2.0 is loaded and enabled in Edge. No native helper update is required.
-- All 36 JavaScript tests pass, including 10 feedback regressions covering separate public/private drafts, character limits, disabled/hidden fields, stale results, safe recovery, and zero submission events.
-- Real GPT polishing, Apply, Undo, and read-only draft translation pass with synthetic feedback in the extension’s safe test page.
-- The live Leave feedback form displays both controls for the public review and the dynamically opened private note. Its original tab, draft, rating, and ending reason were preserved; no feedback or messages were submitted.
-- An already-open feedback tab must be refreshed to load the new content script. Preserve unsaved text and form selections before refreshing.
+- 83 MacHelper Swift tests, 28 Translation Swift tests, 37 browser tests, and 12 installer tests pass (160 total).
+- The signed MacHelper 3.0.0 app is installed with Translation 2.1.0 inside it. The standalone Translation app was stopped and moved recoverably to Trash; its language preference was migrated.
+- The Extensions, AI Connection, and General settings render correctly. Closing the settings window keeps MacHelper running, and reopening returns to the central settings interface.
+- The system reports launch at login enabled. Startup-policy checks pass; the Mac was not rebooted during testing.
+- MacHelper's Accessibility access is enabled. The user manually confirmed floating selection translation and Esc dismissal in Edge through the unified app.
+- The browser companion reconnects to helper 3.0.0 and dynamically discovers eight ChatGPT models. Shared preferences remain ChatGPT with Automatic model selection.
+- Live synthetic translation and polishing pass with an explicit model, preserving the fixture's name, date, amount, and URL. No Upwork messages or feedback were sent.
+- An external example was copied and built outside the repository using only the public SDK header. The real MacHelper registry discovered it, started it, and loaded its settings with isolated test preferences, without rebuilding MacHelper or installing another app.
 
 ## License
 

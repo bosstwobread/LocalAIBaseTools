@@ -1,8 +1,8 @@
 {
-  "name": "message-helper",
+  "name": "local-ai-base-tools",
   "version": "1.2.0",
   "private": true,
-  "description": "Upwork message translation and English polishing through a local native messaging helper.",
+  "description": "Independent text tools backed by the shared macOS MacHelper.",
   "scripts": {
     "test": "node --test test/*.test.cjs",
     "test:native": "python3 scripts/test-native.py",

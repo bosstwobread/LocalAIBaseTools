@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const {webcrypto} = require('node:crypto');
 
 const extensionID = 'fmhfobfddchbeibojepeocgfemkpcklo';
-const source = fs.readFileSync(path.join(__dirname, '../extension/background.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../Extensions/MessageHelper-Upwork/background.js'), 'utf8');
 
 function background() {
   let requestListener;
@@ -93,7 +93,7 @@ test('concurrent answers match their request IDs and ignore unrelated responses'
   assert.equal(first.keepAlive, true);
   assert.equal(second.keepAlive, true);
   assert.equal(bg.hosts.length, 1);
-  assert.equal(bg.hosts[0], 'com.messagehelper.gpt');
+  assert.equal(bg.hosts[0], 'com.localaibasetools.mac_helper');
   bg.reply({id: 'unknown', ok: true, text: 'ignore'});
   bg.reply({id: bg.sent[1].id, ok: true, text: '第二条'});
   bg.reply({id: bg.sent[0].id, ok: true, text: 'First result'});
@@ -173,6 +173,15 @@ test('malformed model catalog does not become selectable models', async () => {
   assert.match(response.error, /catalog|invalid|model/i);
 });
 
+test('an empty local provider catalog remains a valid discovery response', async () => {
+  const bg = background();
+  const discovery = bg.send(request({action: 'listModels', text: ''}));
+  bg.reply({id: bg.sent[0].id, ok: true, models: []});
+  const response = await discovery.promise;
+  assert.equal(response.ok, true);
+  assert.equal(response.models.length, 0);
+});
+
 test('catalog size, model metadata controls and duplicate identities are bounded before forwarding', async () => {
   const bg = background();
   const entry = {model: 'future-bounded-model', displayName: 'Future model', isDefault: false, supportedReasoningEfforts: []};
@@ -180,7 +189,6 @@ test('catalog size, model metadata controls and duplicate identities are bounded
     [{...entry, displayName: 'x'.repeat(513)}],
     [{...entry, model: 'future\u202emodel'}],
     [entry, {...entry}],
-    [],
     Array.from({length: 257}, (_, n) => ({...entry, model: `future-${n}`})),
     Array.from({length: 256}, (_, n) => ({...entry, model: `future-${n}`, displayName: 'x'.repeat(512),
       supportedReasoningEfforts: Array.from({length: 16}, (_, effort) => `effort-${effort}-`.padEnd(64, 'x'))}))

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "identifier": "com.localaibasetools.example.external-greeting",
+  "displayName": "External Greeting",
+  "version": "1.0.0",
+  "summary": "A small independently built extension with its own settings inside MacHelper.",
+  "entryPoint": "Contents/MacOS/ExternalGreetingExtension"
+}

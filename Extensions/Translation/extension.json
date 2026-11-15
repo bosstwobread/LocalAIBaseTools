@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "identifier": "com.localaibasetools.translation",
+  "displayName": "Translation",
+  "version": "2.1.0",
+  "summary": "Translate selected text across Mac apps through your shared local AI connection.",
+  "entryPoint": "Contents/MacOS/libTranslation.dylib"
+}

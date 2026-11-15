@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
 
-const extension = path.join(__dirname, '../extension');
+const extension = path.join(__dirname, '../Extensions/MessageHelper-Upwork');
 const scripts = ['shared.js', 'popup.js'].map(file => fs.readFileSync(path.join(extension, file), 'utf8'));
 const markup = fs.readFileSync(path.join(extension, 'popup.html'), 'utf8');
 const tick = async () => { for (let n = 0; n < 3; n++) await new Promise(resolve => setImmediate(resolve)); };
@@ -51,7 +51,7 @@ test('model options and labels come from the current desktop catalog and refresh
   assert.equal(first.document.querySelector('#model').value, stored.model);
   assert.match(first.document.querySelector('#model').textContent, /Future desktop name A/);
   assert.match(first.document.querySelector('#model').textContent, /Future desktop name B/);
-  assert.match(first.document.querySelector('#model option[value=""]').textContent, /desktop default/i);
+  assert.match(first.document.querySelector('#model option[value=""]').textContent, /MacHelper default/i);
   catalog = {ok: true, models: [model('unknown-future-C', 'New future desktop name C'), model('unknown-future-B', 'Renamed desktop B', true)], defaultModel: 'unknown-future-B'};
   const second = popup(t, stored, () => catalog); await tick();
   assert.deepEqual(second.identities(), ['', 'unknown-future-C', 'unknown-future-B']);

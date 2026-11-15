@@ -80,14 +80,14 @@ class NativeClient:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", type=Path, default=ROOT / ".build/release/message-helper-host")
+    parser.add_argument("--host", type=Path, default=ROOT / "dist/mac-helper-host")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--live", action="store_true", help="Translate/polish synthetic fixtures using existing ChatGPT login.")
     mode.add_argument("--catalog", action="store_true", help="Discover the installed backend's current model catalog without inference.")
     parser.add_argument("--model", default="", help="Explicit model ID for --live; empty uses the desktop default.")
     args = parser.parse_args()
     if not args.host.is_file():
-        parser.error("Build the release host first with: swift build -c release")
+        parser.error("Build the release host first with: scripts/build-helper.sh")
 
     client = NativeClient(args.host)
     try:
