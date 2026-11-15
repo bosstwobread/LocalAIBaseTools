@@ -195,7 +195,7 @@ test('injected controls have button type and manifest access is limited to inten
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(extension, 'manifest.json')));
   assert.deepEqual(manifest.permissions.slice().sort(), ['nativeMessaging', 'storage']);
-  assert.deepEqual(manifest.content_scripts[0].matches, ['https://www.upwork.com/ab/messages/*', 'https://www.upwork.com/nx/proposals/*']);
+  assert.deepEqual(manifest.content_scripts[0].matches, ['https://www.upwork.com/ab/messages/*', 'https://www.upwork.com/nx/proposals/*', 'https://www.upwork.com/ab/feedbacks/f/contract/*']);
   assert.equal(manifest.host_permissions, undefined);
   assertNoDelivery(f);
 });

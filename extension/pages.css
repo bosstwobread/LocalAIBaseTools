@@ -33,3 +33,4 @@ button:focus-visible, select:focus-visible, [contenteditable]:focus-visible { ou
 .mh-sandbox .mh-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
 .mh-sandbox .mh-preview { margin: 14px 0 0; }
 .mh-sandbox .mh-note { margin-bottom: 0; }
+.mh-sandbox textarea { box-sizing: border-box; width: 100%; min-height: 100px; padding: 12px; border: 1px solid #52675a; border-radius: 8px; background: transparent; color: inherit; font: inherit; line-height: 1.5; resize: vertical; }

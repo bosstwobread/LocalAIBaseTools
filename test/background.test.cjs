@@ -43,6 +43,9 @@ test('native helper requests are restricted to this extension and supported Upwo
   for (const sender of [
     {id: extensionID, url: 'https://www.upwork.com.evil.example/ab/messages/rooms/test'},
     {id: extensionID, url: 'https://www.upwork.com/nx/search/jobs/'},
+    {id: extensionID, url: 'https://www.upwork.com/ab/feedbacks/'},
+    {id: extensionID, url: 'https://www.upwork.com/ab/feedbacks/f/contract/test/unsupported'},
+    {id: extensionID, url: 'https://www.upwork.com.evil.example/ab/feedbacks/f/contract/test'},
     {id: extensionID, url: 'http://www.upwork.com/ab/messages/rooms/test'},
     {id: 'another-extension', url: 'https://www.upwork.com/ab/messages/rooms/test'},
     {id: extensionID, url: 'chrome-extension://another-extension/popup.html'}
@@ -55,6 +58,18 @@ test('native helper requests are restricted to this extension and supported Upwo
   }
   assert.equal(bg.sent.length, 0);
   assert.equal(bg.hosts.length, 0);
+});
+
+test('feedback drafts on the supported contract form can reach the helper without any submit action', async () => {
+  const bg = background();
+  for (const action of ['polish', 'translate']) {
+    const operation = bg.send(request({action}),
+      {id: extensionID, url: 'https://www.upwork.com/ab/feedbacks/f/contract/synthetic'});
+    assert.equal(operation.keepAlive, true);
+    assert.equal(bg.sent.at(-1).action, action);
+    bg.reply({id: bg.sent.at(-1).id, ok: true, text: 'Synthetic feedback result.'});
+    assert.equal((await operation.promise).ok, true);
+  }
 });
 
 test('unsupported actions and invalid inputs never reach the helper', async () => {

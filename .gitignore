@@ -6,3 +6,7 @@ work/
 dist/
 *.log
 __pycache__/
+.env
+.env.*
+!.env.example
+.artifacts/

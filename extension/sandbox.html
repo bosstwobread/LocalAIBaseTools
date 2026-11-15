@@ -5,7 +5,7 @@
   <main>
     <h1>MessageHelper test page</h1>
     <p class="mh-subtitle">Try the full translation and polishing flow with sample messages.</p>
-    <div class="mh-banner">This page belongs to the extension. It contains sample text only. Send is disabled and no Upwork conversation is connected.</div>
+    <div class="mh-banner">This page belongs to the extension. It contains sample text only. Sending and feedback submission are disabled; no Upwork conversation or contract is connected.</div>
     <div class="mh-toolbar"><button id="connection" type="button">Test helper connection</button><button id="settings" class="mh-secondary" type="button">Settings</button><button id="reset" class="mh-secondary" type="button">Reset sample draft</button></div>
     <p id="status" role="status" aria-live="polite"></p>
     <h2>Sample client messages</h2>
@@ -17,6 +17,15 @@
       <div class="up-d-composer-actions"><div class="composer-actions-section"><div class="send-message-section"><button data-test="send-message-button" data-cy="send-message" data-mh-send aria-label="Send message" type="button" disabled>Send disabled</button></div></div></div>
     </div>
     <p class="mh-note">Try Polish → Apply → Undo. To test draft protection, click Polish, change the sample draft before applying, then click Apply.</p>
+    <h2>Sample contract feedback</h2>
+    <section data-mh-feedback>
+      <label for="sample-feedback">Public review</label>
+      <textarea id="sample-feedback" rows="3" maxlength="5000">The client give clear instructions and respond quickly. I enjoyed work together.</textarea>
+      <label for="sample-private-note">Private note</label>
+      <textarea id="sample-private-note" rows="3" maxlength="5000">Thank you for the opportunity. I hope we can works together again.</textarea>
+      <button type="button" disabled>Submit feedback disabled</button>
+    </section>
+    <p class="mh-note">Each feedback field has its own Polish and Translate draft controls. Translation is a read-only preview. Applying or undoing one field never changes the other.</p>
   </main>
   <script src="shared.js"></script><script src="content.js"></script><script src="sandbox.js"></script>
 </body>

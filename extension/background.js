@@ -11,7 +11,8 @@ function authorized(sender) {
     const url = new URL(sender.url);
     if (url.protocol === 'chrome-extension:' && url.hostname === chrome.runtime.id) return true;
     return url.protocol === 'https:' && url.hostname === 'www.upwork.com' &&
-      (url.pathname.startsWith('/ab/messages/') || url.pathname.startsWith('/nx/proposals/'));
+      (url.pathname.startsWith('/ab/messages/') || url.pathname.startsWith('/nx/proposals/') ||
+        /^\/ab\/feedbacks\/f\/contract\/[^/]+\/?$/.test(url.pathname));
   } catch { return false; }
 }
 

@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "name": "Debug message-helper-host",
+            "target": "message-helper-host",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug message-helper-host"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "name": "Release message-helper-host",
+            "target": "message-helper-host",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release message-helper-host"
+        }
+    ]
+}

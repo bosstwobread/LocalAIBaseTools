@@ -1,12 +1,16 @@
-# MessageHelper
+# LocalAIBaseTools
+
+LocalAIBaseTools currently contains **MessageHelper**, a browser extension and macOS helper for using your existing desktop AI connection to translate and polish text on Upwork.
 
 MessageHelper adds a **Translate** button beside Upwork conversation messages and a **Polish** button beside the composer’s Send button. Translation appears below the original message. Polishing shows a preview; **Apply** inserts the suggestion into the draft, **Cancel** keeps the draft, and **Undo** restores the previous draft if it has not been edited again.
 
 MessageHelper never clicks Send, submits a message, or sends an Upwork message automatically. You review the draft and use Upwork’s Send control yourself.
 
+On Upwork’s **Leave feedback** contract form, each visible public review or private-note field gets **Polish** and **Translate draft** controls. Polishing previews natural English before **Apply**; **Undo** restores the original while it is still unchanged. Draft translation is for reference and never replaces the field. Ratings, contract-ending reasons, and Submit feedback are untouched. MessageHelper never submits feedback. Results exceeding the field’s character limit cannot be applied.
+
 ## Components
 
-- `extension/`: Chrome/Edge Manifest V3 extension for `https://www.upwork.com/ab/messages/*` and `https://www.upwork.com/nx/proposals/*`.
+- `extension/`: Chrome/Edge Manifest V3 extension for `https://www.upwork.com/ab/messages/*`, `https://www.upwork.com/nx/proposals/*`, and `https://www.upwork.com/ab/feedbacks/f/contract/*`.
 - `Sources/MessageHelperHost/`: macOS native messaging host, named `com.messagehelper.gpt`.
 - `Sources/MessageHelperCore/`: GPT transport adapted from JobInterviewRealTime. This copy is independent of that project.
 
@@ -84,3 +88,15 @@ Upwork can change its page structure. If buttons stop appearing after an Upwork 
 - The installed browser extension connects to the helper. Real GPT translation, polishing, Apply, and Undo pass in the safe test page.
 - The proposal conversation frame and the main Messages page both display Translate controls and Polish immediately before Send. Live proposal-message translation and polishing preview/Cancel pass; the pre-existing `ddd` draft is preserved.
 - Live Upwork draft insertion was intentionally left to the user; Apply/Undo were tested in the sandbox. No Upwork messages were sent during testing.
+
+### Feedback support verified — October 19, 2026
+
+- MessageHelper 1.2.0 is loaded and enabled in Edge. No native helper update is required.
+- All 36 JavaScript tests pass, including 10 feedback regressions covering separate public/private drafts, character limits, disabled/hidden fields, stale results, safe recovery, and zero submission events.
+- Real GPT polishing, Apply, Undo, and read-only draft translation pass with synthetic feedback in the extension’s safe test page.
+- The live Leave feedback form displays both controls for the public review and the dynamically opened private note. Its original tab, draft, rating, and ending reason were preserved; no feedback or messages were submitted.
+- An already-open feedback tab must be refreshed to load the new content script. Preserve unsaved text and form selections before refreshing.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

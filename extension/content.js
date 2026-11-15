@@ -34,8 +34,20 @@
   }
   function visible(node) {
     if (!node.isConnected || node.closest('[hidden], [aria-hidden="true"]')) return false;
-    const style = getComputedStyle(node);
-    return style.display !== 'none' && style.visibility !== 'hidden';
+    for (let current = node; current; current = current.parentElement) {
+      const style = getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+  }
+  function editable(editor) {
+    return visible(editor) && !editor.matches(':disabled') && !editor.readOnly;
+  }
+  function feedbackPage() {
+    return /^\/ab\/feedbacks\/f\/contract\/[^/]+\/?$/.test(location.pathname);
+  }
+  function feedbackEditor(editor) {
+    return feedbackPage() || Boolean(editor.closest('[data-mh-feedback]'));
   }
   function sourceText(node) {
     const clone = node.cloneNode(true);
@@ -63,7 +75,7 @@
       revision: state.revision, key: conversationKey(), editor: state.editor};
   }
   function unchanged(state, captured) {
-    return state.editor === captured.editor && state.editor.isConnected && visible(state.editor) &&
+    return state.editor === captured.editor && editable(state.editor) && (!state.feedback || feedbackEditor(state.editor)) &&
       captured.key === conversationKey() && state.revision === captured.revision &&
       readDraft(state.editor) === captured.text && state.editor.innerHTML === captured.html;
   }
@@ -138,13 +150,19 @@
   }
   function normalized(text) { return text.replace(/\r\n/g, '\n').replace(/\n+$/g, ''); }
   function writeDraft(editor, text) {
-    editor.focus({preventScroll: true});
+    if (!editable(editor)) throw new Error('This draft is no longer editable.');
     if (editor instanceof HTMLTextAreaElement || editor instanceof HTMLInputElement) {
+      if (editor.maxLength >= 0 && text.length > editor.maxLength) {
+        throw new Error(`The result exceeds this field’s ${editor.maxLength.toLocaleString()}-character limit. Shorten the preview before copying it manually, or try Polish with the Concise tone.`);
+      }
+      editor.focus({preventScroll: true});
       const prototype = editor instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(prototype, 'value').set.call(editor, text);
       editor.dispatchEvent(new Event('input', {bubbles: true}));
+      if (readDraft(editor) !== text) throw new Error('The editor could not apply the result. Copy the preview into your draft manually.');
       return;
     }
+    editor.focus({preventScroll: true});
     const range = document.createRange();
     range.selectNodeContents(editor);
     const selection = window.getSelection();
@@ -194,7 +212,7 @@
           } catch (error) { status.textContent = error.message; status.classList.add('mh-error'); }
         });
         actions.replaceChildren(undo, button('mh-button mh-dismiss', 'Dismiss', () => state.preview.replaceChildren()));
-        status.textContent = 'Applied to your draft. Review it in the editor before sending.';
+        status.textContent = state.feedback ? 'Applied to your feedback draft. Review it before submitting.' : 'Applied to your draft. Review it in the editor before sending.';
         status.classList.remove('mh-error');
       } catch (error) {
         status.textContent = error.message;
@@ -208,12 +226,17 @@
               recover.disabled = true;
               return;
             }
-            state.editor.focus({preventScroll: true});
-            if (!document.execCommand('undo') || readDraft(state.editor) !== source.text) {
-              status.textContent = 'Copy the original draft below to restore it manually.';
-              return;
-            }
-            state.preview.replaceChildren();
+            try {
+              if (state.editor instanceof HTMLTextAreaElement || state.editor instanceof HTMLInputElement) {
+                writeDraft(state.editor, source.text);
+              } else {
+                state.editor.focus({preventScroll: true});
+                if (!document.execCommand('undo') || readDraft(state.editor) !== source.text) {
+                  throw new Error('Copy the original draft below to restore it manually.');
+                }
+              }
+              state.preview.replaceChildren();
+            } catch (error) { status.textContent = error.message; }
           });
           actions.replaceChildren(recover, cancel);
         }
@@ -229,35 +252,72 @@
   }
   function richFormattingFromHTML(html) { return /<(strong|b|em|i|u|s|a|ul|ol|blockquote|code|img)(\s|>)/i.test(html); }
 
-  function addComposer(editor) {
-    if (!visible(editor)) return;
-    const composer = editor.closest('.up-d-composer, [data-mh-composer]');
+  function placeComposer(state, send) {
+    if (state.feedback) {
+      if (state.editor.nextElementSibling !== state.toolbar) state.editor.after(state.toolbar);
+      if (state.toolbar.nextElementSibling !== state.preview) state.toolbar.after(state.preview);
+    } else {
+      if (!state.trigger.isConnected || state.trigger.nextElementSibling !== send) send.before(state.trigger);
+      if (!state.preview.isConnected) state.composer.append(state.preview);
+    }
+  }
+  function busy(state, active) {
+    state.trigger.disabled = active;
+    if (state.translateTrigger) state.translateTrigger.disabled = active;
+  }
+  async function translateFeedbackDraft(state) {
+    const captured = snapshot(state);
+    const generation = ++state.generation;
+    busy(state, true);
+    try {
+      MessageHelper.validateText(captured.text);
+      showStatus(state.preview, 'Translating your draft…');
+      const preferences = await MessageHelper.settings();
+      const response = await MessageHelper.request('translate', captured.text, preferences);
+      if (generation !== state.generation || !state.editor.isConnected || captured.key !== conversationKey()) return;
+      if (!unchanged(state, captured)) {
+        showStatus(state.preview, 'Your draft changed. Click Translate draft again for the current text.', true);
+        return;
+      }
+      const nodes = [element('div', 'mh-result-label', 'Draft translation · ' + MessageHelper.languages[preferences.targetLanguage]),
+        element('div', 'mh-result', response.text)];
+      if (response.model) nodes.push(element('div', 'mh-model-label', 'Model: ' + response.model));
+      nodes.push(element('div', 'mh-status', 'For reference only. Your feedback draft has not been changed.'),
+        button('mh-button mh-dismiss', 'Dismiss', () => state.preview.replaceChildren()));
+      state.preview.replaceChildren(...nodes);
+    } catch (error) {
+      if (state.editor.isConnected && generation === state.generation) showStatus(state.preview, error.message, true);
+    } finally { if (generation === state.generation) busy(state, false); }
+  }
+
+  function addComposer(editor, feedback = false) {
+    if (!editable(editor)) return;
+    const composer = feedback ? editor.parentElement : editor.closest('.up-d-composer, [data-mh-composer]');
     if (!composer) return;
-    const send = composer.querySelector(SEND_SELECTOR);
-    if (!send) return;
+    const send = feedback ? null : composer.querySelector(SEND_SELECTOR);
+    if (!feedback && !send) return;
     let state = composers.get(editor);
     if (state) {
       composerStates.add(state);
-      if (!state.trigger.isConnected || state.trigger.nextElementSibling !== send) send.before(state.trigger);
-      if (!state.preview.isConnected) composer.append(state.preview);
+      placeComposer(state, send);
       if (state.key !== conversationKey()) {
         state.key = conversationKey();
         state.generation++;
         state.preview.replaceChildren();
-        state.trigger.disabled = false;
+        busy(state, false);
         state.trigger.textContent = 'Polish';
       }
       return;
     }
     const preview = element('div', 'mh-preview');
     preview.setAttribute('aria-live', 'polite');
-    state = {editor, composer, preview, revision: 0, generation: 0, key: conversationKey()};
+    state = {editor, composer, preview, feedback, revision: 0, generation: 0, key: conversationKey()};
     editor.addEventListener('input', () => { state.revision++; });
     const trigger = button('mh-button mh-polish', 'Polish', async () => {
       // Capture before awaiting settings or AI, so a later edit cannot be silently overwritten.
       const captured = snapshot(state);
       const generation = ++state.generation;
-      trigger.disabled = true;
+      busy(state, true);
       trigger.textContent = 'Polishing…';
       try {
         MessageHelper.validateText(captured.text);
@@ -269,12 +329,18 @@
       } catch (error) {
         if (editor.isConnected && generation === state.generation) showStatus(preview, error.message, true);
       } finally {
-        if (generation === state.generation) { trigger.disabled = false; trigger.textContent = 'Polish'; }
+        if (generation === state.generation) { busy(state, false); trigger.textContent = 'Polish'; }
       }
     });
     state.trigger = trigger;
-    send.before(trigger);
-    composer.append(preview);
+    if (feedback) {
+      state.toolbar = element('div', 'mh-feedback-tools');
+      state.toolbar.setAttribute('role', 'group');
+      state.toolbar.setAttribute('aria-label', 'MessageHelper feedback tools');
+      state.translateTrigger = button('mh-button mh-feedback-translate', 'Translate draft', () => translateFeedbackDraft(state));
+      state.toolbar.append(trigger, state.translateTrigger);
+    }
+    placeComposer(state, send);
     composers.set(editor, state);
     composerStates.add(state);
   }
@@ -284,14 +350,30 @@
       if (!state.node.isConnected) { state.tools.remove(); state.generation++; messageStates.delete(state); }
     }
     for (const state of composerStates) {
-      if (!state.editor.isConnected) { state.preview.remove(); state.trigger.remove(); state.generation++; composerStates.delete(state); }
+      if (!state.editor.isConnected) {
+        state.preview.remove(); state.toolbar?.remove(); state.trigger.remove();
+        state.generation++; composerStates.delete(state);
+      } else if (state.feedback) {
+        const active = feedbackEditor(state.editor) && editable(state.editor);
+        if (!active && !state.toolbar.hidden) {
+          state.generation++;
+          busy(state, false);
+          state.trigger.textContent = 'Polish';
+          state.preview.replaceChildren();
+        }
+        state.toolbar.hidden = !active;
+        state.preview.hidden = !active;
+      }
     }
     document.querySelectorAll(MESSAGE_SELECTOR).forEach(node => {
       // The primary adapter has priority when old fallback markup appears nested inside it.
       if (node.parentElement?.closest(MESSAGE_SELECTOR)) return;
       addMessage(node);
     });
-    document.querySelectorAll(EDITOR_SELECTOR).forEach(addComposer);
+    document.querySelectorAll(EDITOR_SELECTOR).forEach(editor => addComposer(editor));
+    document.querySelectorAll(feedbackPage() ? 'textarea' : '[data-mh-feedback] textarea').forEach(editor => {
+      if (!editor.closest('[data-messagehelper]')) addComposer(editor, true);
+    });
   }
   function schedule() {
     if (scanTimer !== null) return;
@@ -304,7 +386,7 @@
     })) schedule();
   });
   observer.observe(document.documentElement, {childList: true, subtree: true, characterData: true,
-    attributes: true, attributeFilter: ['contenteditable', 'data-room-id', 'hidden', 'aria-hidden', 'class']});
+    attributes: true, attributeFilter: ['contenteditable', 'data-room-id', 'hidden', 'aria-hidden', 'class', 'style', 'disabled', 'readonly']});
   window.addEventListener('popstate', schedule);
   window.addEventListener('hashchange', schedule);
   globalThis.MessageHelperContent = Object.freeze({scan, readDraft, conversationKey});

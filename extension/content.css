@@ -5,6 +5,11 @@ button.mh-button:hover { background: #294b36; border-color: #90c69f; }
 button.mh-button:focus-visible { outline: 2px solid #95dfaa; outline-offset: 2px; }
 button.mh-button:disabled { opacity: .55; cursor: default; }
 button.mh-polish { margin-right: 10px; }
+.mh-feedback-tools { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.mh-feedback-tools[hidden], .mh-preview[hidden] { display: none !important; }
+.mh-feedback-tools button.mh-polish { margin-right: 0; }
+.mh-feedback-tools + .mh-preview { margin: 8px 0 12px; }
+.mh-feedback-tools + .mh-preview .mh-dismiss { margin-top: 10px; }
 .mh-translation:empty, .mh-preview:empty { display: none; }
 .mh-translation[hidden] { display: none !important; }
 .mh-translation, .mh-preview { background: #1b2720; border: 1px solid #455e4b; border-radius: 8px; padding: 12px 14px; margin-top: 8px; max-width: 100%; }
