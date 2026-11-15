@@ -5,6 +5,7 @@ import plistlib
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--signing-identity", help="Signing identity; otherwise prefer an existing Apple identity, falling back to ad hoc.")
     args = parser.parse_args()
+    subprocess.run([sys.executable, str(ROOT / "scripts/build-app-icon.py")], check=True)
     identity = signing_identity(args.signing_identity)
     helper_bin = build(ROOT / "MacHelper")
     dist = ROOT / "dist"
@@ -61,7 +63,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "4.1.0", "CFBundleVersion": "410",
+        "CFBundleShortVersionString": "4.1.0", "CFBundleVersion": "411", "CFBundleIconFile": "AppIcon",
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",
         "NSHighResolutionCapable": True, "LSUIElement": True,
         "NSHumanReadableCopyright": "© 2026 LocalAIBaseTools contributors. MIT License.",
@@ -73,6 +75,7 @@ def main():
     sign(worker, identity)
     resources = contents / "Resources"
     (resources / "SourceCatalog").mkdir(parents=True)
+    shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.icns", resources / "AppIcon.icns")
     shutil.copy2(ROOT / "catalog/extensions.json", resources / "SourceCatalog/extensions.json")
     shutil.copytree(ROOT / "Extensions/Translation", resources / "SourceSeeds/Translation",
                     ignore=shutil.ignore_patterns(".*", "__pycache__"))

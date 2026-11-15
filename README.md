@@ -8,6 +8,7 @@
 LocalAIBaseTools/
 ├── MacHelper/
 │   ├── App/                      Menu-bar app, AI/Extensions/General settings, login startup
+│   ├── Assets/                   App icon artwork and native macOS icon resource
 │   ├── Runtime/                  AI providers, preferences, framing, source validation/download/watchers
 │   ├── Capabilities/             Shared selection detection, floating panels, and AI client
 │   ├── ScriptWorker/             Independent JavaScriptCore process for each source generation
