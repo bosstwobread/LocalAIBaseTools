@@ -12,6 +12,7 @@ enum SourceExtensionVerification {
         var errorDescription: String? { message }
     }
 
+    @MainActor
     private final class AIProbe {
         var calls = 0
         var latest: [String: Any] = [:]
@@ -19,6 +20,31 @@ enum SourceExtensionVerification {
         var blocked = false
         var releaseBlocked = false
         var cancellations = 0
+        var streamNext = false
+        var streaming = false
+        var releaseStream = false
+        var failStreamNext = false
+        var lateProgress: (@MainActor ([String: Any]) -> Void)?
+
+        func transformStreaming(_ payload: [String: Any], onProgress: @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any] {
+            let result = try await transform(payload)
+            guard streamNext else { return result }
+            streamNext = false
+            let failAfterProgress = failStreamNext; failStreamNext = false
+            streaming = true
+            defer { streaming = false }
+            let text = result["text"] as? String ?? ""
+            lateProgress = onProgress
+            onProgress(["text": "AI:", "delta": "AI:", "model": "fixture-model"])
+            while !releaseStream { try await Task.sleep(nanoseconds: 20_000_000) }
+            try Task.checkCancellation()
+            if failAfterProgress { throw Failure(message: "Synthetic streaming failure after partial text.") }
+            let middle = String(text.prefix(max(3, text.count / 2)))
+            onProgress(["text": middle, "delta": String(middle.dropFirst(3)), "model": "fixture-model"])
+            try await Task.sleep(nanoseconds: 40_000_000)
+            onProgress(["text": text, "delta": String(text.dropFirst(middle.count)), "model": "fixture-model"])
+            return result
+        }
 
         func transform(_ payload: [String: Any]) async throws -> [String: Any] {
             calls += 1
@@ -89,7 +115,10 @@ enum SourceExtensionVerification {
                 let transform: (([String: Any]) async throws -> [String: Any])? = live ? nil : { payload in try await probe.transform(payload) }
                 let manager = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
                     bundledCatalogURL: catalogURL, stateDirectory: state, sourceDirectory: sources,
-                    headless: true, testTransform: transform)
+                    headless: true, testTransform: transform,
+                    testStreamingTransform: live ? nil : { payload, onProgress in
+                        try await probe.transformStreaming(payload, onProgress: onProgress)
+                    })
                 managers.append(manager)
                 return manager
             }
@@ -127,6 +156,56 @@ enum SourceExtensionVerification {
                       "The actual Translation source did not receive its text or default settings.")
             note("actual Translation JavaScript invokes the explicit AI bridge and returns model metadata")
 
+            var progress: [String] = []
+            var streamFinished = false
+            probe.streamNext = true; probe.releaseStream = false
+            let streamed = Task {
+                defer { streamFinished = true }
+                return try await manager.performCommand(for: id, text: sample) { update in
+                    progress.append(update.text)
+                }
+            }
+            try await eventually("Translation did not forward partial text while AI was still running.") { probe.streaming && !progress.isEmpty }
+            try check(!streamFinished && progress == ["AI:"], "Translation buffered progress until completion or reordered its first chunk.")
+            probe.releaseStream = true
+            let streamedResult = try await streamed.value
+            try check(streamedResult.text == "AI:" + sample && progress.count == 3 && progress.last == streamedResult.text &&
+                      progress[1].hasPrefix(progress[0]) && progress[2].hasPrefix(progress[1]),
+                      "Partial results arrived out of order or failed to reconcile with the final result.")
+            note("partial translations arrive before AI completion, in order, and reconcile with the final answer")
+
+            probe.streamNext = true; probe.releaseStream = false; probe.failStreamNext = true
+            var failureProgress: [String] = []
+            let failedStream = Task { () -> Bool in
+                do { _ = try await manager.performCommand(for: id, text: sample) { failureProgress.append($0.text) }; return false }
+                catch { return true }
+            }
+            try await eventually("The streaming failure fixture did not deliver partial text.") { !failureProgress.isEmpty }
+            probe.releaseStream = true
+            try check(await failedStream.value && failureProgress == ["AI:"], "A failed partial stream was reported as a completed answer.")
+            note("an AI failure after partial text remains a failure instead of completing with an incomplete answer")
+
+            probe.streamNext = true; probe.releaseStream = false
+            var cancelledProgress: [String] = []
+            let streamingPID = try remember(manager.workerPID(for: id))
+            let cancelledStream = Task { () -> Bool in
+                do { _ = try await manager.performCommand(for: id, text: sample) { cancelledProgress.append($0.text) }; return false }
+                catch { return true }
+            }
+            try await eventually("The streaming cancellation fixture did not deliver partial text.") { !cancelledProgress.isEmpty }
+            let lateProgress = probe.lateProgress
+            cancelledStream.cancel()
+            try check(await cancelledStream.value, "Cancelling a partially translated message returned a completed answer.")
+            try await eventually("Streaming cancellation did not reap its worker.") { !processExists(streamingPID) }
+            probe.releaseStream = true
+            lateProgress?(["text": "STALE STREAM MUST STAY HIDDEN", "delta": "STALE", "model": "fixture-model"])
+            try await Task.sleep(nanoseconds: 80_000_000)
+            try check(cancelledProgress == ["AI:"], "Late progress from a cancelled translation reached its display callback.")
+            try check(try await manager.performCommand(for: id, text: sample).text == "AI:" + sample,
+                      "Translation did not recover after cancelling a partial stream.")
+            _ = try remember(manager.workerPID(for: id))
+            note("cancelling a partial stream rejects late updates, stops its worker, and permits a fresh translation")
+
             let mainURL = source.appendingPathComponent(snapshot.manifest.entryPoint)
             let originalMain = try String(contentsOf: mainURL, encoding: .utf8)
             let outputNeedle = "text: response.text"
@@ -157,10 +236,36 @@ enum SourceExtensionVerification {
             try check((probe.latest["guidance"] as? String)?.contains(markerText) == true, "The new prompt did not reach the AI capability.")
             note("saving nested prompt resources updates the next AI request")
 
+            probe.streamNext = true; probe.releaseStream = false
+            var reloadedStreamProgress: [String] = []
+            let streamBeforeReloadPID = try remember(manager.workerPID(for: id))
+            let countBeforeStreamingReload = try info(manager).reloadCount
+            let replacedStream = Task { () -> Bool in
+                do { _ = try await manager.performCommand(for: id, text: sample) { reloadedStreamProgress.append($0.text) }; return false }
+                catch { return true }
+            }
+            try await eventually("The reload-during-stream fixture did not deliver partial text.") { !reloadedStreamProgress.isEmpty }
+            let oldStreamEmitter = probe.lateProgress
+            let runningPrompt = try String(contentsOf: promptURL, encoding: .utf8)
+            try (runningPrompt + "\nA resource saved while a translation is streaming.\n").write(to: promptURL, atomically: true, encoding: .utf8)
+            try await eventually("Editing a running stream did not replace its source generation.") {
+                ((try? info(manager).reloadCount) ?? 0) > countBeforeStreamingReload && manager.workerPID(for: id) != streamBeforeReloadPID
+            }
+            try check(await replacedStream.value, "A replaced stream incorrectly completed its old command.")
+            try await eventually("Reloading a running stream did not reap its old worker.") { !processExists(streamBeforeReloadPID) }
+            oldStreamEmitter?(["text": "STALE RELOADED STREAM", "delta": "STALE", "model": "fixture-model"])
+            probe.releaseStream = true
+            try await Task.sleep(nanoseconds: 80_000_000)
+            try check(reloadedStreamProgress == ["AI:"], "A replaced source generation delivered stale progress.")
+            let promptPIDAfterStreamingReload = try remember(manager.workerPID(for: id))
+            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + sample,
+                      "The new source generation did not work after replacing a streaming operation.")
+            note("saving source during a partial stream cancels its old generation and suppresses late progress")
+
             let countBeforeSyntaxError = try info(manager).reloadCount
             try (editedMain + "\nMacHelper.define({\n").write(to: mainURL, atomically: true, encoding: .utf8)
             try await eventually("An invalid JavaScript save did not report a reload error.") { (try? info(manager).error) != nil }
-            try check(manager.workerPID(for: id) == promptPID && (try info(manager)).reloadCount == countBeforeSyntaxError,
+            try check(manager.workerPID(for: id) == promptPIDAfterStreamingReload && (try info(manager)).reloadCount == countBeforeSyntaxError,
                       "An invalid edit replaced the last working worker.")
             try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + sample,
                       "The last working version stopped serving results after a syntax error.")
@@ -310,13 +415,29 @@ enum SourceExtensionVerification {
                 try await live.setEnabled(true, for: id)
                 try await live.updateSetting("targetLanguage", value: "zh-CN", for: id)
                 _ = try remember(live.workerPID(for: id))
-                let response = try await live.performCommand(for: id, text: "Hello! The project is ready for review. The amount is $125.50.")
+                let liveStarted = ProcessInfo.processInfo.systemUptime
+                var firstPartial: TimeInterval?
+                var liveProgressCount = 0
+                var liveCompleted = false
+                var progressBeforeCompletion = false
+                let response = try await live.performCommand(for: id, text: "Hello! The project is ready for review. The amount is $125.50. We will review the final design tomorrow and prepare the next development milestone after approval.") { update in
+                    if firstPartial == nil { firstPartial = ProcessInfo.processInfo.systemUptime - liveStarted }
+                    liveProgressCount += 1
+                    if !liveCompleted { progressBeforeCompletion = true }
+                }
+                liveCompleted = true
+                let liveElapsed = ProcessInfo.processInfo.systemUptime - liveStarted
+                try check(progressBeforeCompletion && liveProgressCount > 0 && firstPartial != nil,
+                          "The local AI returned only a final answer without streaming any partial translation.")
+                report["liveProgressCount"] = liveProgressCount
+                report["liveFirstPartialSeconds"] = firstPartial
+                report["liveCompletionSeconds"] = liveElapsed
                 try check(!response.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && response.text.contains("125.50"),
                           "The optional local AI smoke test returned no translation or lost the amount.")
                 try check(response.text.unicodeScalars.contains { (0x3400...0x9FFF).contains(Int($0.value)) }, "The optional live translation did not include Chinese text.")
                 report["liveModel"] = response.model ?? ""
                 report["liveAI"] = true
-                note("synthetic public text translates through the real local helper without any Upwork interaction")
+                note("real local AI streams a synthetic Chinese translation before the final answer without any Upwork interaction")
                 await live.stopAll()
             } else { report["liveAI"] = false }
             for manager in managers { await manager.stopAll() }

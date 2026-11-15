@@ -61,7 +61,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "4.0.0", "CFBundleVersion": "400",
+        "CFBundleShortVersionString": "4.1.0", "CFBundleVersion": "410",
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",
         "NSHighResolutionCapable": True, "LSUIElement": True,
         "NSHumanReadableCopyright": "© 2026 LocalAIBaseTools contributors. MIT License.",

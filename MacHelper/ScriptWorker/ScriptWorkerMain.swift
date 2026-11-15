@@ -58,6 +58,7 @@ private final class JavaScriptWorker {
     private var context: JSContext?
     private var generation: String?
     private var loaded = false
+    private var stopping = false
     private var permissions = Set<String>()
     private var activeIDs = Set<String>()
     private var capabilityIDs = Set<String>()
@@ -80,7 +81,7 @@ private final class JavaScriptWorker {
         guard let context else { respond(id, ok: false, error: "Load the extension before invoking it."); return }
         switch method {
         case "invoke":
-            guard loaded, let command = message["command"] as? String,
+            guard loaded, !stopping, let command = message["command"] as? String,
                   let input = message["input"] as? [String: Any], activeIDs.count < 8,
                   !activeIDs.contains(id), let json = jsonString(input) else {
                 respond(id, ok: false, error: "The extension command request is invalid."); return
@@ -94,7 +95,20 @@ private final class JavaScriptWorker {
             guard capabilityIDs.remove(id) != nil, let ok = message["ok"] as? Bool else { return }
             let encoded = ok ? jsonString(message["result"] ?? NSNull()) : jsonString(message["error"] as? String ?? "The capability failed.")
             context.objectForKeyedSubscript("__mhCapabilityResult")?.call(withArguments: [id, ok, encoded ?? "null"])
+        case "capabilityProgress":
+            guard loaded, !stopping, !invocationIDs.isEmpty, permissions.contains("ai.transform"), capabilityIDs.contains(id),
+                  let progress = message["progress"] as? [String: Any],
+                  let text = progress["text"] as? String, text.utf8.count <= 96_000, !text.contains("\0"),
+                  let delta = progress["delta"] as? String, delta.utf8.count <= 96_000, !delta.contains("\0"),
+                  let encoded = jsonString(progress) else { return }
+            if let model = progress["model"], !(model is NSNull) {
+                guard let model = model as? String, model.count <= 256, !model.contains("\0") else { return }
+            }
+            context.objectForKeyedSubscript("__mhCapabilityProgress")?.call(withArguments: [id, encoded])
         case "stop":
+            stopping = true
+            invocationIDs.removeAll()
+            capabilityIDs.removeAll()
             activeIDs.insert(id)
             exceptionMessage = nil
             context.objectForKeyedSubscript("__mhStop")?.call(withArguments: [id])
@@ -123,8 +137,12 @@ private final class JavaScriptWorker {
         let capabilityBlock: @convention(block) (String, String) -> Void = { [weak self] id, encoded in
             self?.requestCapability(id: id, encoded: encoded)
         }
+        let progressBlock: @convention(block) (String, String) -> Bool = { [weak self] id, encoded in
+            self?.reportProgress(id: id, encoded: encoded) ?? false
+        }
         context.setObject(finishBlock, forKeyedSubscript: "__nativeFinish" as NSString)
         context.setObject(capabilityBlock, forKeyedSubscript: "__nativeCapability" as NSString)
+        context.setObject(progressBlock, forKeyedSubscript: "__nativeProgress" as NSString)
         exceptionMessage = nil
         context.evaluateScript(Self.bootstrap(resources: resourceJSON, settings: settingsJSON))
         guard exceptionMessage == nil else { respond(id, ok: false, error: "The script runtime could not initialize."); return }
@@ -139,7 +157,7 @@ private final class JavaScriptWorker {
         guard let context, capabilityIDs.count < 8, !capabilityIDs.contains(id),
               let data = encoded.data(using: .utf8), data.count <= 128 * 1024,
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        guard loaded, !invocationIDs.isEmpty, permissions.contains("ai.transform") else {
+        guard loaded, !stopping, !invocationIDs.isEmpty, permissions.contains("ai.transform") else {
             let message = loaded ? "This extension has not declared the ai.transform permission." : "AI requests require an explicit command invocation."
             context.objectForKeyedSubscript("__mhCapabilityResult")?.call(withArguments: [id, false, jsonString(message) ?? "null"])
             return
@@ -149,9 +167,27 @@ private final class JavaScriptWorker {
               "generation": generation ?? ""])
     }
 
+    private func reportProgress(id: String, encoded: String) -> Bool {
+        guard loaded, !stopping, invocationIDs.contains(id), permissions.contains("ui.panel"),
+              let data = encoded.data(using: .utf8), data.count <= 128 * 1024,
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = value["text"] as? String, text.utf8.count <= 96_000, !text.contains("\0") else { return false }
+        var progress: [String: Any] = ["text": text]
+        if let title = value["title"] {
+            guard let title = title as? String, title.count <= 120, !title.contains("\0") else { return false }
+            progress["title"] = title
+        }
+        send(["type": "progress", "id": id, "generation": generation ?? "", "result": progress])
+        return true
+    }
+
     private func finish(id: String, ok: Bool, encoded: String) {
         guard activeIDs.remove(id) != nil else { return }
-        invocationIDs.remove(id)
+        let wasInvocation = invocationIDs.remove(id) != nil
+        if wasInvocation && invocationIDs.isEmpty {
+            capabilityIDs.removeAll()
+            context?.objectForKeyedSubscript("__mhCancelCapabilities")?.call(withArguments: [])
+        }
         if ok {
             guard let data = encoded.data(using: .utf8), data.count <= 192 * 1024,
                   let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
@@ -214,10 +250,13 @@ private final class JavaScriptWorker {
               return resources[path];
             },
             settings: initialSettings,
-            ai: Object.freeze({transform(request) {
+            ai: Object.freeze({transform(request, onProgress) {
               return new Promise((resolve, reject) => {
+                if (onProgress !== undefined && onProgress !== null && typeof onProgress !== "function") {
+                  reject(new Error("AI progress must be a callback function.")); return;
+                }
                 const id = "cap-" + (++nextCapability);
-                pending.set(id, {resolve, reject});
+                pending.set(id, {resolve, reject, onProgress});
                 try { __nativeCapability(id, JSON.stringify(request)); }
                 catch (error) { pending.delete(id); reject(error); }
               });
@@ -230,6 +269,16 @@ private final class JavaScriptWorker {
             const value = JSON.parse(encoded);
             ok ? item.resolve(value) : item.reject(new Error(String(value)));
           };
+          global.__mhCapabilityProgress = (id, encoded) => {
+            const item = pending.get(id); if (!item || typeof item.onProgress !== "function") return;
+            try { item.onProgress(JSON.parse(encoded)); }
+            catch (error) { pending.delete(id); item.reject(error); }
+          };
+          global.__mhCancelCapabilities = () => {
+            const items = Array.from(pending.values());
+            pending.clear();
+            for (const item of items) item.reject(new Error("The command has finished."));
+          };
           global.__mhStart = id => done(id, async () => {
             if (!definition) throw new Error("The entry script did not call MacHelper.define.");
             if (definition.start !== undefined && typeof definition.start !== "function") throw new Error("start must be a function.");
@@ -237,9 +286,18 @@ private final class JavaScriptWorker {
             if (definition.start) await definition.start({settings:initialSettings});
             return {__loaded:true, commands:Object.keys(definition.commands)};
           });
-          global.__mhInvoke = (id, command, encoded) => done(id, () => {
+          global.__mhInvoke = (id, command, encoded) => done(id, async () => {
             if (!definition || typeof definition.commands[command] !== "function") throw new Error("Unknown extension command.");
-            return definition.commands[command](JSON.parse(encoded));
+            const input = JSON.parse(encoded);
+            let active = true;
+            Object.defineProperty(input, "reportProgress", {value(value) {
+              if (!active) return false;
+              if (!__nativeProgress(id, JSON.stringify(value)))
+                throw new Error("Progress requires ui.panel permission, an active command, and bounded text/title values.");
+              return true;
+            }, writable:false, configurable:false});
+            try { return await definition.commands[command](input); }
+            finally { active = false; }
           });
           global.__mhStop = id => done(id, async () => {
             if (definition && definition.stop) await definition.stop();

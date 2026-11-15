@@ -59,7 +59,7 @@ Shared AI preferences are stored in the MacHelper support folder's `settings.jso
 
 Open **MacHelper → Extensions → Translation**. Enable it, choose the target language and writing style, then use **Accessibility Settings…** to allow **MacHelper** in Privacy & Security. Permission granted to the old Translation app does not grant it to MacHelper.
 
-Select text in another app. A small icon appears above/below the selection according to the available screen space. Click it for a nearby translation panel with the actual model name, Copy, and Close. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
+Select text in another app. A small icon appears above/below the selection according to the available screen space. Click it for a nearby translation panel that fills with text as the model responds. The panel shows the actual model name; Copy becomes available after the completed answer is validated. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
 
 Protected/password fields, images, and apps that do not expose selected text through Accessibility cannot be read automatically. Copy text yourself and use the explicit **Translate Clipboard…** action for those cases. Translation never simulates Copy or changes the clipboard automatically; the result's Copy button requires a click. **Try Demo…** tests the real AI connection with synthetic text without requiring Accessibility.
 
@@ -111,7 +111,7 @@ python3 scripts/test-native.py --live
 python3 scripts/test-extension-plugin.py --host dist/MacHelper.app/Contents/MacOS/MacHelperApp
 ```
 
-The source-extension integration check uses temporary preferences/source folders, a loopback catalog, and real worker processes. It verifies metadata-only discovery, complete source download on enable, script/prompt/schema reload, invalid-edit recovery, persisted settings/local edits, cancellation, and worker cleanup. `--live` additionally sends one synthetic public sentence through the real configured AI provider and consumes its usage. It does not access Upwork, clipboard contents, user extension folders, or permissions.
+The source-extension integration check uses temporary preferences/source folders, a loopback catalog, and real worker processes. It verifies metadata-only discovery, complete source download on enable, script/prompt/schema reload, invalid-edit recovery, persisted settings/local edits, cancellation, ordered partial streaming before completion, and worker cleanup. `--live` additionally sends one synthetic public sentence through the real configured AI provider and consumes its usage. It does not access Upwork, clipboard contents, user extension folders, or permissions.
 
 The optional live native check also uses synthetic text only. Add `--model MODEL_ID_FROM_CATALOG` to test an explicit model. Browser tests use synthetic messages/feedback and zero-send/zero-submit sentinels. Swift tests cover the providers, framing, source validation/downloads/watchers, JavaScript workers/settings, selection lifecycle/geometry, preferences, startup decisions, and advanced native SDK compatibility. The native integration check builds outside the repository and runs against isolated extension state.
 

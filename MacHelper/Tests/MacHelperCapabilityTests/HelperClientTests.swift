@@ -63,6 +63,94 @@ final class HelperClientTests: XCTestCase {
         XCTAssertEqual(response.model, "fixture-model")
     }
 
+    func testStreamingDeliversOrderedProgressBeforeHostCanSendFinal() async throws {
+        let fixture = try Fixture(mode: "stream")
+        defer { fixture.remove() }
+        let recorder = ProgressRecorder()
+        let first = expectation(description: "First delta arrived before terminal reply")
+        let request = try CapabilityAIRequest(action: "translate", text: "hello")
+        let task = Task {
+            try await fixture.client.transform(request, onProgress: { delta, model in
+                if recorder.append(delta, model) == 1 { first.fulfill() }
+            })
+        }
+        await fulfillment(of: [first], timeout: 1)
+        XCTAssertEqual(recorder.events.map(\.0), ["first "])
+        // The fixture cannot send the second delta or final until this release.
+        try Data().write(to: fixture.resumeFile)
+        let response = try await task.value
+        XCTAssertEqual(recorder.events.map(\.0), ["first ", "second"])
+        XCTAssertNil(recorder.events.first?.1)
+        XCTAssertEqual(recorder.events.last?.1, "fixture-model")
+        XCTAssertEqual(response.text, "authoritative final: hello")
+        XCTAssertEqual(response.model, "fixture-model")
+    }
+
+    func testStreamingFailureNeverCompletesWithUnverifiedPartial() async throws {
+        let fixture = try Fixture(mode: "stream-error")
+        defer { fixture.remove() }
+        let recorder = ProgressRecorder()
+        let request = try CapabilityAIRequest(action: "translate", text: "hello")
+        do {
+            _ = try await fixture.client.transform(request, onProgress: { delta, model in _ = recorder.append(delta, model) })
+            XCTFail("Expected terminal failure")
+        } catch { XCTAssertEqual(error as? CapabilityError, .failed("Provider failed")) }
+        XCTAssertEqual(recorder.events.map(\.0), ["first "])
+        fixture.assertExited()
+    }
+
+    func testMismatchedProgressIsRejectedBeforeCallback() async throws {
+        let fixture = try Fixture(mode: "stream-wrong-id")
+        defer { fixture.remove() }
+        let recorder = ProgressRecorder()
+        let request = try CapabilityAIRequest(action: "translate", text: "hello")
+        do {
+            _ = try await fixture.client.transform(request, onProgress: { delta, model in _ = recorder.append(delta, model) })
+            XCTFail("Expected mismatched request rejection")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("another request")) }
+        XCTAssertTrue(recorder.events.isEmpty)
+    }
+
+    func testStreamingDisconnectRequiresTerminalReply() async throws {
+        let fixture = try Fixture(mode: "stream-eof")
+        defer { fixture.remove() }
+        let recorder = ProgressRecorder()
+        let request = try CapabilityAIRequest(action: "translate", text: "hello")
+        do {
+            _ = try await fixture.client.transform(request, onProgress: { delta, model in _ = recorder.append(delta, model) })
+            XCTFail("Expected disconnect before terminal reply")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("closed the connection")) }
+        XCTAssertEqual(recorder.events.map(\.0), ["first "])
+    }
+
+    func testCancellationDuringStreamingStopsFurtherProgressAndHost() async throws {
+        let fixture = try Fixture(mode: "stream-hang", timeout: 20)
+        defer { fixture.remove() }
+        let recorder = ProgressRecorder()
+        let first = expectation(description: "Received partial before cancellation")
+        let request = try CapabilityAIRequest(action: "translate", text: "hello")
+        let task = Task {
+            try await fixture.client.transform(request, onProgress: { delta, model in
+                if recorder.append(delta, model) == 1 { first.fulfill() }
+            })
+        }
+        await fulfillment(of: [first], timeout: 1)
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertEqual(error as? CapabilityError, .cancelled) }
+        XCTAssertEqual(recorder.events.count, 1)
+        fixture.assertExited()
+    }
+
+    func testUnexpectedStreamFailsWithoutEnablingStreamingImplicitly() async throws {
+        let fixture = try Fixture(mode: "unsolicited")
+        defer { fixture.remove() }
+        do {
+            _ = try await fixture.client.translate(text: "hello", targetLanguage: "en")
+            XCTFail("Expected unrequested progress rejection")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("progress event")) }
+    }
+
     func testHostTimeoutTerminatesUnresponsiveProcess() async throws {
         let fixture = try Fixture(mode: "hang", timeout: 0.2)
         defer { fixture.remove() }
@@ -118,12 +206,14 @@ final class HelperClientTests: XCTestCase {
         let directory: URL
         let client: NativeHelperTransformClient
         let pidFile: URL
+        let resumeFile: URL
 
         init(mode: String, timeout: TimeInterval = 2) throws {
             directory = FileManager.default.temporaryDirectory.appendingPathComponent("translation-fixture-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let script = directory.appendingPathComponent("host.py")
             pidFile = directory.appendingPathComponent("pid")
+            resumeFile = directory.appendingPathComponent("resume")
             try #"""
             import sys, struct, json, time, os
             with open(sys.argv[2], 'w') as pid_file:
@@ -134,9 +224,40 @@ final class HelperClientTests: XCTestCase {
             header = sys.stdin.buffer.read(4)
             size = struct.unpack('<I', header)[0]
             request = json.loads(sys.stdin.buffer.read(size))
+            def send(value):
+                response = json.dumps(value).encode()
+                frame = struct.pack('<I', len(response)) + response
+                for chunk in [frame[:1], frame[1:3], frame[3:9], frame[9:]]:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+                    time.sleep(0.015)
             if mode == 'hang':
                 time.sleep(20)
             if mode == 'eof':
+                sys.exit(0)
+            if mode.startswith('stream') or mode == 'unsolicited':
+                if mode != 'unsolicited' and request.get('stream') is not True:
+                    send({'id': request['id'], 'ok': False, 'error': 'stream was not requested'})
+                    sys.exit(0)
+                response_id = 'other-request' if mode == 'stream-wrong-id' else request['id']
+                send({'id': response_id, 'event': 'delta', 'delta': 'first ', 'model': None})
+                if mode == 'stream-eof':
+                    sys.exit(0)
+                if mode == 'stream':
+                    deadline = time.monotonic() + 5
+                    while not os.path.exists(sys.argv[3]) and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    send({'id': request['id'], 'event': 'delta', 'delta': 'second', 'model': 'fixture-model'})
+                if mode == 'stream-hang':
+                    time.sleep(20)
+                if mode == 'stream-error':
+                    send({'id': request['id'], 'ok': False, 'error': 'Provider failed'})
+                else:
+                    send({'id': request['id'], 'ok': True, 'text': 'authoritative final: ' + request['text'], 'model': 'fixture-model'})
+                sys.stdin.buffer.read()
+                sys.exit(0)
+            if 'stream' in request:
+                send({'id': request['id'], 'ok': False, 'error': 'unexpected stream option'})
                 sys.exit(0)
             response = json.dumps({'id': request['id'], 'ok': True, 'text': 'translated: ' + request['text'], 'model': 'fixture-model'}).encode()
             frame = struct.pack('<I', len(response)) + response
@@ -147,7 +268,7 @@ final class HelperClientTests: XCTestCase {
             sys.stdin.buffer.read()
             """#.write(to: script, atomically: true, encoding: .utf8)
             client = NativeHelperTransformClient(executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
-                                        arguments: [script.path, mode, pidFile.path], timeout: timeout)
+                                        arguments: [script.path, mode, pidFile.path, resumeFile.path], timeout: timeout)
         }
 
         func assertExited(file: StaticString = #filePath, line: UInt = #line) {
@@ -157,6 +278,20 @@ final class HelperClientTests: XCTestCase {
         }
 
         func remove() { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    private final class ProgressRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [(String, String?)] = []
+        var events: [(String, String?)] {
+            lock.lock(); defer { lock.unlock() }
+            return values
+        }
+        func append(_ delta: String, _ model: String?) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            values.append((delta, model))
+            return values.count
+        }
     }
 }
 

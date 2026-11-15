@@ -1,5 +1,47 @@
 import AppKit
 
+/// Separates a readable preview from an authoritative, copyable final result.
+struct CapabilityPresentationState {
+    enum Phase: Equatable { case idle, working, complete, failed }
+    private(set) var phase = Phase.idle
+    private(set) var text = ""
+    private(set) var model: String?
+    private(set) var title: String?
+    private(set) var error: String?
+    private(set) var isIncomplete = false
+    var copyText: String? { phase == .complete && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : nil }
+
+    mutating func begin() { self = Self(); phase = .working }
+    mutating func reset() { self = Self() }
+
+    @discardableResult
+    mutating func progress(_ result: CapabilityTranslationResult) -> Bool {
+        guard phase == .working else { return false }
+        text = result.text
+        if let model = result.model { self.model = model }
+        if let title = result.title { self.title = title }
+        return true
+    }
+
+    mutating func complete(_ result: CapabilityTranslationResult) {
+        let streamModel = phase == .working ? model : nil
+        let streamTitle = phase == .working ? title : nil
+        phase = .complete
+        text = result.text
+        model = result.model ?? streamModel
+        title = result.title ?? streamTitle
+        error = nil
+        isIncomplete = false
+    }
+
+    mutating func fail(_ message: String) {
+        isIncomplete = phase == .working && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !isIncomplete { text = message; model = nil; title = nil }
+        phase = .failed
+        error = message
+    }
+}
+
 private final class CapabilityPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -13,10 +55,11 @@ final class FloatingCapabilityPanels {
     private let resultPanel: NSPanel
     private let title = NSTextField(labelWithString: "")
     private let output = NSTextView()
+    private let scroll = NSScrollView()
     private let footer = NSTextField(labelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
-    private var resultText: String?
+    private var presentation = CapabilityPresentationState()
 
     private let toolTitle: String
     private let systemSymbolName: String
@@ -44,41 +87,59 @@ final class FloatingCapabilityPanels {
     }
 
     func showLoading(near anchor: CGRect) {
-        resultText = nil
+        presentation.begin()
         title.stringValue = toolTitle + "…"
-        output.string = "Working…"
+        updateText("Working…", resetScroll: true)
         footer.stringValue = "MacHelper · shared AI settings"
+        footer.toolTip = nil
         copyButton.isEnabled = false
+        copyButton.title = "Copy"
+        output.isSelectable = false
         retryButton.isHidden = true
-        showResult(near: anchor)
+        presentResult(near: anchor, resetScroll: true)
+    }
+
+    func showProgress(_ response: CapabilityTranslationResult, near anchor: CGRect) {
+        guard presentation.progress(response) else { return }
+        title.stringValue = (presentation.title ?? toolTitle) + "…"
+        if !presentation.text.isEmpty { updateText(presentation.text) }
+        footer.stringValue = presentation.model.map { "Working… · " + $0 } ?? "Working…"
+        footer.toolTip = presentation.model
+        copyButton.isEnabled = false
+        output.isSelectable = false
+        retryButton.isHidden = true
+        presentResult(near: anchor)
     }
 
     func showResult(_ response: CapabilityTranslationResult, near anchor: CGRect) {
-        resultText = response.text
-        title.stringValue = response.title ?? toolTitle
-        output.string = response.text
-        footer.stringValue = response.model ?? "MacHelper · shared AI settings"
-        footer.toolTip = response.model
-        copyButton.isEnabled = true
+        presentation.complete(response)
+        title.stringValue = presentation.title ?? toolTitle
+        updateText(response.text)
+        footer.stringValue = presentation.model ?? "MacHelper · shared AI settings"
+        footer.toolTip = presentation.model
+        copyButton.isEnabled = presentation.copyText != nil
+        output.isSelectable = true
         retryButton.isHidden = true
-        showResult(near: anchor)
+        presentResult(near: anchor)
     }
 
     func showError(_ message: String, near anchor: CGRect, canRetry: Bool = true) {
-        resultText = nil
-        title.stringValue = "Couldn’t complete " + toolTitle
-        output.string = message
-        footer.stringValue = canRetry ? "Check MacHelper settings and try again." : "Copy text, then choose the clipboard action."
-        footer.toolTip = nil
+        presentation.fail(message)
+        title.stringValue = presentation.isIncomplete ? "Incomplete · " + toolTitle : "Couldn’t complete " + toolTitle
+        updateText(presentation.text)
+        footer.stringValue = presentation.isIncomplete ? "Incomplete: " + message
+            : canRetry ? "Check MacHelper settings and try again." : "Copy text, then choose the clipboard action."
+        footer.toolTip = message
         copyButton.isEnabled = false
+        output.isSelectable = false
         retryButton.isHidden = !canRetry
-        showResult(near: anchor)
+        presentResult(near: anchor)
     }
 
     func hide() {
         iconPanel.orderOut(nil)
         resultPanel.orderOut(nil)
-        resultText = nil
+        presentation.reset()
         output.string = ""
     }
 
@@ -147,7 +208,6 @@ final class FloatingCapabilityPanels {
         output.autoresizingMask = [.width]
         output.textContainer?.widthTracksTextView = true
         output.setAccessibilityLabel("Result text")
-        let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
@@ -202,11 +262,38 @@ final class FloatingCapabilityPanels {
         return view
     }
 
-    private func showResult(near anchor: CGRect) {
+    private func presentResult(near anchor: CGRect, resetScroll: Bool = false) {
         iconPanel.orderOut(nil)
-        place(resultPanel, size: CGSize(width: 380, height: 268), near: anchor)
-        output.scrollToBeginningOfDocument(nil)
-        resultPanel.orderFrontRegardless()
+        if !resultPanel.isVisible {
+            place(resultPanel, size: CGSize(width: 380, height: 268), near: anchor)
+            resultPanel.orderFrontRegardless()
+        }
+        if resetScroll { output.scrollToBeginningOfDocument(nil) }
+    }
+
+    /// Append growing text without rebuilding the view or resetting a reader's
+    /// scroll position. Follow the tail only while they are already at the end.
+    private func updateText(_ text: String, resetScroll: Bool = false) {
+        guard output.string != text else { return }
+        let origin = scroll.contentView.bounds.origin
+        let followTail = output.frame.height - scroll.documentVisibleRect.maxY <= 24
+        let old = output.string as NSString
+        let new = text as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: output.font ?? NSFont.systemFont(ofSize: 14),
+            .foregroundColor: output.textColor ?? NSColor.labelColor
+        ]
+        if new.hasPrefix(old as String), let storage = output.textStorage {
+            storage.append(NSAttributedString(string: new.substring(from: old.length), attributes: attributes))
+        } else {
+            output.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+        }
+        if resetScroll { output.scrollToBeginningOfDocument(nil) }
+        else if followTail { output.scrollRangeToVisible(NSRange(location: new.length, length: 0)) }
+        else {
+            scroll.contentView.scroll(to: origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
 
     private func place(_ panel: NSPanel, size: CGSize, near anchor: CGRect) {
@@ -220,7 +307,7 @@ final class FloatingCapabilityPanels {
     @objc private func dismiss() { onDismiss?() }
 
     @objc private func copyResult() {
-        guard let resultText else { return }
+        guard let resultText = presentation.copyText else { return }
         // This is the only clipboard write and requires a deliberate Copy click.
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(resultText, forType: .string)

@@ -90,6 +90,23 @@ enum CapabilityFrame {
         return frame
     }
 
+    static func encodeRequest(_ request: CapabilityAIRequest, streaming: Bool) throws -> Data {
+        try encode(WireRequest(request: request, streaming: streaming))
+    }
+
+    private struct WireRequest: Encodable {
+        let request: CapabilityAIRequest
+        let streaming: Bool
+        enum CodingKeys: String, CodingKey { case stream }
+        func encode(to encoder: Encoder) throws {
+            try request.encode(to: encoder)
+            if streaming {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(true, forKey: .stream)
+            }
+        }
+    }
+
     static func payloadLength(_ header: Data) throws -> Int {
         guard header.count == 4 else { throw CapabilityError.invalid("MacHelper returned an incomplete message header.") }
         let size = header.enumerated().reduce(UInt32(0)) { $0 | (UInt32($1.element) << ($1.offset * 8)) }
@@ -112,6 +129,57 @@ enum CapabilityFrame {
     }
 }
 
+/// A progress frame is never a successful result. Only the normal terminal
+/// response can complete a request, even after one or more readable deltas.
+struct CapabilityStreamDecoder {
+    enum Event: Equatable {
+        case progress(delta: String, model: String?)
+        case complete(CapabilityAIResponse)
+    }
+
+    private let expectedID: String
+    private let permitsProgress: Bool
+    private var receivedDeltaBytes = 0
+    private var progressFrames = 0
+    private(set) var completed = false
+
+    init(expectedID: String, permitsProgress: Bool) {
+        self.expectedID = expectedID
+        self.permitsProgress = permitsProgress
+    }
+
+    mutating func decode(_ payload: Data) throws -> Event {
+        guard !completed else { throw CapabilityError.invalid("MacHelper sent data after completing the request.") }
+        guard payload.count <= CapabilityFrame.maximumBytes else { throw CapabilityError.invalid("MacHelper returned an oversized response.") }
+        let envelope: Envelope
+        do { envelope = try JSONDecoder().decode(Envelope.self, from: payload) }
+        catch { throw CapabilityError.invalid("MacHelper returned an unreadable response.") }
+        guard envelope.id == expectedID else { throw CapabilityError.invalid("MacHelper returned a response for another request.") }
+        if let event = envelope.event {
+            guard permitsProgress, event == "delta", envelope.ok == nil, let delta = envelope.delta else {
+                throw CapabilityError.invalid("MacHelper returned an invalid progress event.")
+            }
+            receivedDeltaBytes += delta.utf8.count
+            progressFrames += 1
+            guard receivedDeltaBytes <= CapabilityFrame.maximumBytes, progressFrames <= 100_000 else {
+                throw CapabilityError.invalid("MacHelper returned too much streamed output.")
+            }
+            return .progress(delta: delta, model: envelope.model)
+        }
+        completed = true
+        let response = try CapabilityFrame.decode(payload, expectedID: expectedID)
+        return .complete(response)
+    }
+
+    private struct Envelope: Decodable {
+        let id: String
+        let event: String?
+        let delta: String?
+        let model: String?
+        let ok: Bool?
+    }
+}
+
 public struct NativeHelperTransformClient: Sendable {
     public let executableURL: URL
     public let arguments: [String]
@@ -123,13 +191,14 @@ public struct NativeHelperTransformClient: Sendable {
         self.timeout = timeout
     }
 
-    public func transform(_ request: CapabilityAIRequest) async throws -> CapabilityAIResponse {
+    public func transform(_ request: CapabilityAIRequest,
+                          onProgress: (@Sendable (String, String?) -> Void)? = nil) async throws -> CapabilityAIResponse {
         guard timeout.isFinite, timeout > 0 else { throw CapabilityError.invalid("The AI request timeout must be a positive finite duration.") }
         let operation = HelperOperation(executableURL: executableURL, arguments: arguments, timeout: timeout)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    do { continuation.resume(returning: try operation.run(request)) }
+                    do { continuation.resume(returning: try operation.run(request, onProgress: onProgress)) }
                     catch { continuation.resume(throwing: error) }
                 }
             }
@@ -160,7 +229,7 @@ private final class HelperOperation: @unchecked Sendable {
         // both new and older MacHelper hosts disconnect their AI subprocess.
     }
 
-    func run(_ request: CapabilityAIRequest) throws -> CapabilityAIResponse {
+    func run(_ request: CapabilityAIRequest, onProgress: (@Sendable (String, String?) -> Void)?) throws -> CapabilityAIResponse {
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else { throw CapabilityError.unavailable }
         let child = Process()
         let input = Pipe()
@@ -193,12 +262,23 @@ private final class HelperOperation: @unchecked Sendable {
 
         let deadline = Date().addingTimeInterval(timeout)
         try checkCancellation()
-        try write(CapabilityFrame.encode(request), to: input.fileHandleForWriting.fileDescriptor, deadline: deadline)
-        let header = try readExactly(4, from: output.fileHandleForReading.fileDescriptor, deadline: deadline)
-        let size = try CapabilityFrame.payloadLength(header)
-        let payload = try readExactly(size, from: output.fileHandleForReading.fileDescriptor, deadline: deadline)
-        try checkCancellation()
-        return try CapabilityFrame.decode(payload, expectedID: request.id)
+        try write(CapabilityFrame.encodeRequest(request, streaming: onProgress != nil),
+                  to: input.fileHandleForWriting.fileDescriptor, deadline: deadline)
+        var decoder = CapabilityStreamDecoder(expectedID: request.id, permitsProgress: onProgress != nil)
+        while true {
+            let header = try readExactly(4, from: output.fileHandleForReading.fileDescriptor, deadline: deadline)
+            let size = try CapabilityFrame.payloadLength(header)
+            let payload = try readExactly(size, from: output.fileHandleForReading.fileDescriptor, deadline: deadline)
+            try checkCancellation()
+            switch try decoder.decode(payload) {
+            case .progress(let delta, let model):
+                // Ordered callbacks run on this background pipe reader. The
+                // caller chooses how to deliver them to its own actor or UI.
+                onProgress?(delta, model)
+                try checkCancellation()
+            case .complete(let response): return response
+            }
+        }
     }
 
     private func checkCancellation() throws {

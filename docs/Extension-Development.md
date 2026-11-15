@@ -37,12 +37,14 @@ MacHelper.define({
         targetLanguage: input.settings.targetLanguage || "zh-CN",
         model: "",
         guidance: MacHelper.readText("prompts/translate.txt")
-      });
+      }, partial => input.reportProgress({ text: partial.text, title: "My Translation" }));
       return { text: result.text, title: "My Translation" };
     }
   }
 });
 ```
+
+The optional AI progress callback receives accumulated text before the final Promise resolves. `input.reportProgress` lets the command show that provisional text immediately, using the same formatting as its final result. MacHelper validates the final answer before enabling Copy. Updates from cancelled/reloaded invocations are ignored. This streaming interface requires MacHelper 4.1 or later.
 
 The empty model follows MacHelper's shared AI connection. Settings come from a small JSON schema with `select`, `text`, and `boolean` fields. MacHelper renders those controls under **Extensions**. `MacHelper.readText` reads a frozen resource from that worker's source generation; there is no direct filesystem, network, shell, Node.js, or npm dependency API. AI transformations require an explicit user command; loading a tool or selecting text does not trigger inference.
 

@@ -33,6 +33,7 @@ final class SourceExtensionManager {
     private let helperURL: URL
     private let headless: Bool
     private let testTransform: (([String: Any]) async throws -> [String: Any])?
+    private let testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])?
     private var definitions: [String: Definition] = [:]
     private var snapshots: [String: SourcePackageSnapshot] = [:]
     private var active: [String: Running] = [:]
@@ -73,11 +74,12 @@ final class SourceExtensionManager {
     init(workerExecutableURL: URL, helperExecutableURL: URL, bundledCatalogURL: URL,
          bundledSeedDirectory: URL? = nil, stateDirectory: URL? = nil,
          sourceDirectory: URL = SourcePackageStore.defaultUserDirectory, headless: Bool = false,
-         testTransform: (([String: Any]) async throws -> [String: Any])? = nil) {
+         testTransform: (([String: Any]) async throws -> [String: Any])? = nil,
+         testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])? = nil) {
         workerURL = workerExecutableURL; helperURL = helperExecutableURL
         self.bundledCatalogURL = bundledCatalogURL; self.bundledSeedDirectory = bundledSeedDirectory
         self.stateDirectory = stateDirectory ?? HelperSettingsStore.defaultFileURL.deletingLastPathComponent()
-        self.headless = headless; self.testTransform = testTransform
+        self.headless = headless; self.testTransform = testTransform; self.testStreamingTransform = testStreamingTransform
         store = SourcePackageStore(directory: sourceDirectory)
     }
 
@@ -202,7 +204,8 @@ final class SourceExtensionManager {
     }
 
     // Also used by the isolated integration harness with a fake AI callback.
-    func performCommand(for id: String, text: String) async throws -> CapabilityTranslationResult {
+    func performCommand(for id: String, text: String,
+                        onProgress: (@MainActor (CapabilityTranslationResult) -> Void)? = nil) async throws -> CapabilityTranslationResult {
         guard state.enabled[id] == true, let runtime = active[id], !shuttingDown else {
             throw SourcePackageError.invalid("This extension is disabled.")
         }
@@ -215,7 +218,14 @@ final class SourceExtensionManager {
         let worker = runtime.worker, gate = runtime.gate
         gate.invoking = true; gate.calls = 0; gate.model = nil
         defer { gate.invoking = false }
-        let result = try await worker.invoke(command: command.identifier, input: ["text": text, "settings": runtime.settings])
+        let result = try await worker.invoke(command: command.identifier, input: ["text": text, "settings": runtime.settings]) { [weak self, weak runtime] update in
+            guard let self, let runtime, !Task.isCancelled, self.active[id] === runtime,
+                  runtime.worker === worker, self.state.enabled[id] == true, gate.invoking,
+                  let output = update["text"] as? String, !output.isEmpty, output.utf8.count <= 96_000,
+                  !output.contains("\0") else { return }
+            onProgress?(CapabilityTranslationResult(text: output, model: gate.model,
+                title: (update["title"] as? String).map { String($0.prefix(120)) }))
+        }
         try Task.checkCancellation()
         guard active[id] === runtime, runtime.worker === worker, state.enabled[id] == true,
               let output = result["text"] as? String, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -276,6 +286,10 @@ final class SourceExtensionManager {
                 guard let self else { throw CancellationError() }
                 return try await self.performCommand(for: id, text: text)
             }
+            capability.onPerformStreaming = { [weak self] text, onProgress in
+                guard let self else { throw CancellationError() }
+                return try await self.performCommand(for: id, text: text, onProgress: onProgress)
+            }
             capability.onPresentOverlay = { [weak self] in self?.onHideSettings?() }
             capability.onStatusChange = { [weak self] in self?.notify() }
             if shouldMonitor(snapshot) { capability.start() }
@@ -305,27 +319,14 @@ final class SourceExtensionManager {
         pending[id] = worker
         do {
             let commands = try await worker.load(entrySource: snapshot.entrySource, resources: snapshot.resources,
-                                                 settings: settings, permissions: snapshot.manifest.permissions) { [weak self, weak gate] payload in
-                guard let self, let gate, gate.invoking, !self.shuttingDown,
-                      snapshot.manifest.permissions.contains("ai.transform") else {
-                    throw SourcePackageError.invalid("AI requests require an explicit current tool action.")
-                }
-                gate.calls += 1
-                guard gate.calls <= 8 else { throw SourcePackageError.invalid("This tool exceeded the AI calls allowed for one action.") }
-                if let test = self.testTransform {
-                    let result = try await test(payload); gate.model = result["model"] as? String; return result
-                }
-                let action = payload["action"] as? String ?? "translate"
-                guard ["translate", "polish"].contains(action), let text = payload["text"] as? String else {
-                    throw SourcePackageError.invalid("The script requested an unsupported AI transformation.")
-                }
-                let request = try CapabilityAIRequest(action: action, text: text,
-                    targetLanguage: payload["targetLanguage"] as? String, tone: payload["tone"] as? String,
-                    model: payload["model"] as? String ?? "", guidance: payload["guidance"] as? String)
-                let response = try await NativeHelperTransformClient(executableURL: self.helperURL).transform(request)
-                gate.model = response.model
-                return ["text": response.text ?? "", "model": response.model as Any? ?? NSNull()]
-            }
+                settings: settings, permissions: snapshot.manifest.permissions,
+                streamingCapabilityHandler: { [weak self, weak gate] payload, onProgress in
+                    guard let self, let gate else { throw CancellationError() }
+                    return try await self.transform(payload, snapshot: snapshot, gate: gate, onProgress: onProgress)
+                }, capabilityHandler: { [weak self, weak gate] payload in
+                    guard let self, let gate else { throw CancellationError() }
+                    return try await self.transform(payload, snapshot: snapshot, gate: gate, onProgress: nil)
+                })
             guard snapshot.manifest.commands.allSatisfy({ commands.contains($0.identifier) }) else {
                 throw SourcePackageError.invalid("The source does not implement every command declared by its manifest.")
             }
@@ -335,6 +336,59 @@ final class SourceExtensionManager {
             await worker.stop()
             throw error
         }
+    }
+
+    private func transform(_ payload: [String: Any], snapshot: SourcePackageSnapshot, gate: Gate,
+                           onProgress: (@MainActor ([String: Any]) -> Void)?) async throws -> [String: Any] {
+        guard gate.invoking, !shuttingDown, snapshot.manifest.permissions.contains("ai.transform") else {
+            throw SourcePackageError.invalid("AI requests require an explicit current tool action.")
+        }
+        gate.calls += 1
+        guard gate.calls <= 8 else { throw SourcePackageError.invalid("This tool exceeded the AI calls allowed for one action.") }
+        if let test = testStreamingTransform, let onProgress {
+            let result = try await test(payload) { update in
+                guard gate.invoking, !Task.isCancelled else { return }
+                if let model = update["model"] as? String { gate.model = model }
+                onProgress(update)
+            }
+            gate.model = result["model"] as? String
+            return result
+        }
+        if let test = testTransform {
+            let result = try await test(payload); gate.model = result["model"] as? String; return result
+        }
+        let action = payload["action"] as? String ?? "translate"
+        guard ["translate", "polish"].contains(action), let text = payload["text"] as? String else {
+            throw SourcePackageError.invalid("The script requested an unsupported AI transformation.")
+        }
+        let request = try CapabilityAIRequest(action: action, text: text,
+            targetLanguage: payload["targetLanguage"] as? String, tone: payload["tone"] as? String,
+            model: payload["model"] as? String ?? "", guidance: payload["guidance"] as? String)
+        let client = NativeHelperTransformClient(executableURL: helperURL)
+        let response: CapabilityAIResponse
+        if let onProgress {
+            // A single consumer preserves delta order and drains every queued
+            // update before the terminal result can mark the panel complete.
+            let channel = AsyncStream<(String, String?)>.makeStream()
+            let pump = Task { @MainActor in
+                var text = ""
+                for await (delta, model) in channel.stream {
+                    guard !Task.isCancelled, gate.invoking, !self.shuttingDown else { break }
+                    text += delta
+                    if let model { gate.model = model }
+                    onProgress(["text": text, "delta": delta, "model": gate.model as Any? ?? NSNull()])
+                }
+            }
+            defer { channel.continuation.finish(); pump.cancel() }
+            response = try await client.transform(request) { delta, model in
+                channel.continuation.yield((delta, model))
+            }
+            channel.continuation.finish()
+            await pump.value
+        } else { response = try await client.transform(request) }
+        try Task.checkCancellation()
+        gate.model = response.model
+        return ["text": response.text ?? "", "model": response.model as Any? ?? NSNull()]
     }
 
     private func replaceWorker(_ runtime: Running) async throws {
@@ -425,6 +479,10 @@ final class SourceExtensionManager {
         active[id] = Running(snapshot: snapshot, worker: worker, gate: gate, capability: capability, schema: schema, settings: values)
         if pending[id] === worker { pending.removeValue(forKey: id) }
         capability.onPerform = { [weak self] text in guard let self else { throw CancellationError() }; return try await self.performCommand(for: id, text: text) }
+        capability.onPerformStreaming = { [weak self] text, onProgress in
+            guard let self else { throw CancellationError() }
+            return try await self.performCommand(for: id, text: text, onProgress: onProgress)
+        }
         capability.onPresentOverlay = { [weak self] in self?.onHideSettings?() }
         if shouldMonitor(snapshot) { capability.start() }
         statuses[id] = "Running the last working version while local edits are invalid."

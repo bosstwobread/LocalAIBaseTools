@@ -11,7 +11,7 @@ MacHelper.define({
         targetLanguage: settings.targetLanguage || "zh-CN",
         model: "", // Use MacHelper's shared provider/model choice.
         guidance: prompt + "\nWriting style: " + (settings.style || "natural")
-      });
+      }, partial => input.reportProgress({text: partial.text, title: "Translation"}));
       // Customize formatting here, e.g. return {text: "译文：" + response.text}.
       return {text: response.text, title: "Translation"};
     }

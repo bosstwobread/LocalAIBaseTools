@@ -23,6 +23,8 @@ public enum ScriptWorkerError: LocalizedError, Equatable {
 @MainActor
 public final class ScriptWorkerClient {
     public typealias CapabilityHandler = @MainActor ([String: Any]) async throws -> [String: Any]
+    public typealias ProgressHandler = @MainActor ([String: Any]) -> Void
+    public typealias StreamingCapabilityHandler = @MainActor ([String: Any], @escaping ProgressHandler) async throws -> [String: Any]
     public private(set) var generation: String?
     public var processIdentifier: Int32? { connection?.process.processIdentifier }
     private let executableURL: URL
@@ -34,6 +36,7 @@ public final class ScriptWorkerClient {
     private var pending: [String: Pending] = [:]
     private var capabilityTasks: [String: Task<Void, Never>] = [:]
     private var capabilityHandler: CapabilityHandler?
+    private var streamingCapabilityHandler: StreamingCapabilityHandler?
     private var permissions = Set<String>()
     private var cleanupTask: Task<Void, Never>?
     private var stopping = false
@@ -42,6 +45,7 @@ public final class ScriptWorkerClient {
         let method: String
         let continuation: CheckedContinuation<[String: Any], Error>
         let timeout: Task<Void, Never>
+        let onProgress: ProgressHandler?
     }
 
     public init(executableURL: URL, requestTimeout: TimeInterval = 180, loadTimeout: TimeInterval = 5) {
@@ -55,6 +59,7 @@ public final class ScriptWorkerClient {
     @discardableResult
     public func load(entrySource: String, resources: [String: String] = [:], settings: [String: Any] = [:],
                      permissions: [String], generation: String = UUID().uuidString,
+                     streamingCapabilityHandler: StreamingCapabilityHandler? = nil,
                      capabilityHandler: @escaping CapabilityHandler) async throws -> [String] {
         guard !stopping else { throw ScriptWorkerError.invalid("Wait for the current worker to stop.") }
         await stop()
@@ -67,6 +72,7 @@ public final class ScriptWorkerClient {
         self.connection = connection
         self.generation = generation
         self.capabilityHandler = capabilityHandler
+        self.streamingCapabilityHandler = streamingCapabilityHandler
         self.permissions = Set(permissions)
         decoder = NativeFrameDecoder()
         connection.output.readabilityHandler = { [weak self] handle in
@@ -90,9 +96,9 @@ public final class ScriptWorkerClient {
         }
     }
 
-    public func invoke(command: String, input: [String: Any]) async throws -> [String: Any] {
+    public func invoke(command: String, input: [String: Any], onProgress: ProgressHandler? = nil) async throws -> [String: Any] {
         guard connection != nil, !stopping else { throw ScriptWorkerError.cancelled }
-        return try await request(method: "invoke", payload: ["command": command, "input": input], timeout: requestTimeout)
+        return try await request(method: "invoke", payload: ["command": command, "input": input], timeout: requestTimeout, onProgress: onProgress)
     }
 
     /// A short lifecycle grace is followed by bounded process termination. This
@@ -116,7 +122,8 @@ public final class ScriptWorkerClient {
 
     public func cancel() async { await stop() }
 
-    private func request(method: String, payload: [String: Any], timeout: TimeInterval) async throws -> [String: Any] {
+    private func request(method: String, payload: [String: Any], timeout: TimeInterval,
+                         onProgress: ProgressHandler? = nil) async throws -> [String: Any] {
         guard let connection, let generation else { throw ScriptWorkerError.cancelled }
         let session = sessionID
         let id = UUID().uuidString
@@ -131,7 +138,7 @@ public final class ScriptWorkerClient {
                     guard let self, self.sessionID == session, self.pending[id] != nil else { return }
                     self.failConnection(ScriptWorkerError.timedOut)
                 }
-                pending[id] = Pending(method: method, continuation: continuation, timeout: timer)
+                pending[id] = Pending(method: method, continuation: continuation, timeout: timer, onProgress: onProgress)
                 connection.write(bytes, timeout: min(timeout, 2)) { [weak self] error in
                     guard let error else { return }
                     DispatchQueue.main.async { [weak self] in
@@ -161,8 +168,20 @@ public final class ScriptWorkerClient {
                 // Reader callbacks from a disposed process cannot affect its replacement.
                 guard returnedGeneration == generation else { continue }
                 if message["type"] as? String == "capability" { receiveCapability(message, id: id, session: session); continue }
+                if message["type"] as? String == "progress" {
+                    guard !stopping, permissions.contains("ui.panel"), let request = pending[id], request.method == "invoke",
+                          let result = message["result"] as? [String: Any], let progress = Self.toolProgress(result) else { continue }
+                    request.onProgress?(progress)
+                    continue
+                }
                 guard let request = pending.removeValue(forKey: id) else { continue }
                 request.timeout.cancel()
+                if request.method == "invoke", !pending.values.contains(where: { $0.method == "invoke" }) {
+                    // A script may throw from a streaming callback or return
+                    // without awaiting AI. Its terminal action must not leave
+                    // an unrelated provider task consuming usage in background.
+                    cancelCapabilities()
+                }
                 guard let ok = message["ok"] as? Bool else {
                     request.continuation.resume(throwing: ScriptWorkerError.invalid("The worker response has no success flag.")); continue
                 }
@@ -185,8 +204,14 @@ public final class ScriptWorkerClient {
             return
         }
         capabilityTasks[id] = Task { [weak self] in
+            guard !Task.isCancelled else { return }
             do {
-                let result = try await handler(payload)
+                let result: [String: Any]
+                if let streaming = self?.streamingCapabilityHandler {
+                    result = try await streaming(payload) { [weak self] progress in
+                        self?.sendCapabilityProgress(id, progress: progress, session: session)
+                    }
+                } else { result = try await handler(payload) }
                 guard !Task.isCancelled else { return }
                 self?.sendCapabilityResult(id, ok: true, result: result, error: nil, session: session)
             } catch {
@@ -196,6 +221,16 @@ public final class ScriptWorkerClient {
             }
             if self?.sessionID == session { self?.capabilityTasks.removeValue(forKey: id) }
         }
+    }
+
+    private func sendCapabilityProgress(_ id: String, progress: [String: Any], session: UUID) {
+        guard sessionID == session, let connection, let generation, !stopping,
+              permissions.contains("ai.transform"), capabilityTasks[id] != nil,
+              pending.values.contains(where: { $0.method == "invoke" }),
+              let value = Self.aiProgress(progress) else { return }
+        let message: [String: Any] = ["id": id, "method": "capabilityProgress", "generation": generation, "progress": value]
+        do { connection.write(try Self.frame(message), timeout: 2) { _ in } }
+        catch { failConnection(error) }
     }
 
     private func sendCapabilityResult(_ id: String, ok: Bool, result: [String: Any]?, error: String?, session: UUID) {
@@ -224,9 +259,31 @@ public final class ScriptWorkerClient {
         generation = nil
         sessionID = UUID()
         capabilityHandler = nil
+        streamingCapabilityHandler = nil
         cancelCapabilities()
         rejectPending(error)
         cleanupTask = Task { await connection.closeAndTerminate() }
+    }
+
+    private static func toolProgress(_ value: [String: Any]) -> [String: Any]? {
+        guard let text = value["text"] as? String, text.utf8.count <= 96_000, !text.contains("\0") else { return nil }
+        var result: [String: Any] = ["text": text]
+        if let title = value["title"] {
+            guard let title = title as? String, title.count <= 120, !title.contains("\0") else { return nil }
+            result["title"] = title
+        }
+        return result
+    }
+
+    private static func aiProgress(_ value: [String: Any]) -> [String: Any]? {
+        guard let text = value["text"] as? String, text.utf8.count <= 96_000, !text.contains("\0"),
+              let delta = value["delta"] as? String, delta.utf8.count <= 96_000, !delta.contains("\0") else { return nil }
+        var result: [String: Any] = ["text": text, "delta": delta]
+        if let model = value["model"], !(model is NSNull) {
+            guard let model = model as? String, model.count <= 256, !model.contains("\0") else { return nil }
+            result["model"] = model
+        }
+        return result
     }
 
     private static func frame(_ value: [String: Any]) throws -> Data {

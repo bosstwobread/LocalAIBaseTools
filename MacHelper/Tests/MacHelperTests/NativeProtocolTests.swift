@@ -3,6 +3,41 @@ import XCTest
 @testable import MacHelper
 
 final class NativeProtocolTests: XCTestCase {
+    func testStreamingIsAnOptionalTransportOptIn() throws {
+        let legacy = try JSONDecoder().decode(HelperRequest.self, from: Data(#"{"id":"legacy","action":"translate","text":"Hello"}"#.utf8))
+        XCTAssertNil(legacy.stream)
+        for enabled in [true, false] {
+            let data = try JSONSerialization.data(withJSONObject: ["id": "stream", "action": "translate", "text": "Hello", "stream": enabled])
+            let request = try JSONDecoder().decode(HelperRequest.self, from: data)
+            XCTAssertEqual(request.stream, enabled)
+            let prompt = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(request.prompt().utf8)) as? [String: Any])
+            XCTAssertNil(prompt["stream"], "Streaming controls the transport, not the AI transformation prompt")
+        }
+        for invalid: Any in ["true", 1] {
+            let data = try JSONSerialization.data(withJSONObject: ["id": "bad", "action": "ping", "stream": invalid])
+            XCTAssertThrowsError(try JSONDecoder().decode(HelperRequest.self, from: data))
+        }
+    }
+
+    func testStreamDeltaFramesAndOrdinaryTerminalRemainDistinctAndOrdered() throws {
+        var bytes = try NativeFrameEncoder.encode(HelperStreamUpdate(id: "one", delta: "你好🙂", model: "confirmed-model"))
+        bytes.append(try NativeFrameEncoder.encode(HelperStreamUpdate(id: "one", delta: " second", model: "confirmed-model")))
+        bytes.append(try NativeFrameEncoder.encode(HelperResponse(id: "one", text: "你好🙂 second", model: "confirmed-model")))
+        var decoder = NativeFrameDecoder(), frames: [Data] = []
+        for byte in bytes { frames += try decoder.append(Data([byte])) }
+        XCTAssertEqual(frames.count, 3)
+        let objects = try frames.map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0) as? [String: Any]) }
+        XCTAssertEqual(objects[0]["event"] as? String, "delta")
+        XCTAssertEqual(objects[0]["delta"] as? String, "你好🙂")
+        XCTAssertEqual(objects[1]["delta"] as? String, " second")
+        XCTAssertEqual(objects[0]["model"] as? String, "confirmed-model")
+        XCTAssertNil(objects[0]["ok"])
+        XCTAssertNil(objects[2]["event"])
+        XCTAssertEqual(objects[2]["ok"] as? Bool, true)
+        XCTAssertEqual(objects[2]["text"] as? String, "你好🙂 second")
+        XCTAssertNoThrow(try decoder.finish())
+    }
+
     func testFramingPreservesSplitUnicodeAndCoalescedMessages() throws {
         let first = HelperResponse(id: "one", text: "中文🙂")
         let second = HelperResponse(id: "two", text: "Second paragraph\n\nNext")

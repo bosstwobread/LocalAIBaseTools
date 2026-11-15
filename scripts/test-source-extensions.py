@@ -155,6 +155,7 @@ def main():
             print(f"PASS one stable host and {len(report['workerPIDs'])} independent worker generations; all workers reaped")
             if args.live:
                 print("Live local AI model: " + (report.get("liveModel") or "reported by local provider"))
+                print(f"Live streaming: {report['liveProgressCount']} updates; first text {report['liveFirstPartialSeconds']:.2f}s; complete {report['liveCompletionSeconds']:.2f}s")
             print("No Upwork interaction, user extension directory, clipboard, or app permission was changed.")
         except subprocess.TimeoutExpired:
             if process is not None:

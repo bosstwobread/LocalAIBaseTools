@@ -60,6 +60,8 @@ MacHelper.define({
         targetLanguage: input.settings.targetLanguage || "zh-CN",
         model: "",
         guidance: MacHelper.readText("prompts/translate.txt")
+      }, partial => {
+        input.reportProgress({ text: partial.text, title: "Translation" });
       });
       return { text: result.text, title: "Translation" };
     }
@@ -68,6 +70,10 @@ MacHelper.define({
 ```
 
 `input.text` is the text supplied by the explicit command action. `input.settings` contains that extension's saved preferences plus schema defaults. The empty model uses MacHelper's shared provider/model selection. The AI result includes text and the actual model. The host controls model attribution in its result panel.
+
+On MacHelper 4.1 or later, the optional second argument of `MacHelper.ai.transform(request, onProgress)` receives incremental `{text, delta, model}` updates. `text` is the accumulated output; `delta` is the latest provider chunk. The Promise resolves only after a validated final answer. Without a callback, the existing Promise-only API is unchanged.
+
+`input.reportProgress({text, title})` displays a cumulative provisional command result. It requires `ui.panel` and is bound to the current command invocation. A tool can apply its own formatting to both partial and final text. The panel updates as chunks arrive, preserves the reader's scroll position, and enables Copy only after completion. Progress callbacks from cancelled, stopped, reloaded, or older invocations are discarded. On failure, partial text is marked incomplete. Progress and results are never saved as tool preferences.
 
 `MacHelper.readText(path)` reads a frozen UTF-8 resource from the current source generation. It does not open arbitrary files. Editing a prompt or script creates a new generation; an in-flight old command cannot accidentally read a mixture of old and new files. Source text and guidance are sent through the same answer-only AI helper. Tools remain disabled.
 

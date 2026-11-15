@@ -75,14 +75,16 @@ public struct HelperRequest: Decodable, Sendable {
     public let provider: String?
     public let baseURL: String?
     public let guidance: String?
+    public let stream: Bool?
 
-    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil) {
+    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil, stream: Bool? = nil) {
         self.id = id; self.action = action; self.text = text
         self.targetLanguage = targetLanguage; self.tone = tone
         self.model = model
         self.provider = provider
         self.baseURL = baseURL
         self.guidance = guidance
+        self.stream = stream
     }
 
     public func validate() throws {
@@ -154,6 +156,19 @@ public struct HelperRequest: Decodable, Sendable {
     }
 }
 
+/// Optional incremental output. Clients still wait for the ordinary terminal
+/// HelperResponse before treating an answer as complete and validated.
+public struct HelperStreamUpdate: Encodable, Sendable {
+    public let id: String
+    public let event = "delta"
+    public let delta: String
+    public let model: String?
+
+    public init(id: String, delta: String, model: String? = nil) {
+        self.id = id; self.delta = delta; self.model = model
+    }
+}
+
 public struct HelperResponse: Encodable, Sendable {
     public let id: String
     public let ok: Bool
@@ -166,10 +181,10 @@ public struct HelperResponse: Encodable, Sendable {
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "4.0.0"; error = nil; models = nil; defaultModel = nil
+        version = "4.1.0"; error = nil; models = nil; defaultModel = nil
     }
     public init(id: String, catalog: LocalGPTModelCatalog) {
-        self.id = id; ok = true; text = nil; model = nil; version = "4.0.0"; error = nil
+        self.id = id; ok = true; text = nil; model = nil; version = "4.1.0"; error = nil
         models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {

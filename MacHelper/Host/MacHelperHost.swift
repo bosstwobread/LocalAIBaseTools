@@ -119,7 +119,19 @@ private final class NativeHost {
                     let catalog = try await self.client.listModels(workingDirectory: self.workingDirectory, settings: settings)
                     if !self.ended { self.write(.init(id: request.id, catalog: catalog)) }
                 } else {
-                    let result = try await self.client.answer(request: request, workingDirectory: self.workingDirectory, settings: settings)
+                    let progress: (@Sendable (String, String) -> Void)?
+                    if request.stream == true {
+                        progress = { [weak self] delta, model in
+                            // AIProviderClient delivers ordered callbacks on the
+                            // main actor. Completion cannot overtake this write.
+                            MainActor.assumeIsolated {
+                                guard let self, !self.ended else { return }
+                                self.writeDelta(delta, model: model, id: request.id)
+                            }
+                        }
+                    } else { progress = nil }
+                    let result = try await self.client.answer(request: request, workingDirectory: self.workingDirectory,
+                                                              settings: settings, onDelta: progress)
                     if !self.ended { self.write(.init(id: request.id, text: result.text, model: result.model)) }
                 }
             } catch {
@@ -137,6 +149,25 @@ private final class NativeHost {
             do { bytes = try NativeFrameEncoder.encode(response) }
             catch { bytes = try NativeFrameEncoder.encode(HelperResponse(id: response.id, error: error.localizedDescription)) }
             try FileHandle.standardOutput.write(contentsOf: bytes)
+        } catch { end() }
+    }
+
+    private func writeDelta(_ delta: String, model: String, id: String) {
+        // A provider may deliver a large delta. Bound each native frame even
+        // when JSON escaping expands its text; preserve Unicode scalar order.
+        var part = "", size = 0
+        func flush() throws {
+            guard !part.isEmpty else { return }
+            try FileHandle.standardOutput.write(contentsOf: NativeFrameEncoder.encode(HelperStreamUpdate(id: id, delta: part, model: model)))
+            part = ""; size = 0
+        }
+        do {
+            for scalar in delta.unicodeScalars {
+                let value = String(scalar), bytes = value.utf8.count
+                if size + bytes > 8 * 1024 { try flush() }
+                part += value; size += bytes
+            }
+            try flush()
         } catch { end() }
     }
 

@@ -15,12 +15,38 @@ public struct CapabilityTranslationResult: Equatable, Sendable {
     }
 }
 
+/// Escaping progress callbacks can outlive cancellation or even the final
+/// response. One active ticket binds every update to both operation and selection.
+struct CapabilityOperationGate {
+    struct Ticket: Equatable {
+        let operation: UInt64
+        let selection: UInt64
+    }
+    private var generation: UInt64 = 0
+    private var active: Ticket?
+
+    mutating func begin(selectionGeneration: UInt64) -> Ticket {
+        generation &+= 1
+        let ticket = Ticket(operation: generation, selection: selectionGeneration)
+        active = ticket
+        return ticket
+    }
+
+    mutating func invalidate() { generation &+= 1; active = nil }
+    mutating func finish(_ ticket: Ticket) { if active == ticket { active = nil } }
+
+    func accepts(_ ticket: Ticket, selection: SelectionState, running: Bool, cancelled: Bool) -> Bool {
+        running && !cancelled && active == ticket && selection.acceptsResult(for: ticket.selection)
+    }
+}
+
 /// Reusable read-only selection, explicit-action, and result-panel capability.
 /// The host owns lifecycle, settings, and permissions. Source tools supply the
 /// asynchronous operation and can be reloaded without rebuilding this module.
 @MainActor
 public final class SelectionTranslationCapability {
     public var onPerform: (@MainActor (String) async throws -> CapabilityTranslationResult)?
+    public var onPerformStreaming: (@MainActor (String, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult)?
     public var onPresentOverlay: (() -> Void)?
     public var onStatusChange: (() -> Void)?
     public private(set) var isRunning = false
@@ -32,7 +58,7 @@ public final class SelectionTranslationCapability {
     private var state = SelectionState()
     private var operationTask: Task<Void, Never>?
     private var manualSelection = false
-    private var operationGeneration: UInt64 = 0
+    private var operationGate = CapabilityOperationGate()
 
     public init(title: String, systemSymbolName: String = "character.bubble") {
         panels = FloatingCapabilityPanels(toolTitle: title, systemSymbolName: systemSymbolName)
@@ -92,7 +118,7 @@ public final class SelectionTranslationCapability {
     }
 
     public func dismiss() {
-        operationGeneration &+= 1
+        operationGate.invalidate()
         operationTask?.cancel()
         operationTask = nil
         state.dismiss()
@@ -108,7 +134,7 @@ public final class SelectionTranslationCapability {
         case .empty, .unavailable: selection = nil
         }
         guard state.observe(selection) else { return }
-        operationGeneration &+= 1
+        operationGate.invalidate()
         operationTask?.cancel()
         operationTask = nil
         if let selection, state.canTranslate { panels.showIcon(near: selection.bounds) }
@@ -118,26 +144,40 @@ public final class SelectionTranslationCapability {
     private func performSelection() {
         guard isRunning, state.canTranslate, let selection = state.selection else { return }
         operationTask?.cancel()
-        operationGeneration &+= 1
-        let requestGeneration = operationGeneration
-        let selectionGeneration = state.generation
+        let ticket = operationGate.begin(selectionGeneration: state.generation)
         panels.showLoading(near: selection.bounds)
         operationTask = Task { [weak self] in
             guard let self else { return }
             do {
-                guard let perform = self.onPerform else { throw CapabilityError.invalid("This tool has no action configured. Reload its source extension and try again.") }
-                let result = try await perform(selection.text)
-                guard !Task.isCancelled, self.isRunning,
-                      self.operationGeneration == requestGeneration,
-                      self.state.acceptsResult(for: selectionGeneration) else { return }
+                let result: CapabilityTranslationResult
+                if let streaming = self.onPerformStreaming {
+                    result = try await streaming(selection.text) { [weak self] progress in
+                        guard let self, self.operationGate.accepts(ticket, selection: self.state,
+                                                                 running: self.isRunning, cancelled: Task.isCancelled) else { return }
+                        // Source tools send cumulative previews. Keep rendering
+                        // bounded even if a broken tool emits oversized output.
+                        guard progress.text.utf8.count <= CapabilityFrame.maximumBytes else { return }
+                        self.panels.showProgress(progress, near: selection.bounds)
+                    }
+                } else if let perform = self.onPerform {
+                    result = try await perform(selection.text)
+                } else {
+                    throw CapabilityError.invalid("This tool has no action configured. Reload its source extension and try again.")
+                }
+                guard self.operationGate.accepts(ticket, selection: self.state,
+                                                running: self.isRunning, cancelled: Task.isCancelled) else { return }
                 guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw CapabilityError.invalid("The tool returned an empty result.")
                 }
+                guard result.text.utf8.count <= CapabilityFrame.maximumBytes else {
+                    throw CapabilityError.invalid("The tool returned too much text to display.")
+                }
+                self.operationGate.finish(ticket)
                 self.panels.showResult(result, near: selection.bounds)
             } catch {
-                guard !Task.isCancelled, self.isRunning,
-                      self.operationGeneration == requestGeneration,
-                      self.state.acceptsResult(for: selectionGeneration) else { return }
+                guard self.operationGate.accepts(ticket, selection: self.state,
+                                                running: self.isRunning, cancelled: Task.isCancelled) else { return }
+                self.operationGate.finish(ticket)
                 self.panels.showError(error.localizedDescription, near: selection.bounds)
             }
         }
