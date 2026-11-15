@@ -14,37 +14,82 @@ struct AccessibilitySelectionReader {
     /// polling never reads surrounding text, even for a selected word.
     func sentence(for selection: TextSelection) -> String? {
         guard SelectionSentenceContext.isSingleWord(selection.text) else { return nil }
+        let deadline = ProcessInfo.processInfo.systemUptime + 1.5
+        func withinBudget() -> Bool { ProcessInfo.processInfo.systemUptime < deadline }
+        func readAttribute(_ name: String, of element: AXUIElement) -> CFTypeRef? {
+            guard withinBudget() else { return nil }
+            return attribute(name, of: element)
+        }
+        func readRange(of element: AXUIElement) -> NSRange? {
+            guard withinBudget() else { return nil }
+            return selectedRange(of: element)
+        }
         let app = AXUIElementCreateApplication(selection.sourcePID)
         AXUIElementSetMessagingTimeout(app, 0.18)
         guard let focused = attribute(kAXFocusedUIElementAttribute, of: app),
               CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
         var element = focused as! AXUIElement
-        for _ in 0..<4 {
+        var ancestors: [AXUIElement] = []
+        // Stay on the focused element's short ancestor chain. A browser may
+        // expose selected text on one node and document markers on its WebArea.
+        for _ in 0..<8 {
+            guard withinBudget(), !ancestors.contains(where: { CFEqual($0, element) }) else { break }
             AXUIElementSetMessagingTimeout(element, 0.18)
-            guard !isProtected(element) else { return nil }
-            if let selected = attribute(kAXSelectedTextAttribute, of: element) as? String {
-                guard selected == selection.text else { return nil }
-                let expected = NSRange(location: selection.rangeLocation, length: selection.rangeLength)
-                let originalRange = selectedRange(of: element)
-                if let originalRange, selection.rangeLocation >= 0,
-                   originalRange != expected { return nil }
-                var result: String?
-                if let originalRange, let count = attribute(kAXNumberOfCharactersAttribute, of: element) as? Int,
-                   let window = SelectionSentenceContext.window(selection: originalRange, documentUTF16Length: count),
-                   !isProtected(element),
-                   let text = string(for: window, in: element),
-                   (attribute(kAXNumberOfCharactersAttribute, of: element) as? Int) == count {
-                    result = SelectionSentenceContext.sentence(selected: selected, selection: originalRange,
-                        windowText: text, windowRange: window, documentUTF16Length: count)
-                }
-                if result == nil { result = markerSentence(selected: selected, in: element) }
-                guard !isProtected(element), (attribute(kAXSelectedTextAttribute, of: element) as? String) == selected,
-                      selectedRange(of: element) == originalRange,
-                      let currentFocus = attribute(kAXFocusedUIElementAttribute, of: app), CFEqual(focused, currentFocus) else { return nil }
-                return result
-            }
-            guard let parent = attribute(kAXParentAttribute, of: element), CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+            guard !isProtected(element, continuing: withinBudget) else { return nil }
+            ancestors.append(element)
+            if CFEqual(element, app) { break }
+            guard let parent = readAttribute(kAXParentAttribute, of: element),
+                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
             element = parent as! AXUIElement
+        }
+        // Prove the same source selection that the normal reader observed.
+        // Its numeric offsets belong to this node, never to an ancestor.
+        var origin: (index: Int, range: NSRange?)?
+        for (index, candidate) in ancestors.prefix(4).enumerated() {
+            guard withinBudget() else { return nil }
+            if let text = readAttribute(kAXSelectedTextAttribute, of: candidate) as? String {
+                guard text == selection.text else { return nil }
+                let range = readRange(of: candidate)
+                if selection.rangeLocation >= 0,
+                   range != NSRange(location: selection.rangeLocation, length: selection.rangeLength) { return nil }
+                origin = (index, range)
+                break
+            }
+        }
+        guard let origin else { return nil }
+        let source = ancestors[origin.index]
+        func currentSelection() -> Bool {
+            guard withinBudget(), AXIsProcessTrusted(),
+                  ancestors.allSatisfy({ !isProtected($0, continuing: withinBudget) }), withinBudget(),
+                  (readAttribute(kAXSelectedTextAttribute, of: source) as? String) == selection.text,
+                  readRange(of: source) == origin.range,
+                  let currentFocus = readAttribute(kAXFocusedUIElementAttribute, of: app),
+                  CFEqual(focused, currentFocus) else { return false }
+            return withinBudget()
+        }
+        for candidate in ancestors.dropFirst(origin.index) {
+            guard withinBudget() else { return nil }
+            var result: String?
+            let role = readAttribute(kAXRoleAttribute, of: candidate) as? String
+            // Numeric ranges describe the whole text control in editors. A
+            // browser's static inline node may describe only a sentence fragment.
+            if [kAXTextAreaRole, kAXTextFieldRole].contains(role ?? ""),
+               (readAttribute(kAXSelectedTextAttribute, of: candidate) as? String) == selection.text,
+               let range = readRange(of: candidate),
+               let count = readAttribute(kAXNumberOfCharactersAttribute, of: candidate) as? Int,
+               let window = SelectionSentenceContext.window(selection: range, documentUTF16Length: count),
+               currentSelection(), let text = string(for: window, in: candidate),
+               withinBudget(), (readAttribute(kAXNumberOfCharactersAttribute, of: candidate) as? Int) == count,
+               readRange(of: candidate) == range {
+                result = SelectionSentenceContext.sentence(selected: selection.text, selection: range,
+                    windowText: text, windowRange: window, documentUTF16Length: count)
+            }
+            if result == nil {
+                result = markerSentence(selected: selection.text, in: candidate,
+                                        withinBudget: withinBudget, canReadText: currentSelection)
+            }
+            if let result { return currentSelection() ? result : nil }
+            // Unsupported context on a child must not hide a capable WebArea.
         }
         return nil
     }
@@ -115,33 +160,56 @@ struct AccessibilitySelectionReader {
         return self.parameter(kAXStringForRangeParameterizedAttribute, value: parameter, in: element) as? String
     }
 
-    private func markerSentence(selected: String, in element: AXUIElement) -> String? {
-        // Browser engines may expose opaque text markers instead of numeric
-        // character ranges. All text reads still have a verified length bound.
-        var names: CFArray?
-        guard AXUIElementCopyParameterizedAttributeNames(element, &names) == .success,
-              let supported = names as? [String],
-              Set(["AXSentenceTextMarkerRangeForTextMarker", "AXLengthForTextMarkerRange", "AXStringForTextMarkerRange"]).isSubset(of: Set(supported)),
-              let selectedMarker = attribute("AXSelectedTextMarkerRange", of: element),
-              let selectedLength = parameter("AXLengthForTextMarkerRange", value: selectedMarker, in: element) as? Int,
-              selectedLength == selected.utf16.count,
-              // Some WebKit versions implement this metadata-only parameter
-              // without advertising it. A failed query returns nil; sentence
-              // text still waits for the advertised API and verified length.
-              let start = parameter("AXStartTextMarkerForTextMarkerRange", value: selectedMarker, in: element),
-              let sentenceRange = parameter("AXSentenceTextMarkerRangeForTextMarker", value: start, in: element),
-              let length = parameter("AXLengthForTextMarkerRange", value: sentenceRange, in: element) as? Int,
-              !isProtected(element) else { return nil }
-        let result = SelectionSentenceContext.readBoundedSentence(selected: selected, reportedUTF16Length: length) {
-            parameter("AXStringForTextMarkerRange", value: sentenceRange, in: element) as? String
+    private func markerSentence(selected: String, in element: AXUIElement,
+                                withinBudget: @escaping () -> Bool,
+                                canReadText: @escaping () -> Bool) -> String? {
+        func query(_ name: String, _ value: CFTypeRef) -> CFTypeRef? {
+            guard withinBudget() else { return nil }
+            return parameter(name, value: value, in: element)
         }
-        guard
-              let currentMarker = attribute("AXSelectedTextMarkerRange", of: element), CFEqual(selectedMarker, currentMarker) else { return nil }
-        return result
+        func range(_ value: CFTypeRef?) -> AXTextMarkerRange? {
+            guard let value, CFGetTypeID(value) == AXTextMarkerRangeGetTypeID() else { return nil }
+            return (value as! AXTextMarkerRange)
+        }
+        func marker(_ value: CFTypeRef?) -> AXTextMarker? {
+            guard let value, CFGetTypeID(value) == AXTextMarkerGetTypeID() else { return nil }
+            return (value as! AXTextMarker)
+        }
+        return TextMarkerSentenceReader<AXTextMarkerRange, AXTextMarker>(
+            selectedRange: {
+                guard withinBudget(), let selectedRange = range(attribute("AXSelectedTextMarkerRange", of: element)) else { return nil }
+                // Marker ranges can follow a backwards drag. Ask the provider
+                // to order the opaque endpoints; never infer document offsets.
+                let endpoints = [AXTextMarkerRangeCopyStartMarker(selectedRange), AXTextMarkerRangeCopyEndMarker(selectedRange)] as CFArray
+                return range(query("AXTextMarkerRangeForUnorderedTextMarkers", endpoints))
+            },
+            equalsRange: { CFEqual($0, $1) },
+            startMarker: { AXTextMarkerRangeCopyStartMarker($0) },
+            endMarker: { AXTextMarkerRangeCopyEndMarker($0) },
+            makeRange: { AXTextMarkerRangeCreate(nil, $0, $1) },
+            paragraphRange: { selectedRange in
+                // Chromium's built-in sentence/paragraph expansion can stop at
+                // inline links/bold text. Explicit navigation crosses anchors.
+                // Opposite endpoints also handle first/last words in a paragraph.
+                let start = AXTextMarkerRangeCopyStartMarker(selectedRange)
+                let end = AXTextMarkerRangeCopyEndMarker(selectedRange)
+                guard let paragraphStart = marker(query("AXPreviousParagraphStartTextMarkerForTextMarker", end)),
+                      let paragraphEnd = marker(query("AXNextParagraphEndTextMarkerForTextMarker", start)) else { return nil }
+                return AXTextMarkerRangeCreate(nil, paragraphStart, paragraphEnd)
+            },
+            length: { query("AXLengthForTextMarkerRange", $0) as? Int },
+            string: {
+                guard canReadText() else { return nil }
+                return query("AXStringForTextMarkerRange", $0) as? String
+            },
+            canRead: withinBudget
+        ).read(selected: selected)
     }
 
-    private func isProtected(_ element: AXUIElement) -> Bool {
+    private func isProtected(_ element: AXUIElement, continuing: () -> Bool = { true }) -> Bool {
+        guard continuing() else { return true }
         if (attribute(kAXSubroleAttribute, of: element) as? String) == kAXSecureTextFieldSubrole { return true }
+        guard continuing() else { return true }
         return (attribute("AXProtectedContent", of: element) as? Bool) == true
     }
 

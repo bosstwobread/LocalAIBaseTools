@@ -494,7 +494,7 @@ public final class LocalGPTClient {
     private func initializeServer(workingDirectory: URL, disabledMCPServers: [String]) async throws -> [String: Any] {
         try transport.start(workingDirectory: workingDirectory, disabledMCPServers: disabledMCPServers)
         _ = try await request("initialize", [
-            "clientInfo": ["name": "mac_helper", "title": "MacHelper", "version": "4.3.0"],
+            "clientInfo": ["name": "mac_helper", "title": "MacHelper", "version": "4.3.1"],
             "capabilities": ["experimentalApi": false]
         ])
         try send(["method": "initialized"])

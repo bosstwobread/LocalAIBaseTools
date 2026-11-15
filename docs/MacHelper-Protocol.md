@@ -20,7 +20,7 @@ Optional `guidance` carries an editable tool's translation/editing style, such a
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"4.3.0","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"4.3.1","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -28,7 +28,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"4.3.0","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"4.3.1","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.

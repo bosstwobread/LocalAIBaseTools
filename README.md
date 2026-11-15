@@ -65,6 +65,8 @@ Select text in another app. A small icon appears above/below the selection accor
 
 With MacHelper 4.3 and Translation 4.2, selecting one word shows its meaning in the enclosing sentence, followed by that sentence's full translation. The sentence is read only when you click the icon, through bounded Accessibility ranges. If the app cannot supply it, the panel gives a standalone word meaning and notes that sentence context is unavailable. Longer selections keep the normal translation behavior.
 
+MacHelper 4.3.1 also reads sentence context from supported read-only browser text. It orders opaque text-marker endpoints, reads a complete paragraph of at most 2,000 UTF-16 units, and extracts the selected word's sentence locally. This handles backwards selections and inline text split by links or formatting. Unsupported apps or oversized paragraphs keep the context-unavailable fallback.
+
 Protected/password fields, images, and apps that do not expose selected text through Accessibility cannot be read automatically. Copy text yourself and use the explicit **Translate Clipboard…** action for those cases. Translation never simulates Copy or changes the clipboard automatically; the result's Copy button requires a click. **Try Demo…** tests the real AI connection with synthetic text without requiring Accessibility.
 
 Use **Edit Source** to open Translation's installed working folder. Change `main.js`, `prompts/translate.txt`, or its settings schema and save. The watcher debounces saves, validates a candidate, and replaces only that extension's worker. Invalid edits show an error while the last working generation remains active. Settings stay separate, and re-enabling does not overwrite local edits. **Reload** performs the same validation on demand.

@@ -3,7 +3,7 @@
   "baseUrl": "https://local-ai-extension.nelson007.com/",
   "sourceUrl": "https://github.com/bosstwobread/LocalAIBaseTools",
   "macHelper": {
-    "version": "4.3.0",
+    "version": "4.3.1",
     "minimumOS": "macOS 14+",
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
