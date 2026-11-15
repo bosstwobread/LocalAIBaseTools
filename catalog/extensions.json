@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "extensions": [
+    {
+      "identifier": "com.localaibasetools.translation",
+      "displayName": "Translation",
+      "version": "4.0.0",
+      "summary": "Translate selected text with editable local scripts and prompts.",
+      "files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/LICENSE",
+          "sha256": "440e6585ed0fdb621839a4431bc7d1ad2306557df0d7a50596d2f48973801a9f",
+          "size": 1063
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/README.md",
+          "sha256": "1cfeff537e6924d61988f5a216064dc8e4e009be46237f78254115c0c5207d64",
+          "size": 2022
+        },
+        {
+          "path": "extension.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/extension.json",
+          "sha256": "a0e5816e98d30a077727bac8d12d0d1a092e9fdbb1b07c9a16110414fcb24334",
+          "size": 479
+        },
+        {
+          "path": "main.js",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/main.js",
+          "sha256": "3f1df51d70c707f9dc698cf3d00c457acaccb7772ff215becdfccb62fdcfb987",
+          "size": 794
+        },
+        {
+          "path": "prompts/translate.txt",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/prompts/translate.txt",
+          "sha256": "007c7c9bbd05af0329ec826fbf5241cc1acc8c748f6fb906a07bc487fdc900c5",
+          "size": 300
+        },
+        {
+          "path": "settings.schema.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/settings.schema.json",
+          "sha256": "f4111429f6e95936b6b431845892de1e91555859605b052c31ad32fa6da19f44",
+          "size": 824
+        }
+      ]
+    }
+  ]
+}

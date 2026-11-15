@@ -1,5 +1,5 @@
 import XCTest
-@testable import Translation
+@testable import MacHelperCapabilities
 
 final class GeometryTests: XCTestCase {
     func testAccessibilityConversionUsesMainScreenTop() {

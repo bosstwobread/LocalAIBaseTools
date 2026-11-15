@@ -87,7 +87,7 @@ final class SelectionMonitor {
     private var localMonitor: Any?
     private var workspaceObserver: NSObjectProtocol?
     private var debounce: DispatchWorkItem?
-    private let readQueue = DispatchQueue(label: "org.localaibasetools.translation.selection", qos: .userInitiated)
+    private let readQueue = DispatchQueue(label: "org.localaibasetools.capabilities.selection", qos: .userInitiated)
     private var reading = false
     private var dragging = false
     private var trusted = false

@@ -74,13 +74,15 @@ public struct HelperRequest: Decodable, Sendable {
     public let model: String?
     public let provider: String?
     public let baseURL: String?
+    public let guidance: String?
 
-    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil) {
+    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil) {
         self.id = id; self.action = action; self.text = text
         self.targetLanguage = targetLanguage; self.tone = tone
         self.model = model
         self.provider = provider
         self.baseURL = baseURL
+        self.guidance = guidance
     }
 
     public func validate() throws {
@@ -101,6 +103,9 @@ public struct HelperRequest: Decodable, Sendable {
         }
         if let baseURL, baseURL.utf8.count > 2048 {
             throw MacHelperError.invalid("The local service address is too long.")
+        }
+        if let guidance, guidance.count > 12_000 || guidance.utf8.count > 48_000 || guidance.contains("\0") {
+            throw MacHelperError.invalid("Translation guidance must contain at most 12,000 characters and no null characters.")
         }
         guard action != .ping, action != .listModels else { return }
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -138,12 +143,14 @@ public struct HelperRequest: Decodable, Sendable {
     /// A JSON field prevents quoted message content from becoming request instructions.
     public func prompt() throws -> String {
         try validate()
-        return String(decoding: try JSONSerialization.data(withJSONObject: [
+        var fields = [
             "action": action.rawValue,
             "targetLanguage": action == .polish ? "en" : targetLanguage ?? "zh-CN",
             "tone": tone ?? "professional",
             "text": text ?? ""
-        ], options: [.sortedKeys]), as: UTF8.self)
+        ]
+        if let guidance, !guidance.isEmpty { fields["guidance"] = guidance }
+        return String(decoding: try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]), as: UTF8.self)
     }
 }
 
@@ -159,10 +166,10 @@ public struct HelperResponse: Encodable, Sendable {
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "3.0.0"; error = nil; models = nil; defaultModel = nil
+        version = "4.0.0"; error = nil; models = nil; defaultModel = nil
     }
     public init(id: String, catalog: LocalGPTModelCatalog) {
-        self.id = id; ok = true; text = nil; model = nil; version = "3.0.0"; error = nil
+        self.id = id; ok = true; text = nil; model = nil; version = "4.0.0"; error = nil
         models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {

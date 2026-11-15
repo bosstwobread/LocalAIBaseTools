@@ -9,6 +9,12 @@ enum MacHelperApplication {
         signal(SIGPIPE, SIG_IGN)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--verify-source-extensions") {
+            app.setActivationPolicy(.prohibited)
+            Task { @MainActor in exit(await SourceExtensionVerification.run()) }
+            RunLoop.main.run()
+            return
+        }
         if CommandLine.arguments.contains("--verify-extensions") {
             app.setActivationPolicy(.prohibited)
             ExtensionVerification.run()
@@ -28,7 +34,10 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var container: NSView!
     private var statusItem: NSStatusItem?
     private let ai = AISettingsViewController()
-    private var extensions: ExtensionsViewController!
+    private var extensions: SourceExtensionsViewController!
+    private var nativeExtensions: ExtensionsViewController!
+    private var sourceManager: SourceExtensionManager!
+    private var startupTask: Task<Void, Never>?
     private var general: GeneralSettingsViewController!
     private var currentController: NSViewController?
     private var rootController: NSViewController!
@@ -45,9 +54,19 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             hideSettings: { [weak self] in self?.window?.orderOut(nil) })
         registry.refresh()
         registry.startEnabled()
-        extensions = ExtensionsViewController(registry: registry)
+        let bin = Bundle.main.executableURL!.deletingLastPathComponent()
+        sourceManager = SourceExtensionManager(workerExecutableURL: bin.appendingPathComponent("MacHelperScriptWorker"),
+            helperExecutableURL: bin.appendingPathComponent("mac-helper-host"),
+            bundledCatalogURL: Bundle.main.resourceURL!.appendingPathComponent("SourceCatalog/extensions.json"),
+            bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds/Translation"))
+        sourceManager.onOpenAISettings = { [weak self] in self?.showSettings(tab: 0) }
+        sourceManager.onHideSettings = { [weak self] in self?.window?.orderOut(nil) }
+        extensions = SourceExtensionsViewController(manager: sourceManager)
+        nativeExtensions = ExtensionsViewController(registry: registry)
+        extensions.onShowNativeExtensions = { [weak self] in self?.showNativeExtensions() }
         general = GeneralSettingsViewController(login: login)
         createWindow()
+        startupTask = Task { [weak self] in await self?.sourceManager.start() }
         // The first Apple open event carries the login launch reason. Do not
         // open a window here: a login launch must remain in the menu bar.
         if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
@@ -73,7 +92,13 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    func applicationWillTerminate(_ notification: Notification) { registry?.stopAll() }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        startupTask?.cancel()
+        registry?.stopAll()
+        guard sourceManager != nil else { return .terminateNow }
+        Task { [weak self] in await self?.sourceManager.stopAll(); NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         if general != nil, currentController === general { general.refreshStatus() }
@@ -176,6 +201,23 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         ])
         if index == 1 { extensions.refreshDisplay() }
         if index == 2 { general.refreshStatus() }
+    }
+
+    private func showNativeExtensions() {
+        currentController?.view.removeFromSuperview()
+        currentController?.removeFromParent()
+        currentController = nativeExtensions
+        rootController.addChild(nativeExtensions)
+        let view = nativeExtensions.view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        nativeExtensions.refreshDisplay()
     }
 
     @objc private func tabChanged() { showTab(tabs.selectedSegment) }

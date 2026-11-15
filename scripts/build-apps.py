@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build one MacHelper.app containing the independently built Translation extension."""
+"""Build MacHelper with generic capabilities and an editable Translation source catalog."""
 import argparse
 import plistlib
 import re
@@ -42,7 +42,6 @@ def main():
     args = parser.parse_args()
     identity = signing_identity(args.signing_identity)
     helper_bin = build(ROOT / "MacHelper")
-    translation_bin = build(ROOT / "Extensions/Translation")
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     legacy_artifact = dist / "Translation.app"
@@ -62,28 +61,24 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "3.0.0", "CFBundleVersion": "300",
+        "CFBundleShortVersionString": "4.0.0", "CFBundleVersion": "400",
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",
         "NSHighResolutionCapable": True, "LSUIElement": True,
         "NSHumanReadableCopyright": "© 2026 LocalAIBaseTools contributors. MIT License.",
     }
     with (contents / "Info.plist").open("wb") as stream:
         plistlib.dump(metadata, stream)
-    plugin = contents / "PlugIns/Translation.machextension/Contents"
-    (plugin / "MacOS").mkdir(parents=True)
-    (plugin / "Resources").mkdir()
-    shutil.copy2(translation_bin / "libTranslation.dylib", plugin / "MacOS/libTranslation.dylib")
-    shutil.copy2(ROOT / "Extensions/Translation/extension.json", plugin / "Resources/extension.json")
-    with (plugin / "Info.plist").open("wb") as stream:
-        plistlib.dump({"CFBundleName": "Translation", "CFBundleIdentifier": "com.localaibasetools.translation",
-                      "CFBundleExecutable": "libTranslation.dylib", "CFBundlePackageType": "BNDL",
-                      "CFBundleShortVersionString": "2.1.0", "CFBundleVersion": "210",
-                      "NSPrincipalClass": "TranslationExtension"}, stream)
-    sign(plugin / "MacOS/libTranslation.dylib", identity)
-    sign(plugin.parent, identity)
+    worker = contents / "MacOS/MacHelperScriptWorker"
+    shutil.copy2(helper_bin / "MacHelperScriptWorker", worker)
+    sign(worker, identity)
+    resources = contents / "Resources"
+    (resources / "SourceCatalog").mkdir(parents=True)
+    shutil.copy2(ROOT / "catalog/extensions.json", resources / "SourceCatalog/extensions.json")
+    shutil.copytree(ROOT / "Extensions/Translation", resources / "SourceSeeds/Translation",
+                    ignore=shutil.ignore_patterns(".*", "__pycache__"))
     sign(app, identity, "com.localaibasetools.mac-helper")
     print(f"Built {app}")
-    print("Translation is bundled inside MacHelper; no separate Translation app is built or installed.")
+    print("Translation source installs into its editable working folder when enabled; hot reload uses an independent worker.")
 
 
 if __name__ == "__main__":

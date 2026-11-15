@@ -1,5 +1,5 @@
 import XCTest
-@testable import Translation
+@testable import MacHelperCapabilities
 
 final class SelectionStateTests: XCTestCase {
     private func selection(_ text: String = "hello", pid: Int32 = 100, x: CGFloat = 100) -> TextSelection {

@@ -1,26 +1,31 @@
 import AppKit
 
-private final class TranslationPanel: NSPanel {
+private final class CapabilityPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 
 @MainActor
-final class FloatingTranslationPanels {
-    var onTranslate: (() -> Void)?
+final class FloatingCapabilityPanels {
+    var onPerform: (() -> Void)?
     var onDismiss: (() -> Void)?
     private let iconPanel: NSPanel
     private let resultPanel: NSPanel
-    private let title = NSTextField(labelWithString: "Translation")
+    private let title = NSTextField(labelWithString: "")
     private let output = NSTextView()
     private let footer = NSTextField(labelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
-    private var translatedText: String?
+    private var resultText: String?
 
-    init() {
-        iconPanel = Self.panel(size: NSSize(width: 34, height: 34))
-        resultPanel = Self.panel(size: NSSize(width: 380, height: 268))
+    private let toolTitle: String
+    private let systemSymbolName: String
+
+    init(toolTitle: String, systemSymbolName: String) {
+        self.toolTitle = toolTitle
+        self.systemSymbolName = systemSymbolName
+        iconPanel = Self.panel(title: toolTitle, size: NSSize(width: 34, height: 34))
+        resultPanel = Self.panel(title: toolTitle, size: NSSize(width: 380, height: 268))
         buildIcon()
         buildResult()
     }
@@ -38,20 +43,20 @@ final class FloatingTranslationPanels {
         iconPanel.orderFrontRegardless()
     }
 
-    func showLoading(near anchor: CGRect, language: String) {
-        translatedText = nil
-        title.stringValue = "Translating to \(language)…"
-        output.string = "Waiting for your local AI connection…"
+    func showLoading(near anchor: CGRect) {
+        resultText = nil
+        title.stringValue = toolTitle + "…"
+        output.string = "Working…"
         footer.stringValue = "MacHelper · shared AI settings"
         copyButton.isEnabled = false
         retryButton.isHidden = true
         showResult(near: anchor)
     }
 
-    func showResponse(_ response: TranslationResponse, near anchor: CGRect, language: String) {
-        translatedText = response.text
-        title.stringValue = language
-        output.string = response.text ?? ""
+    func showResult(_ response: CapabilityTranslationResult, near anchor: CGRect) {
+        resultText = response.text
+        title.stringValue = response.title ?? toolTitle
+        output.string = response.text
         footer.stringValue = response.model ?? "MacHelper · shared AI settings"
         footer.toolTip = response.model
         copyButton.isEnabled = true
@@ -60,10 +65,10 @@ final class FloatingTranslationPanels {
     }
 
     func showError(_ message: String, near anchor: CGRect, canRetry: Bool = true) {
-        translatedText = nil
-        title.stringValue = "Couldn’t translate"
+        resultText = nil
+        title.stringValue = "Couldn’t complete " + toolTitle
         output.string = message
-        footer.stringValue = canRetry ? "Check MacHelper settings and try again." : "Translate text you have already copied."
+        footer.stringValue = canRetry ? "Check MacHelper settings and try again." : "Copy text, then choose the clipboard action."
         footer.toolTip = nil
         copyButton.isEnabled = false
         retryButton.isHidden = !canRetry
@@ -73,12 +78,12 @@ final class FloatingTranslationPanels {
     func hide() {
         iconPanel.orderOut(nil)
         resultPanel.orderOut(nil)
-        translatedText = nil
+        resultText = nil
         output.string = ""
     }
 
-    private static func panel(size: NSSize) -> NSPanel {
-        let panel = TranslationPanel(contentRect: NSRect(origin: .zero, size: size),
+    private static func panel(title: String, size: NSSize) -> NSPanel {
+        let panel = CapabilityPanel(contentRect: NSRect(origin: .zero, size: size),
                                      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -89,19 +94,19 @@ final class FloatingTranslationPanels {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
-        panel.setAccessibilityLabel("Translation")
+        panel.setAccessibilityLabel(title)
         return panel
     }
 
     private func buildIcon() {
         let background = Self.background()
         iconPanel.contentView = background
-        let button = NSButton(image: NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Translate selected text")!,
-                              target: self, action: #selector(translate))
+        let button = NSButton(image: NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: toolTitle) ?? NSImage(systemSymbolName: "sparkles", accessibilityDescription: toolTitle)!,
+                              target: self, action: #selector(perform))
         button.isBordered = false
         button.contentTintColor = .controlAccentColor
         button.imageScaling = .scaleProportionallyDown
-        button.toolTip = "Translate selected text"
+        button.toolTip = toolTitle + " · selected text"
         button.translatesAutoresizingMaskIntoConstraints = false
         background.addSubview(button)
         NSLayoutConstraint.activate([
@@ -118,7 +123,7 @@ final class FloatingTranslationPanels {
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss translation")!,
+        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss result")!,
                              target: self, action: #selector(dismiss))
         close.isBordered = false
         close.contentTintColor = .secondaryLabelColor
@@ -141,7 +146,7 @@ final class FloatingTranslationPanels {
         output.isVerticallyResizable = true
         output.autoresizingMask = [.width]
         output.textContainer?.widthTracksTextView = true
-        output.setAccessibilityLabel("Translated text")
+        output.setAccessibilityLabel("Result text")
         let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
@@ -154,11 +159,11 @@ final class FloatingTranslationPanels {
         footer.lineBreakMode = .byTruncatingMiddle
         footer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         copyButton.target = self
-        copyButton.action = #selector(copyTranslation)
+        copyButton.action = #selector(copyResult)
         copyButton.bezelStyle = .rounded
         copyButton.controlSize = .small
         retryButton.target = self
-        retryButton.action = #selector(translate)
+        retryButton.action = #selector(perform)
         retryButton.bezelStyle = .rounded
         retryButton.controlSize = .small
         let bottom = NSStackView(views: [footer, retryButton, copyButton])
@@ -211,14 +216,14 @@ final class FloatingTranslationPanels {
         output.frame.size.width = max(1, panel.frame.width - 26)
     }
 
-    @objc private func translate() { onTranslate?() }
+    @objc private func perform() { onPerform?() }
     @objc private func dismiss() { onDismiss?() }
 
-    @objc private func copyTranslation() {
-        guard let translatedText else { return }
+    @objc private func copyResult() {
+        guard let resultText else { return }
         // This is the only clipboard write and requires a deliberate Copy click.
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(translatedText, forType: .string)
+        NSPasteboard.general.setString(resultText, forType: .string)
         copyButton.title = "Copied"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in self?.copyButton.title = "Copy" }
     }

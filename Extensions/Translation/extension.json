@@ -1,8 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "runtime": "javascript",
   "identifier": "com.localaibasetools.translation",
   "displayName": "Translation",
-  "version": "2.1.0",
-  "summary": "Translate selected text across Mac apps through your shared local AI connection.",
-  "entryPoint": "Contents/MacOS/libTranslation.dylib"
+  "version": "4.0.0",
+  "summary": "Translate selected text with editable local scripts and prompts.",
+  "entryPoint": "main.js",
+  "permissions": ["selection.read", "clipboard.read", "ai.transform", "ui.panel"],
+  "commands": [{"identifier":"translate","title":"Translate","trigger":"selection"}],
+  "settingsSchema": "settings.schema.json"
 }

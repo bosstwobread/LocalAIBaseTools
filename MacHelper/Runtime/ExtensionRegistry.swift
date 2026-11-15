@@ -93,7 +93,7 @@ public final class ExtensionRegistry {
 
     public init(bundledDirectory: URL? = nil, userDirectory: URL = defaultUserDirectory,
                 stateFileURL: URL = defaultStateFileURL, helperExecutableURL: URL = defaultHelperExecutableURL,
-                hostVersion: String = "3.0.0", openAISettings: @escaping () -> Void = {}, hideSettings: @escaping () -> Void = {}) {
+                hostVersion: String = "4.0.0", openAISettings: @escaping () -> Void = {}, hideSettings: @escaping () -> Void = {}) {
         self.bundledDirectory = bundledDirectory; self.userDirectory = userDirectory; self.stateFileURL = stateFileURL
         self.helperExecutableURL = helperExecutableURL; self.hostVersion = hostVersion
         self.openAISettings = openAISettings; self.hideSettings = hideSettings
