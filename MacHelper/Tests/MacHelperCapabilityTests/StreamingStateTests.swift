@@ -2,6 +2,25 @@ import XCTest
 @testable import MacHelperCapabilities
 
 final class StreamingStateTests: XCTestCase {
+    func testIncrementalTextUpdateUsesLiteralUTF16Prefix() {
+        XCTAssertEqual(CapabilityTextUpdate.between(old: "你😊", new: "你😊好"), .append("好"))
+        XCTAssertEqual(CapabilityTextUpdate.between(old: "e", new: "e\u{301}"), .append("\u{301}"))
+        XCTAssertEqual(CapabilityTextUpdate.between(old: "same", new: "same"), .unchanged)
+        // Normalizing an existing prefix must replace it, never slice using the
+        // old decomposed prefix's larger UTF-16 offset.
+        let old = "e\u{301}\u{323}"
+        let normalized = old.precomposedStringWithCanonicalMapping
+        let final = normalized + "!"
+        guard case .replace(let replacement) = CapabilityTextUpdate.between(old: old, new: final) else {
+            return XCTFail("Unicode normalization must replace the displayed prefix")
+        }
+        XCTAssertEqual(Array(replacement.utf16), Array(final.utf16))
+        let decomposedKorean = "\u{1100}\u{1161}\u{11A8}"
+        XCTAssertLessThan(("각!" as NSString).length, (decomposedKorean as NSString).length)
+        XCTAssertEqual(CapabilityTextUpdate.between(old: decomposedKorean, new: "각!"), .replace("각!"))
+        XCTAssertEqual(CapabilityTextUpdate.between(old: "earlier preview", new: "final"), .replace("final"))
+    }
+
     func testProgressBecomesCopyableOnlyAfterTerminalSuccess() {
         var state = CapabilityPresentationState()
         state.begin()

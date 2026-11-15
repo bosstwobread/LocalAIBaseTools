@@ -42,6 +42,23 @@ struct CapabilityPresentationState {
     }
 }
 
+/// AppKit edits use UTF-16 offsets. Canonically equivalent Swift strings can
+/// have different UTF-16 lengths, so only a literal prefix is safe to append.
+enum CapabilityTextUpdate: Equatable {
+    case unchanged
+    case append(String)
+    case replace(String)
+
+    static func between(old: String, new: String) -> Self {
+        let oldLength = (old as NSString).length
+        let newString = new as NSString
+        if newString.length >= oldLength, new.utf16.starts(with: old.utf16) {
+            return newString.length == oldLength ? .unchanged : .append(newString.substring(from: oldLength))
+        }
+        return .replace(new)
+    }
+}
+
 private final class CapabilityPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -274,19 +291,21 @@ final class FloatingCapabilityPanels {
     /// Append growing text without rebuilding the view or resetting a reader's
     /// scroll position. Follow the tail only while they are already at the end.
     private func updateText(_ text: String, resetScroll: Bool = false) {
-        guard output.string != text else { return }
+        let update = CapabilityTextUpdate.between(old: output.string, new: text)
+        guard update != .unchanged else { return }
         let origin = scroll.contentView.bounds.origin
         let followTail = output.frame.height - scroll.documentVisibleRect.maxY <= 24
-        let old = output.string as NSString
         let new = text as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: output.font ?? NSFont.systemFont(ofSize: 14),
             .foregroundColor: output.textColor ?? NSColor.labelColor
         ]
-        if new.hasPrefix(old as String), let storage = output.textStorage {
-            storage.append(NSAttributedString(string: new.substring(from: old.length), attributes: attributes))
-        } else {
+        switch update {
+        case .append(let suffix):
+            output.textStorage?.append(NSAttributedString(string: suffix, attributes: attributes))
+        case .replace:
             output.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+        case .unchanged: break
         }
         if resetScroll { output.scrollToBeginningOfDocument(nil) }
         else if followTail { output.scrollRangeToVisible(NSRange(location: new.length, length: 0)) }
