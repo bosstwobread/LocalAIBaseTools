@@ -426,7 +426,10 @@ def archive(files: list[tuple[Path, str]]) -> bytes:
 
 
 def remote(target: str, command: list[str], *, data: bytes | None = None, quiet: bool = False) -> None:
-    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", target, shlex.join(command)],
+    # Do not inherit a stale desktop ControlMaster socket for a deployment.
+    # Each operation still uses the configured key and normal host verification.
+    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                             "-o", "ControlMaster=no", "-o", "ControlPath=none", target, shlex.join(command)],
                             input=data, stdout=subprocess.PIPE if quiet else None,
                             stderr=subprocess.PIPE if quiet else None)
     if result.returncode:
