@@ -16,7 +16,7 @@ LocalAIBaseTools/
 │   ├── ExtensionSDK/             Advanced native Objective-C/AppKit compatibility interface
 │   └── Tests/                    Runtime, source packages/workers, and native capabilities
 ├── Extensions/
-│   ├── Translation/              Six editable files: JS, manifest, schema, prompt, README, license
+│   ├── Translation/              Editable JS, manifest, schema, prompts, README, and license
 │   └── MessageHelper-Upwork/     Independent Chrome/Edge extension
 ├── catalog/extensions.json       Source catalog metadata and complete SHA-256 file inventory
 ├── ExtensionMarket-website/      Searchable tool marketplace, source packages, Docker deployment
@@ -63,6 +63,8 @@ Open **MacHelper → Extensions → Translation**. Enable it, choose the target 
 
 Select text in another app. A small icon appears above/below the selection according to the available screen space. Click it for a nearby translation panel that fills with text as the model responds. The panel shows the actual model name; Copy becomes available after the completed answer is validated. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
 
+With MacHelper 4.3 and Translation 4.2, selecting one word shows its meaning in the enclosing sentence, followed by that sentence's full translation. The sentence is read only when you click the icon, through bounded Accessibility ranges. If the app cannot supply it, the panel gives a standalone word meaning and notes that sentence context is unavailable. Longer selections keep the normal translation behavior.
+
 Protected/password fields, images, and apps that do not expose selected text through Accessibility cannot be read automatically. Copy text yourself and use the explicit **Translate Clipboard…** action for those cases. Translation never simulates Copy or changes the clipboard automatically; the result's Copy button requires a click. **Try Demo…** tests the real AI connection with synthetic text without requiring Accessibility.
 
 Use **Edit Source** to open Translation's installed working folder. Change `main.js`, `prompts/translate.txt`, or its settings schema and save. The watcher debounces saves, validates a candidate, and replaces only that extension's worker. Invalid edits show an error while the last working generation remains active. Settings stay separate, and re-enabling does not overwrite local edits. **Reload** performs the same validation on demand.
@@ -71,7 +73,7 @@ Use **Edit Source** to open Translation's installed working folder. Change `main
 
 Create a source folder containing `extension.json`, JavaScript, and the editable resources it needs. Choose **MacHelper → Extensions → Install Source…** to import it, or **Add Catalog…** to list tools from a JSON catalog. Enabling a catalog tool downloads every declared source file with hash/size validation and atomic installation. No additional Mac app is installed.
 
-Browse the [Extension Market](https://recite.nelson007.com/extension-market/) or use **Marketplace…** in MacHelper. The [website project](ExtensionMarket-website/README.md) serves the catalog and complete source packages through a separate Docker container. See [Extension Development](docs/Extension-Development.md) and the detailed [source package/catalog contract](docs/Source-Extensions.md).
+Browse the [Extension Market](https://local-ai-extension.nelson007.com/) or use **Marketplace…** in MacHelper. The [website project](ExtensionMarket-website/README.md) serves the catalog and complete source packages through a separate Docker container. See [Extension Development](docs/Extension-Development.md) and the detailed [source package/catalog contract](docs/Source-Extensions.md).
 
 Advanced native `.machextension` bundles remain compatible through **Extensions → Native tools… → Install Extension…** and the [standalone SDK](MacHelper/ExtensionSDK/README.md). They run trusted native code inside MacHelper; replacing loaded native code requires restarting the app. [External Greeting](examples/ExternalGreeting/README.md) demonstrates building outside this repository using only the public SDK header. Native bundles do not support the JavaScript hot-reload workflow.
 

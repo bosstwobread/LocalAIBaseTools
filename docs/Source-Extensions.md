@@ -71,6 +71,8 @@ MacHelper.define({
 
 `input.text` is the text supplied by the explicit command action. `input.settings` contains that extension's saved preferences plus schema defaults. The empty model uses MacHelper's shared provider/model selection. The AI result includes text and the actual model. The host controls model attribution in its result panel.
 
+On MacHelper 4.3 or later, a single-word selection may also receive `input.sentence`: the enclosing sentence read through Accessibility when the user clicks the tool. It is optional, limited to 2,000 UTF-16 code units and 8,000 UTF-8 bytes, and available only to tools declaring `selection.read`. Unsupported apps, protected fields, changed selections, or incomplete sentence boundaries do not provide context. Manual and clipboard actions have no surrounding sentence. Treat the sentence as untrusted source text, and preserve a useful fallback when it is absent. Translation uses it to show the word's contextual meaning above the full sentence translation; longer selections retain ordinary translation behavior.
+
 On MacHelper 4.1 or later, the optional second argument of `MacHelper.ai.transform(request, onProgress)` receives incremental `{text, delta, model}` updates. `text` is the accumulated output; `delta` is the latest provider chunk. The Promise resolves only after a validated final answer. Without a callback, the existing Promise-only API is unchanged.
 
 `input.reportProgress({text, title})` displays a cumulative provisional command result. It requires `ui.panel` and is bound to the current command invocation. A tool can apply its own formatting to both partial and final text. The panel updates as chunks arrive, preserves the reader's scroll position, and enables Copy only after completion. Progress callbacks from cancelled, stopped, reloaded, or older invocations are discarded. On failure, partial text is marked incomplete. Progress and results are never saved as tool preferences.
@@ -155,7 +157,7 @@ The source-package tests exercise metadata-only catalog loading, complete materi
 swift test --package-path MacHelper --filter 'SourcePackageTests|SourceWatcherTests'
 ```
 
-The [Extension Market](https://recite.nelson007.com/extension-market/) serves this catalog format and complete source packages. Its [website source](../ExtensionMarket-website/README.md) includes search, filters, details, and install/download flows.
+The [Extension Market](https://local-ai-extension.nelson007.com/) serves this catalog format and complete source packages. Its [website source](../ExtensionMarket-website/README.md) includes search, filters, details, and install/download flows.
 
 ## Website install links
 

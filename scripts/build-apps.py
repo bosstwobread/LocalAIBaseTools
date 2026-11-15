@@ -43,7 +43,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--signing-identity", help="Signing identity; otherwise prefer an existing Apple identity, falling back to ad hoc.")
     config_path = ROOT / "ExtensionMarket-website/marketplace.config.json"
-    default_marketplace = json.loads(config_path.read_text())["baseUrl"] if config_path.exists() else "https://recite.nelson007.com/extension-market/"
+    default_marketplace = json.loads(config_path.read_text())["baseUrl"] if config_path.exists() else "https://local-ai-extension.nelson007.com/"
     parser.add_argument("--marketplace-url", default=default_marketplace, help="Public HTTPS URL opened by MacHelper's Marketplace entry.")
     args = parser.parse_args()
     market_url = urlsplit(args.marketplace_url)
@@ -71,7 +71,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "4.2.0", "CFBundleVersion": "421", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "4.3.0", "CFBundleVersion": "431", "CFBundleIconFile": "AppIcon",
         "MacHelperMarketplaceURL": args.marketplace_url,
         "CFBundleURLTypes": [{"CFBundleURLName": "com.localaibasetools.marketplace", "CFBundleURLSchemes": ["machelper"], "CFBundleTypeRole": "Viewer"}],
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",

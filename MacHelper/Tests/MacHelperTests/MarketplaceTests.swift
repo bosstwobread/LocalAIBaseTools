@@ -125,7 +125,7 @@ final class MarketplaceTests: XCTestCase {
         for url in ["https://market.localaibasetools.example", "https://example.com", "http://tools.example", "file:///tmp/market"] {
             XCTAssertThrowsError(try MarketplaceConfiguration.websiteURL(info: [MarketplaceConfiguration.websiteKey: url]))
         }
-        let actual = "https://recite.nelson007.com/extension-market/"
+        let actual = "https://local-ai-extension.nelson007.com/"
         XCTAssertEqual(try MarketplaceConfiguration.websiteURL(info: [MarketplaceConfiguration.websiteKey: actual]).absoluteString, actual)
     }
 

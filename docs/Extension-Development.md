@@ -2,7 +2,7 @@
 
 MacHelper is the installed menu-bar app and settings host. Its default extension format is an editable JavaScript source package. An extension can be developed in a separate repository, downloaded or imported into the installed MacHelper, and changed locally without rebuilding the host or installing another app.
 
-The source package uses manifest schema version two and runs in its own `MacHelperScriptWorker` process. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation is the first source tool; its six files are `extension.json`, `main.js`, `settings.schema.json`, `prompts/translate.txt`, `README.md`, and `LICENSE`.
+The source package uses manifest schema version two and runs in its own `MacHelperScriptWorker` process. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation is the first source tool; its files include `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, `README.md`, and `LICENSE`.
 
 Browser extensions remain separate browser packages and can continue using the [framed MacHelper service](MacHelper-Protocol.md). The version-one native Swift/Objective-C SDK is retained as an advanced compatibility interface, documented below.
 

@@ -230,12 +230,22 @@ final class SourceExtensionManager {
     }
 
     // Also used by the isolated integration harness with a fake AI callback.
-    func performCommand(for id: String, text: String,
+    func performCommand(for id: String, text: String, sentence: String? = nil,
                         onProgress: (@MainActor (CapabilityTranslationResult) -> Void)? = nil) async throws -> CapabilityTranslationResult {
         guard state.enabled[id] == true, let runtime = active[id], !shuttingDown else {
             throw SourcePackageError.invalid("This extension is disabled.")
         }
         guard !runtime.actionInProgress else { throw SourcePackageError.invalid("This extension is already processing an action.") }
+        var input: [String: Any] = ["text": text, "settings": runtime.settings]
+        if let sentence {
+            let selected = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard runtime.snapshot.manifest.permissions.contains("selection.read"),
+                  !selected.isEmpty, sentence.utf16.count <= 2_000, sentence.utf8.count <= 8_000,
+                  !sentence.contains("\0"), sentence.contains(selected) else {
+                throw SourcePackageError.invalid("The surrounding sentence is unavailable or invalid.")
+            }
+            input["sentence"] = sentence
+        }
         runtime.actionInProgress = true
         defer { runtime.actionInProgress = false }
         if runtime.worker.generation == nil { try await replaceWorker(runtime) }
@@ -244,7 +254,7 @@ final class SourceExtensionManager {
         let worker = runtime.worker, gate = runtime.gate
         gate.invoking = true; gate.calls = 0; gate.model = nil
         defer { gate.invoking = false }
-        let result = try await worker.invoke(command: command.identifier, input: ["text": text, "settings": runtime.settings]) { [weak self, weak runtime] update in
+        let result = try await worker.invoke(command: command.identifier, input: input) { [weak self, weak runtime] update in
             guard let self, let runtime, !Task.isCancelled, self.active[id] === runtime,
                   runtime.worker === worker, self.state.enabled[id] == true, gate.invoking,
                   let output = update["text"] as? String, !output.isEmpty, output.utf8.count <= 96_000,
@@ -317,6 +327,10 @@ final class SourceExtensionManager {
             capability.onPerformStreaming = { [weak self] text, onProgress in
                 guard let self else { throw CancellationError() }
                 return try await self.performCommand(for: id, text: text, onProgress: onProgress)
+            }
+            capability.onPerformSelectionStreaming = { [weak self] input, onProgress in
+                guard let self else { throw CancellationError() }
+                return try await self.performCommand(for: id, text: input.text, sentence: input.sentence, onProgress: onProgress)
             }
             capability.onPresentOverlay = { [weak self] in self?.onHideSettings?() }
             capability.onStatusChange = { [weak self] in self?.notify() }
@@ -511,6 +525,10 @@ final class SourceExtensionManager {
         capability.onPerformStreaming = { [weak self] text, onProgress in
             guard let self else { throw CancellationError() }
             return try await self.performCommand(for: id, text: text, onProgress: onProgress)
+        }
+        capability.onPerformSelectionStreaming = { [weak self] input, onProgress in
+            guard let self else { throw CancellationError() }
+            return try await self.performCommand(for: id, text: input.text, sentence: input.sentence, onProgress: onProgress)
         }
         capability.onPresentOverlay = { [weak self] in self?.onHideSettings?() }
         if shouldMonitor(snapshot) { capability.start() }

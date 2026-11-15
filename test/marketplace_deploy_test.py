@@ -15,6 +15,79 @@ DEPLOY = runpy.run_path(str(Path(__file__).resolve().parents[1] / "ExtensionMark
 
 
 class MarketplaceDeployTests(unittest.TestCase):
+    domain = "local-ai-extension.nelson007.com"
+    old_managed = """  # BEGIN LocalAIBaseTools ExtensionMarket
+  redir /extension-market /extension-market/ 308
+  handle_path /extension-market/* {
+    reverse_proxy extension-market:8080
+  }
+  # END LocalAIBaseTools ExtensionMarket"""
+
+    def legacy_config(self):
+        return "recite.nelson007.com {\n" + self.old_managed + """
+  handle_path /serenity/* {
+    reverse_proxy serenity-backend:3010
+  }
+  respond /status "keep } quoted content" 200
+  handle {
+    reverse_proxy backend:3000
+  }
+}
+
+web.nelson007.com {
+  reverse_proxy recite-web:80
+}
+"""
+
+    def test_caddy_migrates_owned_landing_keeps_native_alias_and_other_routes(self):
+        before = self.legacy_config()
+        result = DEPLOY["candidate_caddy"](before, self.domain)
+        self.assertIn("handle_path /extension-market {", result)
+        self.assertIn("handle_path /extension-market/ {", result)
+        self.assertEqual(result.count("redir https://" + self.domain + "{uri} 308"), 2)
+        self.assertIn("handle_path /extension-market/* {\n    reverse_proxy extension-market:8080\n  }", result)
+        self.assertIn(self.domain + " {\n  encode gzip\n  reverse_proxy extension-market:8080\n}", result)
+        self.assertNotIn("redir /extension-market /extension-market/", result)
+        self.assertIn(before.split(self.old_managed)[1], result)
+
+    def test_caddy_canonical_migration_is_idempotent(self):
+        migrated = DEPLOY["candidate_caddy"](self.legacy_config(), self.domain)
+        self.assertEqual(DEPLOY["candidate_caddy"](migrated, self.domain), migrated)
+
+    def test_caddy_preserves_unrelated_same_host_routes_without_old_market_block(self):
+        before = self.legacy_config().replace(self.old_managed + "\n", "")
+        result = DEPLOY["candidate_caddy"](before, self.domain)
+        self.assertIn(before.split("{", 1)[1], result)
+
+    def test_caddy_refuses_conflicting_or_extended_canonical_domain_block(self):
+        for body in ["reverse_proxy other-service:8080", "reverse_proxy extension-market:8080\n  respond /custom custom"]:
+            before = self.legacy_config() + "\n" + self.domain + " {\n  " + body + "\n}\n"
+            with self.assertRaisesRegex(ValueError, "unexpected existing"):
+                DEPLOY["candidate_caddy"](before, self.domain)
+
+    def test_caddy_refuses_operator_edits_or_unmanaged_legacy_market_routes(self):
+        for before in [self.legacy_config().replace("extension-market:8080", "operator-service:8080"),
+                       self.legacy_config().replace(" 308", " 302"),
+                       self.legacy_config().replace(self.old_managed, "  redir /extension-market https://operator.example 308")]:
+            with self.assertRaises(ValueError):
+                DEPLOY["candidate_caddy"](before, self.domain)
+
+    def test_caddy_refuses_duplicate_or_ambiguous_domain_sites(self):
+        for before in [self.legacy_config() * 2,
+                       self.legacy_config() + "\nhttps://" + self.domain + " { reverse_proxy operator:80 }\n"]:
+            with self.assertRaises(ValueError):
+                DEPLOY["candidate_caddy"](before, self.domain)
+
+    def test_legacy_baseline_origin_is_independent_of_new_public_origin(self):
+        function = next(node for node in ast.parse(DEPLOY["REMOTE_TRANSACTION"]).body
+                        if isinstance(node, ast.FunctionDef) and node.name == "baselines")
+        namespace = {"cfg": {"origin": "https://" + self.domain, "legacyOrigin": "https://recite.nelson007.com"},
+                     "get": lambda url: calls.append(url)}
+        calls = []
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "legacy-baselines", "exec"), namespace)
+        namespace["baselines"]()
+        self.assertEqual(calls, ["https://recite.nelson007.com/en", "https://recite.nelson007.com/serenity/health/live"])
+
     def test_archive_preserves_fractional_mtime_and_changed_same_size_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "extensions.json"

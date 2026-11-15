@@ -156,6 +156,52 @@ enum SourceExtensionVerification {
                       "The actual Translation source did not receive its text or default settings.")
             note("actual Translation JavaScript invokes the explicit AI bridge and returns model metadata")
 
+            let selectedWord = "ready"
+            let surroundingSentence = "The project is ready for review."
+            let callsBeforeInvalidContext = probe.calls
+            for invalidSentence in ["", "A different surrounding sentence.", "ready\0",
+                                    "ready " + String(repeating: "x", count: 2_000)] {
+                var rejected = false
+                do { _ = try await manager.performCommand(for: id, text: selectedWord, sentence: invalidSentence) }
+                catch { rejected = true }
+                try check(rejected, "Invalid selection context reached the extension command.")
+            }
+            try check(probe.calls == callsBeforeInvalidContext, "Invalid selection context triggered an AI request.")
+            note("invalid, unrelated, or oversized selection context is rejected before AI inference")
+
+            var wordProgress: [String] = []
+            var wordFinished = false
+            probe.streamNext = true; probe.releaseStream = false
+            let contextualWord = Task {
+                defer { wordFinished = true }
+                return try await manager.performCommand(for: id, text: selectedWord, sentence: surroundingSentence) { update in
+                    wordProgress.append(update.text)
+                }
+            }
+            try await eventually("Contextual word translation did not stream through the real JavaScript worker.") {
+                probe.streaming && !wordProgress.isEmpty
+            }
+            try check(!wordFinished && wordProgress == ["AI:"], "Contextual word translation buffered its partial result until completion.")
+            let wordPayloadText = probe.latest["text"] as? String ?? ""
+            let wordPayload = try JSONSerialization.jsonObject(with: Data(wordPayloadText.utf8)) as? [String: Any]
+            try check(wordPayload?["selectedWord"] as? String == selectedWord &&
+                      wordPayload?["surroundingSentence"] as? String == surroundingSentence,
+                      "The real manager/worker bridge lost the selected word or optional surrounding sentence.")
+            try check(probe.latest["action"] as? String == "translate" && probe.latest["targetLanguage"] as? String == "zh-CN",
+                      "Word lookup changed the supported AI action or lost the shared target-language setting.")
+            let wordGuidance = probe.latest["guidance"] as? String ?? ""
+            let dedicatedPrompts = snapshot.resources.filter { $0.key.hasPrefix("prompts/") && $0.key != "prompts/translate.txt" }
+            try check(dedicatedPrompts.values.contains { prompt in
+                let value = String(prompt.split(separator: "\n").first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return !value.isEmpty && wordGuidance.contains(value)
+            }, "Word translation did not use its dedicated editable prompt resource.")
+            probe.releaseStream = true
+            let contextualWordResult = try await contextualWord.value
+            try check(contextualWordResult.text == "AI:" + wordPayloadText && contextualWordResult.model == "fixture-model" &&
+                      wordProgress.count == 3 && wordProgress.last == contextualWordResult.text,
+                      "Contextual word progress failed to reconcile with the fake AI's final payload answer.")
+            note("selected-word context crosses the real manager/worker bridge and streams with the dedicated word prompt")
+
             var progress: [String] = []
             var streamFinished = false
             probe.streamNext = true; probe.releaseStream = false

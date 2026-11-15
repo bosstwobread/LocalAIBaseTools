@@ -7,6 +7,7 @@ import sys
 import zipfile
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
+from build import historical_files
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -31,6 +32,11 @@ def main():
         path = site / relative
         assert path.is_file() and path.stat().st_size > 0, relative
         return path
+
+    history = historical_files()
+    for relative, raw in history.items():
+        assert public_file(relative).read_bytes() == raw, "Historical package changed: " + relative
+    print("PASS", len(history), "historical package files remain byte-identical at their published paths")
 
     entries = {entry["identifier"]: entry for entry in catalog["extensions"]}
     for tool in data["extensions"]:

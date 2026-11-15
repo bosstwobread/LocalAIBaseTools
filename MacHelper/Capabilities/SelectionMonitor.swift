@@ -10,6 +10,45 @@ enum SelectionReadResult {
 /// Uses read-only Accessibility attributes. It never performs AX actions or sets
 /// attributes, synthesizes keystrokes, reads a whole document, or touches pasteboard.
 struct AccessibilitySelectionReader {
+    /// This separate read runs only after an explicit translation click. Normal
+    /// polling never reads surrounding text, even for a selected word.
+    func sentence(for selection: TextSelection) -> String? {
+        guard SelectionSentenceContext.isSingleWord(selection.text) else { return nil }
+        let app = AXUIElementCreateApplication(selection.sourcePID)
+        AXUIElementSetMessagingTimeout(app, 0.18)
+        guard let focused = attribute(kAXFocusedUIElementAttribute, of: app),
+              CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        var element = focused as! AXUIElement
+        for _ in 0..<4 {
+            AXUIElementSetMessagingTimeout(element, 0.18)
+            guard !isProtected(element) else { return nil }
+            if let selected = attribute(kAXSelectedTextAttribute, of: element) as? String {
+                guard selected == selection.text else { return nil }
+                let expected = NSRange(location: selection.rangeLocation, length: selection.rangeLength)
+                let originalRange = selectedRange(of: element)
+                if let originalRange, selection.rangeLocation >= 0,
+                   originalRange != expected { return nil }
+                var result: String?
+                if let originalRange, let count = attribute(kAXNumberOfCharactersAttribute, of: element) as? Int,
+                   let window = SelectionSentenceContext.window(selection: originalRange, documentUTF16Length: count),
+                   !isProtected(element),
+                   let text = string(for: window, in: element),
+                   (attribute(kAXNumberOfCharactersAttribute, of: element) as? Int) == count {
+                    result = SelectionSentenceContext.sentence(selected: selected, selection: originalRange,
+                        windowText: text, windowRange: window, documentUTF16Length: count)
+                }
+                if result == nil { result = markerSentence(selected: selected, in: element) }
+                guard !isProtected(element), (attribute(kAXSelectedTextAttribute, of: element) as? String) == selected,
+                      selectedRange(of: element) == originalRange,
+                      let currentFocus = attribute(kAXFocusedUIElementAttribute, of: app), CFEqual(focused, currentFocus) else { return nil }
+                return result
+            }
+            guard let parent = attribute(kAXParentAttribute, of: element), CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+            element = parent as! AXUIElement
+        }
+        return nil
+    }
+
     func read(sourcePID: Int32, mainScreenTop: CGFloat, fallbackPoint: CGPoint) -> SelectionReadResult {
         let app = AXUIElementCreateApplication(sourcePID)
         AXUIElementSetMessagingTimeout(app, 0.18)
@@ -56,6 +95,51 @@ struct AccessibilitySelectionReader {
         return result
     }
 
+    private func selectedRange(of element: AXUIElement) -> NSRange? {
+        guard let value = attribute(kAXSelectedTextRangeAttribute, of: element), CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var range = CFRange(location: -1, length: 0)
+        guard AXValueGetValue(value as! AXValue, .cfRange, &range), range.location >= 0, range.length > 0 else { return nil }
+        return NSRange(location: range.location, length: range.length)
+    }
+
+    private func parameter(_ name: String, value: CFTypeRef, in element: AXUIElement) -> CFTypeRef? {
+        var result: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, name as CFString, value, &result) == .success else { return nil }
+        return result
+    }
+
+    private func string(for range: NSRange, in element: AXUIElement) -> String? {
+        guard range.length > 0, range.length <= SelectionSentenceContext.maximumUTF16 else { return nil }
+        var value = CFRange(location: range.location, length: range.length)
+        guard let parameter = AXValueCreate(.cfRange, &value) else { return nil }
+        return self.parameter(kAXStringForRangeParameterizedAttribute, value: parameter, in: element) as? String
+    }
+
+    private func markerSentence(selected: String, in element: AXUIElement) -> String? {
+        // Browser engines may expose opaque text markers instead of numeric
+        // character ranges. All text reads still have a verified length bound.
+        var names: CFArray?
+        guard AXUIElementCopyParameterizedAttributeNames(element, &names) == .success,
+              let supported = names as? [String],
+              Set(["AXSentenceTextMarkerRangeForTextMarker", "AXLengthForTextMarkerRange", "AXStringForTextMarkerRange"]).isSubset(of: Set(supported)),
+              let selectedMarker = attribute("AXSelectedTextMarkerRange", of: element),
+              let selectedLength = parameter("AXLengthForTextMarkerRange", value: selectedMarker, in: element) as? Int,
+              selectedLength == selected.utf16.count,
+              // Some WebKit versions implement this metadata-only parameter
+              // without advertising it. A failed query returns nil; sentence
+              // text still waits for the advertised API and verified length.
+              let start = parameter("AXStartTextMarkerForTextMarkerRange", value: selectedMarker, in: element),
+              let sentenceRange = parameter("AXSentenceTextMarkerRangeForTextMarker", value: start, in: element),
+              let length = parameter("AXLengthForTextMarkerRange", value: sentenceRange, in: element) as? Int,
+              !isProtected(element) else { return nil }
+        let result = SelectionSentenceContext.readBoundedSentence(selected: selected, reportedUTF16Length: length) {
+            parameter("AXStringForTextMarkerRange", value: sentenceRange, in: element) as? String
+        }
+        guard
+              let currentMarker = attribute("AXSelectedTextMarkerRange", of: element), CFEqual(selectedMarker, currentMarker) else { return nil }
+        return result
+    }
+
     private func isProtected(_ element: AXUIElement) -> Bool {
         if (attribute(kAXSubroleAttribute, of: element) as? String) == kAXSecureTextFieldSubrole { return true }
         return (attribute("AXProtectedContent", of: element) as? Bool) == true
@@ -94,6 +178,26 @@ final class SelectionMonitor {
     private var context: UInt64 = 0
     private var selectionPoint = NSEvent.mouseLocation
     private let ownPID = ProcessInfo.processInfo.processIdentifier
+
+    func input(for selection: TextSelection) async -> CapabilitySelectionInput {
+        guard SelectionSentenceContext.isSingleWord(selection.text), selection.sourcePID != ownPID,
+              trusted, !dragging, NSWorkspace.shared.frontmostApplication?.processIdentifier == selection.sourcePID else {
+            return CapabilitySelectionInput(text: selection.text)
+        }
+        let capturedContext = context
+        return await withCheckedContinuation { continuation in
+            readQueue.async { [weak self] in
+                let sentence = AccessibilitySelectionReader().sentence(for: selection)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.timer != nil, self.trusted, self.context == capturedContext,
+                          !self.dragging, NSWorkspace.shared.frontmostApplication?.processIdentifier == selection.sourcePID else {
+                        continuation.resume(returning: CapabilitySelectionInput(text: selection.text)); return
+                    }
+                    continuation.resume(returning: CapabilitySelectionInput(text: selection.text, sentence: sentence))
+                }
+            }
+        }
+    }
 
     func start() {
         guard timer == nil else { return }

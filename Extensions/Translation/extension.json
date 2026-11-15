@@ -3,7 +3,7 @@
   "runtime": "javascript",
   "identifier": "com.localaibasetools.translation",
   "displayName": "Translation",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "summary": "Translate selected text with editable local scripts and prompts.",
   "entryPoint": "main.js",
   "permissions": [

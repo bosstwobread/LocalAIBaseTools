@@ -1,6 +1,6 @@
 # Extension Market website
 
-Public marketplace: **https://recite.nelson007.com/extension-market/**
+Public marketplace: **https://local-ai-extension.nelson007.com/**
 
 The website lists every current tool under `Extensions`, with search, category
 and platform filters, interface previews, details, source links, and complete
@@ -19,6 +19,10 @@ with Chrome/Edge Developer mode installation instructions.
 - `index.html`, `styles.css`, `app.js`: buildless responsive interface.
 - `assets/`: app/tool artwork and clearly labelled illustrative previews.
 - `marketplace.config.json`: public URL, tool descriptions, and display metadata.
+- `historical-packages/packages/`: immutable published source files and ZIPs.
+  Builds retain these paths for older pinned catalogs and existing download links,
+  while the current catalog lists only the latest versions. Translation 4.1.0's
+  retained ZIP SHA-256 is `3f2f881578751ddcf445fc868212db96819c068369d786c29f72acd3c602be75`.
 - `build.py`: discovers actual extension manifests, builds the source catalog,
   complete source ZIPs, and the prebuilt MacHelper app ZIP in `dist/`.
 - `verify.py`: checks the built file inventories, package hashes, prefix-safe
@@ -47,8 +51,8 @@ After moving the app to Applications and opening it, MacHelper sets up its
 browser native host without requiring Python, Xcode, or administrator access.
 
 For frontend-only development, `build.py --without-app` omits the app ZIP and
-uses source links. Serve `dist/` locally; assets and links also work under the
-production `/extension-market/` prefix.
+uses source links. Serve `dist/` locally; assets and links work at the production
+domain root and also support a mounted path prefix.
 
 ## Deploy
 
@@ -58,8 +62,8 @@ python3 ExtensionMarket-website/deploy.py --deploy
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the isolated container, baseline checks,
-private configuration, and rollback. The live site uses an existing HTTPS
-certificate; no new domain or changes to Serenity's database are needed.
+private configuration, and rollback. The live site uses its dedicated HTTPS
+domain; the marketplace container stays separate from Serenity's database.
 
 To add a tool, add its independent source folder under `Extensions`, optionally
 add display metadata in `marketplace.config.json`, then rebuild and deploy.

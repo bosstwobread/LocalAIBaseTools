@@ -1,9 +1,9 @@
 {
   "name": "MacHelper Extensions",
-  "baseUrl": "https://recite.nelson007.com/extension-market/",
+  "baseUrl": "https://local-ai-extension.nelson007.com/",
   "sourceUrl": "https://github.com/bosstwobread/LocalAIBaseTools",
   "macHelper": {
-    "version": "4.2.0",
+    "version": "4.3.0",
     "minimumOS": "macOS 14+",
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
@@ -20,7 +20,7 @@
         "caption": "Interface preview — selected text, a nearby translation, and streaming output."
       }],
       "description": "Select text in an app on your Mac, click the small Translation icon, and read the translation nearby as your AI responds. Choose your language in MacHelper, or edit the tool's JavaScript and prompt to make it your own.",
-      "features": ["Translate selected text across supported Mac apps", "Read the result as the AI generates it", "Choose from 10 target languages", "Edit scripts and prompts with reload on save", "Keep settings in one MacHelper app"],
+      "features": ["Translate selected text across supported Mac apps", "Explain a selected word in context, with the full sentence translation below", "Read the result as the AI generates it", "Choose from 10 target languages", "Edit scripts and prompts with reload on save", "Keep settings in one MacHelper app"],
       "installSteps": ["Install and open MacHelper on an Apple Silicon Mac.", "Choose Install in MacHelper and review the tool's permissions.", "Enable Accessibility for MacHelper to read selected text in other apps.", "Select a sentence, click the floating icon, and press Esc to dismiss the translation."]
     },
     "MessageHelper-Upwork": {

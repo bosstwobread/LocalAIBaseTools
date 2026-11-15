@@ -23,29 +23,93 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 PRIVATE_SETTINGS = Path.home() / "Project/proginn/ReciteVocabulary/.env"
-PUBLIC_ORIGIN = "https://recite.nelson007.com"
-PREFIX = "/extension-market/"
+PUBLIC_ORIGIN = "https://local-ai-extension.nelson007.com"
+LEGACY_ORIGIN = "https://recite.nelson007.com"
+PREFIX = "/"
 
 
 def candidate_caddy(original: str, domain: str) -> str:
-    """Insert one isolated path without replacing an existing operator route."""
-    uncommented = "\n".join(line.split("#", 1)[0] for line in original.splitlines())
-    if "/extension-market" in uncommented:
-        redirect = re.findall(r"(?m)^\s*redir\s+/extension-market\s+/extension-market/\s+308\s*$", uncommented)
-        handler = re.findall(r"handle_path\s+/extension-market/\*\s*\{\s*reverse_proxy\s+extension-market:8080\s*\}", uncommented)
-        if len(redirect) == 1 and len(handler) == 1 and uncommented.count("/extension-market") == 3:
-            return original
-        raise ValueError("An existing ExtensionMarket route differs from the managed route; it was preserved.")
-    site = re.compile(r"(?m)^[ \t]*" + re.escape(domain) + r"[ \t]*\{[ \t]*$")
-    if len(list(site.finditer(original))) != 1:
-        raise ValueError("The existing HTTPS site block could not be identified uniquely.")
-    block = ("\n  # BEGIN LocalAIBaseTools ExtensionMarket\n"
-             "  redir /extension-market /extension-market/ 308\n"
-             "  handle_path /extension-market/* {\n"
-             "    reverse_proxy extension-market:8080\n"
-             "  }\n"
-             "  # END LocalAIBaseTools ExtensionMarket")
-    return site.sub(lambda match: match.group(0) + block, original, count=1)
+    """Migrate only owned market routes; preserve unrelated Caddy bytes."""
+    legacy_domain = "recite.nelson007.com"
+    if domain == legacy_domain or not re.fullmatch(r"[a-z0-9.-]+", domain):
+        raise ValueError("Choose a dedicated canonical marketplace domain.")
+
+    def code(value):
+        return "\n".join(line.split("#", 1)[0] for line in value.splitlines())
+
+    def tokens(value):
+        return " ".join(code(value).split())
+
+    def site_span(value, host):
+        matches = list(re.finditer(r"(?m)^[ \t]*" + re.escape(host) + r"[ \t]*\{[ \t]*(?:#[^\n]*)?$", value))
+        if not matches:
+            if host in code(value):
+                raise ValueError("The marketplace domain appears in an unexpected Caddy route; it was preserved.")
+            return None
+        if len(matches) != 1:
+            raise ValueError("A Caddy site block is duplicated; no routes were changed.")
+        opening = value.index("{", matches[0].start())
+        depth, quoted, escaped, comment = 1, None, False, False
+        for position in range(opening + 1, len(value)):
+            char = value[position]
+            if comment:
+                if char == "\n": comment = False
+            elif quoted:
+                if escaped: escaped = False
+                elif char == "\\" and quoted != "`": escaped = True
+                elif char == quoted: quoted = None
+            elif char == "#": comment = True
+            elif char in ['"', "`"]: quoted = char
+            elif char == "{": depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0: return matches[0].start(), opening + 1, position, position + 1
+        raise ValueError("A Caddy site block is incomplete; no routes were changed.")
+
+    legacy = site_span(original, legacy_domain)
+    if legacy is None:
+        raise ValueError("The existing legacy HTTPS site block is missing.")
+    canonical = site_span(original, domain)
+    canonical_site = domain + " {\n  encode gzip\n  reverse_proxy extension-market:8080\n}"
+    if canonical and tokens(original[canonical[0]:canonical[3]]) != tokens(canonical_site):
+        raise ValueError("The canonical domain has an unexpected existing Caddy configuration; it was preserved.")
+
+    # Exact landing handlers precede the compatibility wildcard. handle_path
+    # strips the old prefix; {uri} retains the remaining path and query string.
+    managed = ("  # BEGIN LocalAIBaseTools ExtensionMarket\n"
+               "  handle_path /extension-market {\n"
+               "    redir https://" + domain + "{uri} 308\n"
+               "  }\n"
+               "  handle_path /extension-market/ {\n"
+               "    redir https://" + domain + "{uri} 308\n"
+               "  }\n"
+               "  handle_path /extension-market/* {\n"
+               "    reverse_proxy extension-market:8080\n"
+               "  }\n"
+               "  # END LocalAIBaseTools ExtensionMarket")
+    previous = ("redir /extension-market /extension-market/ 308\n"
+                "handle_path /extension-market/* { reverse_proxy extension-market:8080 }")
+    body = original[legacy[1]:legacy[2]]
+    marker = re.compile(r"(?ms)^[ \t]*# BEGIN LocalAIBaseTools ExtensionMarket[ \t]*\n.*?^[ \t]*# END LocalAIBaseTools ExtensionMarket[ \t]*(?=\n|$)")
+    owned = list(marker.finditer(body))
+    if len(owned) > 1:
+        raise ValueError("The managed legacy route is duplicated; it was preserved.")
+    if owned:
+        match = owned[0]
+        if tokens(match.group()) not in [tokens(previous), tokens(managed)]:
+            raise ValueError("The existing managed legacy route was edited; it was preserved.")
+        remainder = body[:match.start()] + body[match.end():]
+        if "/extension-market" in code(remainder):
+            raise ValueError("An additional legacy marketplace route was found; it was preserved.")
+        body = body[:match.start()] + managed + body[match.end():]
+    else:
+        if "/extension-market" in code(body):
+            raise ValueError("An unmanaged legacy marketplace route was found; it was preserved.")
+        body = "\n" + managed + body
+    result = original[:legacy[1]] + body + original[legacy[2]:]
+    if canonical is None:
+        result += ("" if result.endswith("\n") else "\n") + "\n" + canonical_site + "\n"
+    return result
 
 
 def public_manifest(folder: Path) -> dict:
@@ -142,24 +206,40 @@ def run(args,stage,cwd=None,allow_failure=False,input_text=None):
 def inspect_container(name):
  result=subprocess.run(['docker','inspect',name],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
  return json.loads(result.stdout)[0] if result.returncode==0 else None
-def get(url,expected=200,body=False):
+def get(url,expected=200,body=False,timeout=10,allow_redirects=True):
  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+ if not allow_redirects:
+  class NoRedirect(urllib.request.HTTPRedirectHandler):
+   def redirect_request(self,*args,**kwargs):return None
+  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
  request=urllib.request.Request(url,headers={'Cache-Control':'no-cache','User-Agent':'ExtensionMarketDeploy/1'})
- with opener.open(request,timeout=10) as response:
+ with opener.open(request,timeout=timeout) as response:
   if response.status!=expected:raise RuntimeError('Unexpected HTTP status during verification.')
   data=response.read(2*1024*1024+1) if body else response.read(4096)
   if len(data)>2*1024*1024:raise RuntimeError('Verification response exceeds its limit.')
   return data
 def baselines():
- for path in ['/en','/serenity/health/live']:get(cfg['origin']+path)
-def health(url):
- for attempt in range(20):
+ for path in ['/en','/serenity/health/live']:get(cfg['legacyOrigin']+path)
+def health(url,wait_seconds=20):
+ deadline=time.monotonic()+wait_seconds
+ while True:
   try:
-   if get(url)!=b'ok\n':raise RuntimeError('Unexpected website health response.')
+   if get(url,timeout=min(3,max(.1,deadline-time.monotonic())))!=b'ok\n':raise RuntimeError('Unexpected website health response.')
    return
   except Exception:
-   if attempt==19:raise
-   time.sleep(1)
+   if time.monotonic()>=deadline:raise
+   time.sleep(min(1,max(0,deadline-time.monotonic())))
+def verify_legacy_routes(expected):
+ for path in ['/extension-market','/extension-market/']:
+  try:get(cfg['legacyOrigin']+path+'?from=compatibility',allow_redirects=False)
+  except urllib.error.HTTPError as error:
+   if error.code!=308 or error.headers.get('Location')!=cfg['origin']+'/?from=compatibility':
+    raise RuntimeError('A legacy landing redirect did not preserve its query or canonical root.')
+  else:raise RuntimeError('A legacy landing URL did not redirect to the canonical root.')
+ if 'catalog.json' in expected:
+  data=get(cfg['legacyOrigin']+'/extension-market/catalog.json',body=True,allow_redirects=False)
+  if digest(data)!=expected['catalog.json']['sha256']:
+   raise RuntimeError('The legacy native catalog alias does not serve the verified bytes directly.')
 def write_in_place(data):
  with live.open('wb') as output:output.write(data);output.flush();os.fsync(output.fileno())
 def reload_proxy():run(['docker','exec','caddy','caddy','reload','--config','/etc/caddy/Caddyfile','--adapter','caddyfile'],'caddy-reload')
@@ -260,11 +340,12 @@ try:
  if candidate!=original:
   step('Reloading the dedicated HTTPS path through Caddy')
   write_in_place(candidate);proxy_written=True;reload_proxy()
- health(cfg['origin']+'/extension-market/healthz')
- if digest(get(cfg['origin']+'/extension-market/',body=True))!=cfg['indexSHA256']:
+ health(cfg['origin']+'/healthz',wait_seconds=120)
+ if digest(get(cfg['origin']+'/',body=True))!=cfg['indexSHA256']:
   raise RuntimeError('The public page does not match this release.')
+ verify_legacy_routes(expected)
  baselines()
- record={'status':'deployed','tag':cfg['tag'],'image':cfg['image'],'publicURL':cfg['origin']+'/extension-market/','previousContainer':previous,'previousRunning':previous_running,'caddyBeforeSHA256':digest(original),'caddyAfterSHA256':digest(candidate),'revision':cfg['revision'],'publicFileCount':len(expected),'publicManifestSHA256':manifest_digest(expected)}
+ record={'status':'deployed','tag':cfg['tag'],'image':cfg['image'],'publicURL':cfg['origin']+'/','previousContainer':previous,'previousRunning':previous_running,'caddyBeforeSHA256':digest(original),'caddyAfterSHA256':digest(candidate),'revision':cfg['revision'],'publicFileCount':len(expected),'publicManifestSHA256':manifest_digest(expected)}
  save_json(journal,record)
  print(json.dumps(record),flush=True)
 except BaseException:
@@ -359,7 +440,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Explicitly print the plan without SSH or Docker changes.")
     parser.add_argument("--credentials-file", type=Path, default=PRIVATE_SETTINGS, help="Private ReciteVocabulary .env; never transferred.")
     parser.add_argument("--ssh-alias", help="Existing key-authenticated SSH alias, defaulting to the private configuration.")
-    parser.add_argument("--public-origin", default=PUBLIC_ORIGIN, help="Existing HTTPS origin; the path is /extension-market/.")
+    parser.add_argument("--public-origin", default=PUBLIC_ORIGIN, help="Dedicated HTTPS marketplace origin, served at its root.")
     parser.add_argument("--dist", type=Path, default=ROOT / "dist", help="Built public static files, including source packages and MacHelper ZIP.")
     parser.add_argument("--tag", help="Optional explicit timestamp/commit image tag.")
     parser.add_argument("--rollback", metavar="DEPLOYED_TAG", help="Roll back this active release; still requires --deploy to act.")
@@ -377,6 +458,8 @@ def main() -> None:
     if origin.scheme != "https" or not origin.hostname or origin.username or origin.password or origin.path not in ["", "/"] or origin.query or origin.fragment or origin.port not in [None, 443]:
         raise ValueError("The public origin must be an existing HTTPS domain without a path or credentials.")
     public_origin = "https://" + origin.hostname
+    if public_origin == LEGACY_ORIGIN:
+        raise ValueError("Use the dedicated marketplace domain; the legacy vocabulary origin is preserved.")
     revision = subprocess.check_output(["git", "-C", str(ROOT.parent), "rev-parse", "HEAD"], text=True).strip()
     tag = args.rollback or args.tag or (dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + revision[:12])
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", tag):
@@ -384,7 +467,7 @@ def main() -> None:
     image = namespace + "/extension-market-website:" + tag
     files = [] if args.rollback else source_files(args.dist.absolute())
     config = {"tag": tag, "image": image, "revision": revision, "domain": origin.hostname,
-              "origin": public_origin, "rollback": bool(args.rollback)}
+              "origin": public_origin, "legacyOrigin": LEGACY_ORIGIN, "rollback": bool(args.rollback)}
     if files:
         expected = public_manifest(args.dist.absolute())
         if len(expected) != len(files) - 2:

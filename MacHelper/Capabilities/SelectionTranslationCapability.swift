@@ -47,6 +47,7 @@ struct CapabilityOperationGate {
 public final class SelectionTranslationCapability {
     public var onPerform: (@MainActor (String) async throws -> CapabilityTranslationResult)?
     public var onPerformStreaming: (@MainActor (String, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult)?
+    public var onPerformSelectionStreaming: (@MainActor (CapabilitySelectionInput, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult)?
     public var onPresentOverlay: (() -> Void)?
     public var onStatusChange: (() -> Void)?
     public private(set) var isRunning = false
@@ -149,16 +150,21 @@ public final class SelectionTranslationCapability {
         operationTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let input = self.onPerformSelectionStreaming == nil ? CapabilitySelectionInput(text: selection.text)
+                    : await self.monitor.input(for: selection)
+                guard self.operationGate.accepts(ticket, selection: self.state,
+                                                running: self.isRunning, cancelled: Task.isCancelled) else { return }
+                let progress: @MainActor (CapabilityTranslationResult) -> Void = { [weak self] progress in
+                    guard let self, self.operationGate.accepts(ticket, selection: self.state,
+                                                             running: self.isRunning, cancelled: Task.isCancelled),
+                          progress.text.utf8.count <= CapabilityFrame.maximumBytes else { return }
+                    self.panels.showProgress(progress, near: selection.bounds)
+                }
                 let result: CapabilityTranslationResult
-                if let streaming = self.onPerformStreaming {
-                    result = try await streaming(selection.text) { [weak self] progress in
-                        guard let self, self.operationGate.accepts(ticket, selection: self.state,
-                                                                 running: self.isRunning, cancelled: Task.isCancelled) else { return }
-                        // Source tools send cumulative previews. Keep rendering
-                        // bounded even if a broken tool emits oversized output.
-                        guard progress.text.utf8.count <= CapabilityFrame.maximumBytes else { return }
-                        self.panels.showProgress(progress, near: selection.bounds)
-                    }
+                if let streaming = self.onPerformSelectionStreaming {
+                    result = try await streaming(input, progress)
+                } else if let streaming = self.onPerformStreaming {
+                    result = try await streaming(selection.text, progress)
                 } else if let perform = self.onPerform {
                     result = try await perform(selection.text)
                 } else {

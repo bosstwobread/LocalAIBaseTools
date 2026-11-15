@@ -2,10 +2,12 @@
 """Build the static marketplace and complete, hash-verified source downloads."""
 import argparse
 import hashlib
+import io
 import json
 import plistlib
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import zipfile
@@ -24,6 +26,42 @@ def digest(data):
 def json_file(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def historical_files(folder=None):
+    """Retain bounded public package bytes; never import arbitrary release files."""
+    folder = folder or HERE / "historical-packages"
+    if folder.is_symlink():
+        raise ValueError("Historical packages cannot be a symbolic link.")
+    if not folder.exists():
+        return {}
+    if not folder.is_dir():
+        raise ValueError("Historical packages must be an ordinary directory.")
+    result = {}
+    for path in sorted(folder.rglob("*")):
+        relative = path.relative_to(folder)
+        if relative.parts[0] != "packages" or any(part.startswith(".") for part in relative.parts):
+            raise ValueError("Historical files must use non-hidden packages/ paths: " + str(relative))
+        mode = path.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            continue
+        if len(relative.parts) < 2 or not stat.S_ISREG(mode):
+            raise ValueError("Historical packages cannot contain links or special files: " + str(relative))
+        limit = 4 * 1024 * 1024 if relative.suffix == ".zip" else 512 * 1024
+        if path.stat().st_size > limit:
+            raise ValueError("Historical package file exceeds its limit: " + str(relative))
+        result[relative.as_posix()] = path.read_bytes()
+        if len(result) > 256 or sum(map(len, result.values())) > 8 * 1024 * 1024:
+            raise ValueError("Historical package inventory exceeds its limits.")
+    return result
+
+
+def write_package(path, data):
+    """Published versioned paths are immutable, including retained releases."""
+    if path.exists() and path.read_bytes() != data:
+        raise ValueError("A build cannot replace published package bytes: " + str(path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
 
 def source_files(folder):
@@ -47,13 +85,14 @@ def source_files(folder):
 
 def write_source_zip(path, folder_name, files):
     """Stable archives make source checksums reproducible across deployments."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name, data in sorted(files.items()):
             item = zipfile.ZipInfo(folder_name + "/" + name, date_time=(2026, 1, 1, 0, 0, 0))
             item.compress_type = zipfile.ZIP_DEFLATED
             item.external_attr = 0o100644 << 16
             archive.writestr(item, data)
+    write_package(path, buffer.getvalue())
 
 
 def updated_at(folder):
@@ -76,6 +115,8 @@ def build(output, app, without_app=False):
     with tempfile.TemporaryDirectory(prefix=".market-build-", dir=HERE) as temporary:
         stage = Path(temporary) / "site"
         stage.mkdir()
+        for relative, data in historical_files().items():
+            write_package(stage / relative, data)
         for filename in ["index.html", "styles.css", "app.js"]:
             shutil.copy2(HERE / filename, stage / filename)
         shutil.copytree(HERE / "assets", stage / "assets")
@@ -128,8 +169,7 @@ def build(output, app, without_app=False):
                 for relative, data in files.items():
                     url = "packages/" + slug + "/" + quote(version, safe="") + "/" + quote(relative, safe="/")
                     destination = stage / "packages" / slug / version / relative
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination.write_bytes(data)
+                    write_package(destination, data)
                     inventory.append({"path": relative, "url": url, "sha256": digest(data), "size": len(data)})
                 catalog["extensions"].append({
                     "identifier": identifier, "displayName": name, "version": version,
