@@ -18,10 +18,15 @@ final class AISettingsViewController: NSViewController {
     private var settings = HelperSettings()
     private var isLoading = false
 
+    var hasPendingChanges: Bool {
+        guard isViewLoaded else { return false }
+        return isLoading || (try? currentSettings()) != settings
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         do { settings = try store.load() }
-        catch { setStatus("Settings could not be loaded: \(error.localizedDescription)", error: true) }
+        catch { setStatus(L("Settings could not be loaded: %@", error.localizedDescription), error: true) }
         providerPicker.selectItem(at: AIProvider.allCases.firstIndex(of: settings.provider) ?? 0)
         addressField.stringValue = settings.baseURL
         showCurrentModel(settings.model)
@@ -64,19 +69,19 @@ final class AISettingsViewController: NSViewController {
             container.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -28)
         ])
 
-        let title = NSTextField(labelWithString: "AI Connection")
+        let title = NSTextField(labelWithString: L("AI Connection"))
         title.font = .systemFont(ofSize: 24, weight: .semibold)
         container.addArrangedSubview(title)
-        let subtitle = NSTextField(wrappingLabelWithString: "Choose the AI service and model shared by your tools.")
+        let subtitle = NSTextField(wrappingLabelWithString: L("Choose the AI service and model shared by your tools."))
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
         container.addArrangedSubview(subtitle)
         subtitle.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
-        providerPicker.addItems(withTitles: AIProvider.allCases.map(\.displayName))
+        providerPicker.addItems(withTitles: AIProvider.allCases.map { L($0.displayName) })
         providerPicker.target = self
         providerPicker.action = #selector(providerChanged(_:))
-        providerPicker.setAccessibilityLabel("AI service")
+        providerPicker.setAccessibilityLabel(L("AI service"))
         addRow(label: "AI service", control: providerPicker, in: container)
 
         explanation.font = .systemFont(ofSize: 12)
@@ -85,11 +90,11 @@ final class AISettingsViewController: NSViewController {
         explanation.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         addressField.placeholderString = "http://127.0.0.1:11434"
-        addressField.setAccessibilityLabel("Local service address")
+        addressField.setAccessibilityLabel(L("Local service address"))
         addressRow = addRow(label: "Address", control: addressField, in: container)
 
-        modelPicker.setAccessibilityLabel("AI model")
-        refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshModels(_:)))
+        modelPicker.setAccessibilityLabel(L("AI model"))
+        refreshButton = NSButton(title: L("Refresh"), target: self, action: #selector(refreshModels(_:)))
         let modelControls = NSStackView(views: [modelPicker, refreshButton])
         modelControls.spacing = 8
         modelControls.distribution = .fill
@@ -100,7 +105,7 @@ final class AISettingsViewController: NSViewController {
         refreshButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         addRow(label: "Model", control: modelControls, in: container)
 
-        let note = NSTextField(wrappingLabelWithString: "Refresh reads the current model list from your AI service. New models appear without updating your tools.")
+        let note = NSTextField(wrappingLabelWithString: L("Refresh reads the current model list from your AI service. New models appear without updating your tools."))
         note.font = .systemFont(ofSize: 12)
         note.textColor = .secondaryLabelColor
         container.addArrangedSubview(note)
@@ -120,8 +125,8 @@ final class AISettingsViewController: NSViewController {
         container.addArrangedSubview(statusRow)
         statusRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
-        testButton = NSButton(title: "Test Connection", target: self, action: #selector(testConnection(_:)))
-        saveButton = NSButton(title: "Save", target: self, action: #selector(save(_:)))
+        testButton = NSButton(title: L("Test Connection"), target: self, action: #selector(testConnection(_:)))
+        saveButton = NSButton(title: L("Save"), target: self, action: #selector(save(_:)))
         saveButton.keyEquivalent = "\r"
         let buttons = NSStackView(views: [testButton, saveButton])
         buttons.spacing = 12
@@ -130,8 +135,8 @@ final class AISettingsViewController: NSViewController {
 
     @discardableResult
     private func addRow(label: String, control: NSView, in container: NSStackView) -> NSStackView {
-        let title = NSTextField(labelWithString: label)
-        title.widthAnchor.constraint(equalToConstant: 78).isActive = true
+        let title = NSTextField(labelWithString: L(label))
+        title.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
         let row = NSStackView(views: [title, control])
         row.spacing = 12
         row.alignment = .centerY
@@ -154,7 +159,7 @@ final class AISettingsViewController: NSViewController {
     }
 
     private func updateProviderDescription() {
-        explanation.stringValue = selectedProvider.explanation
+        explanation.stringValue = L(selectedProvider.explanation)
         addressRow.isHidden = selectedProvider == .chatGPT
         addressField.placeholderString = selectedProvider.defaultBaseURL
     }
@@ -163,13 +168,13 @@ final class AISettingsViewController: NSViewController {
         addressField.stringValue = selectedProvider.defaultBaseURL
         showCurrentModel("")
         updateProviderDescription()
-        setStatus("Choose a model, then save your settings.")
+        setStatus(L("Choose a model, then save your settings."))
         refreshModels(nil)
     }
 
     private func showCurrentModel(_ model: String) {
         modelPicker.removeAllItems()
-        modelPicker.addItem(withTitle: selectedProvider == .chatGPT ? "Automatic (service default)" : "Choose a model…")
+        modelPicker.addItem(withTitle: selectedProvider == .chatGPT ? L("Automatic (service default)") : L("Choose a model…"))
         modelIDs = [""]
         if !model.isEmpty {
             modelIDs.append(model)
@@ -187,7 +192,7 @@ final class AISettingsViewController: NSViewController {
         do { chosen = try currentSettings() }
         catch { setStatus(error.localizedDescription, error: true); return }
         setLoading(true)
-        setStatus(isTest ? "Checking connection…" : "Loading models…")
+        setStatus(isTest ? L("Checking connection…") : L("Loading models…"))
         Task { [weak self] in
             guard let self else { return }
             defer { self.setLoading(false) }
@@ -204,7 +209,7 @@ final class AISettingsViewController: NSViewController {
                         self.modelPicker.selectItem(at: index)
                     } else {
                         self.modelIDs.append(chosen.model)
-                        self.modelPicker.addItem(withTitle: "\(chosen.model) (unavailable)")
+                        self.modelPicker.addItem(withTitle: L("%@ (unavailable)", chosen.model))
                         self.modelPicker.selectItem(at: self.modelIDs.count - 1)
                     }
                 } else if chosen.provider != .chatGPT, self.modelIDs.count > 1 {
@@ -212,9 +217,9 @@ final class AISettingsViewController: NSViewController {
                 }
                 let count = catalog.models.count
                 if count == 0 {
-                    self.setStatus("Connected. No models are available; load or download a model in \(chosen.provider.displayName).")
+                    self.setStatus(L("Connected. No models are available; load or download a model in %@.", L(chosen.provider.displayName)))
                 } else {
-                    self.setStatus("Connected to \(chosen.provider.displayName). \(count) model\(count == 1 ? "" : "s") available.")
+                    self.setStatus(count == 1 ? L("Connected to %@. %ld model available.", L(chosen.provider.displayName), count) : L("Connected to %@. %ld models available.", L(chosen.provider.displayName), count))
                 }
             } catch { self.setStatus(error.localizedDescription, error: true) }
         }
@@ -224,12 +229,12 @@ final class AISettingsViewController: NSViewController {
         do {
             settings = try currentSettings()
             guard settings.provider == .chatGPT || !settings.model.isEmpty else {
-                setStatus("Choose a model before saving. Refresh the list after starting your AI service.", error: true)
+                setStatus(L("Choose a model before saving. Refresh the list after starting your AI service."), error: true)
                 return
             }
             try store.save(settings)
             addressField.stringValue = settings.baseURL
-            setStatus("Saved. Your tools will use these settings for their next request.")
+            setStatus(L("Saved. Your tools will use these settings for their next request."))
         } catch { setStatus(error.localizedDescription, error: true) }
     }
 
@@ -245,7 +250,7 @@ final class AISettingsViewController: NSViewController {
     }
 
     private func setStatus(_ message: String, error: Bool = false) {
-        status.stringValue = message
+        status.stringValue = error ? L("Connection error: %@", L(message)) : L(message)
         status.textColor = error ? .systemRed : .secondaryLabelColor
     }
 }

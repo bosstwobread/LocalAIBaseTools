@@ -100,14 +100,14 @@ final class SourceExtensionManager {
             let snapshot = snapshots[id] ?? active[id]?.snapshot
             let definition = definitions[id]?.entry
             let exists = (try? store.installedURL(for: id)).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
-            return SourceToolInfo(id: id, displayName: snapshot?.manifest.displayName ?? definition?.displayName ?? id,
-                                  summary: snapshot?.manifest.summary ?? definition?.summary ?? "Editable source extension",
+            return SourceToolInfo(id: id, displayName: localizedText(snapshot?.manifest.displayName ?? definition?.displayName ?? id, for: id),
+                                  summary: localizedText(snapshot?.manifest.summary ?? definition?.summary ?? L("Editable source extension"), for: id),
                                   version: snapshot?.manifest.version ?? definition?.version ?? "",
                                   runtime: snapshot?.manifest.runtime ?? "",
                                   isEnabled: state.enabled[id] == true, isRunning: active[id]?.worker.generation != nil,
                                   sourceURL: exists ? try? store.installedURL(for: id) : nil,
                                   isLocallyModified: snapshot?.isLocallyModified ?? false, reloadCount: counts[id] ?? 0,
-                                  error: errors[id] ?? configurationErrors[id], status: statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source."))
+                                  error: errors[id] ?? configurationErrors[id], status: L(statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source.")))
         }
     }
 
@@ -117,12 +117,12 @@ final class SourceExtensionManager {
         if FileManager.default.fileExists(atPath: file.path) {
             do {
                 state = try JSONDecoder().decode(State.self, from: Data(contentsOf: file))
-                guard state.schemaVersion == 1 else { throw SourcePackageError.invalid("Unsupported extension preferences.") }
+                guard state.schemaVersion == 1 else { throw SourcePackageError.invalid(L("Unsupported extension preferences.")) }
                 guard state.enabled.count <= 128, state.permissions.count <= 128, state.catalogs.count <= 32 else {
-                    throw SourcePackageError.invalid("Extension preferences exceed their size limits.")
+                    throw SourcePackageError.invalid(L("Extension preferences exceed their size limits."))
                 }
                 for id in Set(state.enabled.keys).union(state.permissions.keys) { try SourcePackageRules.validateIdentifier(id) }
-            } catch { state = State(); errors[Self.translationID] = "Source extension preferences could not be read. Enable the tool explicitly." }
+            } catch { state = State(); errors[Self.translationID] = L("Source extension preferences could not be read. Enable the tool explicitly.") }
         } else if !headless {
             // Translation was enabled by default in MacHelper 3. Preserve that
             // existing choice; other catalog tools remain disabled until chosen.
@@ -161,11 +161,11 @@ final class SourceExtensionManager {
     }
 
     func reload(_ id: String) async throws {
-        guard state.enabled[id] == true else { throw SourcePackageError.invalid("Enable this extension before reloading it.") }
+        guard state.enabled[id] == true else { throw SourcePackageError.invalid(L("Enable this extension before reloading it.")) }
         do { try await activate(id, approving: false) }
         catch {
             if !(error is CancellationError), state.enabled[id] == true, !shuttingDown {
-                errors[id] = "Reload failed; the last working version remains active. " + error.localizedDescription; notify()
+                errors[id] = L("Reload failed; the last working version remains active. %@", error.localizedDescription); notify()
             }
             throw error
         }
@@ -200,10 +200,15 @@ final class SourceExtensionManager {
                let configuration = try? settingsConfiguration(cached, id: id) {
                 preparedSettings[id] = configuration
             }
-            configurationErrors[id] = "Settings could not be read from the local source. " + error.localizedDescription
+            configurationErrors[id] = L("Settings could not be read from the local source. %@", error.localizedDescription)
             notify()
             throw error
         }
+    }
+
+    func localizedText(_ text: String, for id: String) -> String {
+        let snapshot = active[id]?.snapshot ?? preparedSettings[id]?.snapshot ?? snapshots[id]
+        return snapshot?.localizations?.text(text, language: AppLocalization.shared.resolvedLanguage) ?? text
     }
 
     func settingsSchema(for id: String) -> ScriptSettingsSchema? {
@@ -214,10 +219,10 @@ final class SourceExtensionManager {
     func promptValue(_ key: String, for id: String) throws -> String {
         guard let snapshot = active[id]?.snapshot ?? preparedSettings[id]?.snapshot,
               let schema = settingsSchema(for: id) else {
-            throw SourcePackageError.invalid("Load this extension's validated source before editing a prompt.")
+            throw SourcePackageError.invalid(L("Load this extension's validated source before editing a prompt."))
         }
         let path = try schema.promptPath(for: key)
-        guard let value = snapshot.resources[path] else { throw SourcePackageError.invalid("The declared prompt resource is unavailable.") }
+        guard let value = snapshot.resources[path] else { throw SourcePackageError.invalid(L("The declared prompt resource is unavailable.")) }
         try ScriptPromptResource.validate(value)
         return value
     }
@@ -235,7 +240,7 @@ final class SourceExtensionManager {
     func updateSetting(_ key: String, value: Any, for id: String) async throws {
         guard !shuttingDown else { throw CancellationError() }
         if let runtime = active[id] {
-            guard let schema = runtime.schema else { throw SourcePackageError.invalid("This tool has no additional settings.") }
+            guard let schema = runtime.schema else { throw SourcePackageError.invalid(L("This tool has no additional settings.")) }
             try schema.validate(value, for: key)
             var values = runtime.settings; values[key] = value
             try saveSettings(values, id: id)
@@ -246,7 +251,7 @@ final class SourceExtensionManager {
             // This synchronous read/validate/write cannot interleave with an
             // enable, and deliberately does not touch enabled/permission state.
             let (snapshot, configuration) = try readSettingsSource(for: id)
-            guard let schema = configuration.schema else { throw SourcePackageError.invalid("This tool has no additional settings.") }
+            guard let schema = configuration.schema else { throw SourcePackageError.invalid(L("This tool has no additional settings.")) }
             try schema.validate(value, for: key)
             var values = configuration.values; values[key] = value
             try saveSettings(values, id: id)
@@ -262,7 +267,7 @@ final class SourceExtensionManager {
         let (snapshot, configuration) = try readSettingsSource(for: id)
         guard let displayed = active[id]?.snapshot ?? preparedSettings[id]?.snapshot,
               displayed.fingerprint == snapshot.fingerprint else {
-            throw SourcePackageError.invalid("The extension source changed since this editor was loaded. Revert to the current source before saving again.")
+            throw SourcePackageError.invalid(L("The extension source changed since this editor was loaded. Revert to the current source before saving again."))
         }
         let updated = try ScriptPromptResource.replace(in: snapshot, key: key, value: value, expectedValue: expectedValue)
         if active[id] != nil {
@@ -306,7 +311,7 @@ final class SourceExtensionManager {
         guard sourceURL(for: id) == nil else { return false }
         let catalog = preview.request.catalogURL.absoluteString
         guard state.catalogs.contains(catalog) || state.catalogs.count < 32 else {
-            throw MarketplaceError.invalidLink("Too many tool catalogs are configured. Remove an unused catalog before installing another.")
+            throw MarketplaceError.invalidLink(L("Too many tool catalogs are configured. Remove an unused catalog before installing another."))
         }
         definitions[id] = Definition(entry: preview.entry, base: preview.request.catalogURL)
         do {
@@ -333,16 +338,16 @@ final class SourceExtensionManager {
     func performCommand(for id: String, text: String, sentence: String? = nil,
                         onProgress: (@MainActor (CapabilityTranslationResult) -> Void)? = nil) async throws -> CapabilityTranslationResult {
         guard state.enabled[id] == true, let runtime = active[id], !shuttingDown else {
-            throw SourcePackageError.invalid("This extension is disabled.")
+            throw SourcePackageError.invalid(L("This extension is disabled."))
         }
-        guard !runtime.actionInProgress else { throw SourcePackageError.invalid("This extension is already processing an action.") }
+        guard !runtime.actionInProgress else { throw SourcePackageError.invalid(L("This extension is already processing an action.")) }
         var input: [String: Any] = ["text": text, "settings": runtime.settings]
         if let sentence {
             let selected = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard runtime.snapshot.manifest.permissions.contains("selection.read"),
                   !selected.isEmpty, sentence.utf16.count <= 2_000, sentence.utf8.count <= 8_000,
                   !sentence.contains("\0"), sentence.contains(selected) else {
-                throw SourcePackageError.invalid("The surrounding sentence is unavailable or invalid.")
+                throw SourcePackageError.invalid(L("The surrounding sentence is unavailable or invalid."))
             }
             input["sentence"] = sentence
         }
@@ -350,7 +355,7 @@ final class SourceExtensionManager {
         defer { runtime.actionInProgress = false }
         if runtime.worker.generation == nil { try await replaceWorker(runtime) }
         guard active[id] === runtime, state.enabled[id] == true, !shuttingDown else { throw CancellationError() }
-        guard let command = runtime.snapshot.manifest.commands.first else { throw SourcePackageError.invalid("This extension has no command.") }
+        guard let command = runtime.snapshot.manifest.commands.first else { throw SourcePackageError.invalid(L("This extension has no command.")) }
         let worker = runtime.worker, gate = runtime.gate
         gate.invoking = true; gate.calls = 0; gate.model = nil
         defer { gate.invoking = false }
@@ -365,7 +370,7 @@ final class SourceExtensionManager {
         try Task.checkCancellation()
         guard active[id] === runtime, runtime.worker === worker, state.enabled[id] == true,
               let output = result["text"] as? String, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              output.utf8.count <= 96_000 else { throw SourcePackageError.invalid("The extension returned an invalid or stale result.") }
+              output.utf8.count <= 96_000 else { throw SourcePackageError.invalid(L("The extension returned an invalid or stale result.")) }
         return CapabilityTranslationResult(text: output, model: gate.model,
                                            title: (result["title"] as? String).map { String($0.prefix(120)) })
     }
@@ -406,7 +411,7 @@ final class SourceExtensionManager {
             snapshots[id] = snapshot
             let approved = state.permissions[id]
             guard approving || approved.map({ Set(snapshot.manifest.permissions).isSubset(of: Set($0)) }) == true else {
-                throw SourcePackageError.invalid("This edit requests new permissions. Disable and re-enable the extension to approve them.")
+                throw SourcePackageError.invalid(L("This edit requests new permissions. Disable and re-enable the extension to approve them."))
             }
             if snapshot.manifest.runtime == "native", !(approved ?? []).contains("native.execute"), !headless {
                 guard approving, onApproveNativeExecution?(snapshot.manifest) == true else {
@@ -492,7 +497,7 @@ final class SourceExtensionManager {
                     return try await self.transform(payload, snapshot: snapshot, gate: gate, onProgress: nil)
                 })
             guard snapshot.manifest.commands.allSatisfy({ commands.contains($0.identifier) }) else {
-                throw SourcePackageError.invalid("The source does not implement every command declared by its manifest.")
+                throw SourcePackageError.invalid(L("The source does not implement every command declared by its manifest."))
             }
             try Task.checkCancellation()
             guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
@@ -507,10 +512,10 @@ final class SourceExtensionManager {
     private func transform(_ payload: [String: Any], snapshot: SourcePackageSnapshot, gate: Gate,
                            onProgress: (@MainActor ([String: Any]) -> Void)?) async throws -> [String: Any] {
         guard gate.invoking, !shuttingDown, snapshot.manifest.permissions.contains("ai.transform") else {
-            throw SourcePackageError.invalid("AI requests require an explicit current tool action.")
+            throw SourcePackageError.invalid(L("AI requests require an explicit current tool action."))
         }
         gate.calls += 1
-        guard gate.calls <= 8 else { throw SourcePackageError.invalid("This tool exceeded the AI calls allowed for one action.") }
+        guard gate.calls <= 8 else { throw SourcePackageError.invalid(L("This tool exceeded the AI calls allowed for one action.")) }
         if let test = testStreamingTransform, let onProgress {
             let result = try await test(payload) { update in
                 guard gate.invoking, !Task.isCancelled else { return }
@@ -525,7 +530,7 @@ final class SourceExtensionManager {
         }
         let action = payload["action"] as? String ?? "translate"
         guard ["translate", "polish"].contains(action), let text = payload["text"] as? String else {
-            throw SourcePackageError.invalid("The extension requested an unsupported AI transformation.")
+            throw SourcePackageError.invalid(L("The extension requested an unsupported AI transformation."))
         }
         let request = try CapabilityAIRequest(action: action, text: text,
             targetLanguage: payload["targetLanguage"] as? String, tone: payload["tone"] as? String,
@@ -595,7 +600,7 @@ final class SourceExtensionManager {
     }
     private func parseSchema(_ snapshot: SourcePackageSnapshot) throws -> ScriptSettingsSchema? {
         guard let path = snapshot.manifest.settingsSchema else { return nil }
-        guard let text = snapshot.resources[path] else { throw SourcePackageError.invalid("The settings schema is missing.") }
+        guard let text = snapshot.resources[path] else { throw SourcePackageError.invalid(L("The settings schema is missing.")) }
         let schema = try ScriptSettingsSchema(data: Data(text.utf8))
         try schema.validatePromptResources(in: snapshot)
         return schema

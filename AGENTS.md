@@ -1,5 +1,7 @@
 # LocalAIBaseTools
 
+- For every change, read [DEVELOPMENT.md](DEVELOPMENT.md) before editing and check its checklist again before reporting completion. Keep affected implementation, UI, documentation, website content, and release packages consistent.
+
 - Never send, submit, or automatically deliver an Upwork message. Only the user may use Upwork's Send control.
 - Translation is an explicit action on one message. Polishing shows a preview and requires Apply before changing a draft.
 - Test draft insertion and undo in the extension's sandbox, where Send is disabled. Preserve existing drafts during live Upwork tests.

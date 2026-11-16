@@ -1,4 +1,15 @@
 import AppKit
+import MacHelper
+
+/// Apply semantic layout after creating dynamic settings/cards too. Source text
+/// editors retain their original writing direction and exact text bytes.
+@MainActor
+func applyAppLanguageDirection(to view: NSView) {
+    if view is NSTextView { return }
+    view.userInterfaceLayoutDirection = AppLocalization.shared.isRightToLeft ? .rightToLeft : .leftToRight
+    if let field = view as? NSTextField, !field.isEditable { field.alignment = .natural }
+    for child in view.subviews { applyAppLanguageDirection(to: child) }
+}
 
 /// Shared navigation, separate from settings defined by individual extensions.
 @MainActor
@@ -6,7 +17,7 @@ final class SettingsNavigationButton: NSButton {
     var isSelected = false {
         didSet {
             font = .systemFont(ofSize: 13, weight: isSelected ? .semibold : .regular)
-            setAccessibilityValue(isSelected ? "Selected" : "")
+            setAccessibilityValue(isSelected ? L("Selected") : "")
             needsDisplay = true
         }
     }
@@ -17,7 +28,7 @@ final class SettingsNavigationButton: NSButton {
         self.target = target
         self.action = action
         isBordered = false
-        alignment = .left
+        alignment = AppLocalization.shared.isRightToLeft ? .right : .left
         image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
         imagePosition = .imageLeading

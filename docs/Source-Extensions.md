@@ -54,6 +54,24 @@ The `runtime` field is explicit and validated; MacHelper does not infer runtime 
 
 A migration preserves the identifier and compatible setting keys, rewrites commands for the target API, and changes `runtime`/`entryPoint`. Moving JavaScript to native adds `native.execute`. If it has not already been granted, automatic reload retains the previous generation and requires disable/re-enable approval before compilation/execution. Any other newly requested capability also requires re-enabling. Failed or unapproved reloads retain the previous generation. Returning to JavaScript removes `native.execute`, validates the JavaScript entry, and replaces the native worker. Renaming source files alone does not convert a tool.
 
+### Extension-owned interface translations (MacHelper 6.2+)
+
+MacHelper's General settings choose the interface language independently of a tool's translation target. A manifest may declare `"localizations": "localizations.json"`, using a safe relative `.json` resource path. Include that file in the source inventory:
+
+```json
+{
+  "schemaVersion": 1,
+  "translations": {
+    "fr": {"Translate to": "Traduire en", "Translation prompt": "Consigne de traduction"},
+    "zh-Hans": {"Translate to": "翻译为", "Translation prompt": "翻译提示词"}
+  }
+}
+```
+
+Keys are exact original UI strings from the tool's display name, summary, settings labels, and option labels. Values are displayed without changing the manifest identity, schema keys/values, saved settings, prompt resources, user text, or AI requests. Names can remain unchanged as product names. The host tries the selected locale, its base language, English, then the original string. Languages supported by the app are `en`, `zh-Hans`, `zh-Hant`, `es`, `fr`, `de`, `ja`, `ko`, `pt`, `ar`, `hi`, `ru`, and `it`.
+
+The optional catalog is at most 64 KiB of UTF-8 JSON, has `schemaVersion: 1`, and allows at most 32 language tables with 256 entries each. Locale keys contain 2–3 letters followed by up to three hyphen-separated 2–8 character alphanumeric subtags. Label keys must be nonempty and at most 2,000 UTF-8 bytes; values must be nonempty and at most 8,000 bytes; neither may contain NUL. The file counts toward the existing 96 KiB runtime text budget. Invalid/missing declared catalogs fail source validation and keep the last working generation. Tools without a catalog remain valid and retain original text. Edits use the normal source watcher/reload flow. Host translations never substitute for tool-owned configuration strings.
+
 ### JavaScript entry point
 
 Call `MacHelper.define` once. Supply named command functions, with optional `start` and `stop` lifecycle functions. Commands may return a Promise. Translation's editable behavior follows this pattern:

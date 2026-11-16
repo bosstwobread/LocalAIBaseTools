@@ -35,13 +35,13 @@ final class LoginItemManager {
 
     var statusMessage: String {
         switch status {
-        case .notRegistered: return "MacHelper will not open automatically."
-        case .enabled: return "MacHelper starts in the background when you log in. Open Settings from its Dock icon or menu bar."
+        case .notRegistered: return L("MacHelper will not open automatically.")
+        case .enabled: return L("MacHelper starts in the background when you log in. Open Settings from its Dock icon or menu bar.")
         case .requiresApproval:
-            return "Allow MacHelper in System Settings → General → Login Items & Extensions."
+            return L("Allow MacHelper in System Settings → General → Login Items & Extensions.")
         case .notFound:
-            return "Launch at login is not set up yet. Enable it to register MacHelper."
-        case .unavailable: return "The system could not determine MacHelper’s login status."
+            return L("Launch at login is not set up yet. Enable it to register MacHelper.")
+        case .unavailable: return L("The system could not determine MacHelper’s login status.")
         }
     }
 

@@ -8,6 +8,11 @@ enum MacHelperApplication {
     @MainActor
     static func main() {
         signal(SIGPIPE, SIG_IGN)
+        if CommandLine.arguments.contains(where: { $0.hasPrefix("--verify-") }) ||
+            Bundle.main.bundleIdentifier == "com.localaibasetools.panel-drag-verification" {
+            // Synthetic checks are deterministic and never write the user's language preference.
+            setenv("MACHELPER_INTERFACE_LANGUAGE", "en", 1)
+        }
         let app = NSApplication.shared
         if CommandLine.arguments.contains("--verify-extension-list") {
             app.setActivationPolicy(.prohibited)
@@ -61,7 +66,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var selectedSection = 1
     private var container: NSView!
     private var statusItem: NSStatusItem?
-    private let ai = AISettingsViewController()
+    private var ai = AISettingsViewController()
     private var extensions: ExtensionsViewController!
     private var sourceManager: SourceExtensionManager!
     private var startupTask: Task<Void, Never>?
@@ -90,6 +95,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
+        general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
         createWindow()
         startupTask = Task { [weak self] in
             guard let self else { return }
@@ -153,51 +159,58 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func createMenus() {
+        browserSupportMenuItems.removeAll()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         let menu = NSMenu()
         let appItem = NSMenuItem()
-        let appMenu = NSMenu(title: "MacHelper")
-        appMenu.addItem(withTitle: "MacHelper Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
-        appMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
-        let appBrowserSupport = appMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "")
+        let appMenu = NSMenu(title: L("MacHelper"))
+        appMenu.addItem(withTitle: L("MacHelper Settings…"), action: #selector(openSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: L("Marketplace…"), action: #selector(openMarketplace), keyEquivalent: "").target = self
+        let appBrowserSupport = appMenu.addItem(withTitle: L("Install Browser Support…"), action: #selector(installBrowserSupport), keyEquivalent: "")
         appBrowserSupport.target = self
         browserSupportMenuItems.append(appBrowserSupport)
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit MacHelper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L("Quit MacHelper"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         menu.addItem(appItem)
         let editItem = NSMenuItem()
-        let edit = NSMenu(title: "Edit")
+        let edit = NSMenu(title: L("Edit"))
         for (title, selector, key) in [("Undo", "undo:", "z"), ("Cut", "cut:", "x"),
                                        ("Copy", "copy:", "c"), ("Paste", "paste:", "v"),
                                        ("Select All", "selectAll:", "a")] {
-            edit.addItem(withTitle: title, action: NSSelectorFromString(selector), keyEquivalent: key)
+            edit.addItem(withTitle: L(title), action: NSSelectorFromString(selector), keyEquivalent: key)
         }
         editItem.submenu = edit
         menu.addItem(editItem)
         NSApp.mainMenu = menu
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: "MacHelper")
-        item.button?.toolTip = "MacHelper · AI connection and extensions"
+        item.button?.toolTip = L("MacHelper · AI connection and extensions")
         let statusMenu = NSMenu()
-        statusMenu.addItem(withTitle: "Extensions…", action: #selector(openExtensions), keyEquivalent: "").target = self
-        statusMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
-        statusMenu.addItem(withTitle: "AI Connection…", action: #selector(openAI), keyEquivalent: "").target = self
-        statusMenu.addItem(withTitle: "General…", action: #selector(openGeneral), keyEquivalent: "").target = self
-        let statusBrowserSupport = statusMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "")
+        statusMenu.addItem(withTitle: L("Extensions…"), action: #selector(openExtensions), keyEquivalent: "").target = self
+        statusMenu.addItem(withTitle: L("Marketplace…"), action: #selector(openMarketplace), keyEquivalent: "").target = self
+        statusMenu.addItem(withTitle: L("AI Connection…"), action: #selector(openAI), keyEquivalent: "").target = self
+        statusMenu.addItem(withTitle: L("General…"), action: #selector(openGeneral), keyEquivalent: "").target = self
+        let statusBrowserSupport = statusMenu.addItem(withTitle: L("Install Browser Support…"), action: #selector(installBrowserSupport), keyEquivalent: "")
         statusBrowserSupport.target = self
         browserSupportMenuItems.append(statusBrowserSupport)
         statusMenu.addItem(.separator())
-        statusMenu.addItem(withTitle: "Quit MacHelper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        statusMenu.addItem(withTitle: L("Quit MacHelper"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = statusMenu
         statusItem = item
     }
 
     private func createWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let firstWindow = window == nil
+        currentController?.view.removeFromSuperview()
+        currentController?.removeFromParent()
+        currentController = nil
+        navigationButtons.removeAll()
+        if firstWindow { window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false) }
         window.title = "MacHelper"
         window.contentMinSize = NSSize(width: 940, height: 650)
-        if let visible = NSScreen.main?.visibleFrame {
+        if firstWindow, let visible = NSScreen.main?.visibleFrame {
             window.setContentSize(NSSize(width: min(1060, max(940, visible.width - 64)),
                                          height: min(760, max(650, visible.height - 64))))
         }
@@ -211,10 +224,10 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         sidebar.blendingMode = .behindWindow
         sidebar.state = .followsWindowActiveState
         sidebar.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.setAccessibilityLabel("Settings navigation")
-        let title = NSTextField(labelWithString: "MacHelper")
+        sidebar.setAccessibilityLabel(L("Settings navigation"))
+        let title = NSTextField(labelWithString: L("MacHelper"))
         title.font = .systemFont(ofSize: 20, weight: .semibold)
-        let subtitle = NSTextField(labelWithString: "Settings")
+        let subtitle = NSTextField(labelWithString: L("Settings"))
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
         let header = NSStackView(views: [title, subtitle])
@@ -230,7 +243,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         navigation.spacing = 5
         navigation.translatesAutoresizingMaskIntoConstraints = false
         for (index, name, symbol) in [(2, "General", "gearshape"), (0, "AI Connection", "sparkles"), (1, "Extensions", "puzzlepiece.extension")] {
-            let button = SettingsNavigationButton(title: name, symbol: symbol, target: self, action: #selector(sectionChanged(_:)))
+            let button = SettingsNavigationButton(title: L(name), symbol: symbol, target: self, action: #selector(sectionChanged(_:)))
             button.tag = index
             navigationButtons[index] = button
             navigation.addArrangedSubview(button)
@@ -258,7 +271,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 208),
+            sidebar.widthAnchor.constraint(equalToConstant: 240),
             header.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 22),
             header.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -16),
             header.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 24),
@@ -277,8 +290,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             container.topAnchor.constraint(equalTo: root.topAnchor),
             container.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
-        showTab(1)
-        window.center()
+        applyAppLanguageDirection(to: rootController.view)
+        showTab(selectedSection)
+        if firstWindow { window.center() }
     }
 
     private func showSettings(tab: Int) {
@@ -313,8 +327,34 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             view.topAnchor.constraint(equalTo: container.topAnchor),
             view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
+        applyAppLanguageDirection(to: view)
         if index == 1 { extensions.refreshDisplay() }
         if index == 2 { general.refreshStatus() }
+    }
+
+    private func changeInterfaceLanguage(_ code: String) -> Bool {
+        guard code != AppLocalization.shared.language else { return true }
+        // Rebuilding presentation must never discard an unfinished prompt or AI setting.
+        guard !extensions.hasPendingOperations, !extensions.hasUnsavedPromptChanges,
+              !ai.hasPendingChanges, marketplaceTask == nil else {
+            let alert = NSAlert()
+            alert.messageText = L("Finish your changes first")
+            alert.informativeText = L("Save or revert unsaved prompts and AI settings, and wait for current operations before changing the interface language.")
+            alert.addButton(withTitle: L("OK"))
+            alert.runModal()
+            return false
+        }
+        AppLocalization.shared.language = code
+        extensions = ExtensionsViewController(manager: sourceManager)
+        extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
+        ai = AISettingsViewController()
+        general = GeneralSettingsViewController(login: login)
+        general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
+        createMenus()
+        updateBrowserSupportMenus()
+        createWindow()
+        general.refreshStatus()
+        return true
     }
 
     private func processMarketplaceRequests() {
@@ -356,35 +396,35 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     private func reviewMarketplaceInstall(_ preview: MarketplaceInstallPreview) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Install \(preview.manifest.displayName)?"
+        alert.messageText = L("Install %@?", preview.manifest.displayName)
         let permissionNames = ["selection.read": "Read selected text across apps", "clipboard.read": "Read clipboard text when you request it",
                                "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
                                "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
-        let permissions = preview.manifest.permissions.map { "• " + (permissionNames[$0] ?? $0) }.joined(separator: "\n")
+        let permissions = preview.manifest.permissions.map { "• " + L(permissionNames[$0] ?? $0) }.joined(separator: "\n")
         let source = preview.request.catalogURL.host.map { $0 + preview.request.catalogURL.path } ?? preview.request.catalogURL.absoluteString
-        alert.informativeText = "\(String(preview.manifest.summary.prefix(360)))\n\nVersion: \(preview.manifest.version)\nCatalog: \(String(source.prefix(360)))\n\nPermissions:\n\(permissions.isEmpty ? "None" : permissions)\n\nInstall source only from publishers you trust. The complete editable source will be downloaded and enabled after you approve."
-        alert.addButton(withTitle: "Install & Enable")
-        alert.addButton(withTitle: "Cancel")
+        alert.informativeText = L("%@\n\nVersion: %@\nCatalog: %@\n\nPermissions:\n%@\n\nInstall source only from publishers you trust. The complete editable source will be downloaded and enabled after you approve.", String(preview.manifest.summary.prefix(360)), preview.manifest.version, String(source.prefix(360)), permissions.isEmpty ? L("None") : permissions)
+        alert.addButton(withTitle: L("Install & Enable"))
+        alert.addButton(withTitle: L("Cancel"))
         NSApp.activate(ignoringOtherApps: true)
         return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func showMarketplaceError(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Marketplace"
+        alert.messageText = L("Marketplace")
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L("OK"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
 
     private func showBrowserSupportError(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Browser support could not be installed"
+        alert.messageText = L("Browser support could not be installed")
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L("OK"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
@@ -406,7 +446,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateBrowserSupportMenus() {
         for item in browserSupportMenuItems {
-            item.title = browserSupportFailure == nil ? "Install Browser Support…" : "Browser Support Needs Attention…"
+            item.title = browserSupportFailure == nil ? L("Install Browser Support…") : L("Browser Support Needs Attention…")
             item.toolTip = browserSupportFailure
         }
     }
@@ -426,7 +466,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         do {
             let url = try MarketplaceConfiguration.websiteURL()
             guard NSWorkspace.shared.open(url) else {
-                throw MarketplaceError.invalidLink("The marketplace could not be opened in your browser. Try again after checking your default browser.")
+                throw MarketplaceError.invalidLink(L("The marketplace could not be opened in your browser. Try again after checking your default browser."))
             }
         } catch { showMarketplaceError(error.localizedDescription) }
     }
@@ -437,9 +477,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             browserSupportFailure = nil
             updateBrowserSupportMenus()
             let alert = NSAlert()
-            alert.messageText = "Browser support is ready"
-            alert.informativeText = "Chrome and Edge can now connect to MacHelper. Reload an already-open browser extension to use the updated helper."
-            alert.addButton(withTitle: "OK")
+            alert.messageText = L("Browser support is ready")
+            alert.informativeText = L("Chrome and Edge can now connect to MacHelper. Reload an already-open browser extension to use the updated helper.")
+            alert.addButton(withTitle: L("OK"))
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         } catch {

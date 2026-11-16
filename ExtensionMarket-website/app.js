@@ -1,9 +1,11 @@
 (() => {
   'use strict';
+  const i18n = window.MarketI18n;
+  const t = (message, values) => i18n ? i18n.t(message, values) : typeof message !== 'string' ? '' : message.replace(/\{(\w+)\}/g, (_, key) => String(values?.[key] ?? `{${key}}`));
   const base = new URL('./', document.baseURI);
   const $ = selector => document.querySelector(selector);
   const dialog = $('#tool-dialog');
-  const state = { data: null, tools: [], loading: false, pendingTab: null, activeSlug: null, returnFocus: null, previousHash: '#browse' };
+  const state = { data: null, tools: [], loading: false, pendingTab: null, activeSlug: null, returnFocus: null, previousHash: '#browse', activeTab: 'overview' };
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   const h = (tag, attrs = {}, ...children) => {
     const node = document.createElement(tag);
@@ -38,8 +40,8 @@
     $('#catalog-empty').hidden = true;
     $('#extension-grid').hidden = false;
     $('#extension-grid').setAttribute('aria-busy', 'true');
-    $('#extension-grid').replaceChildren(h('div', { class: 'loading-note' }, h('span', { class: 'loading-dot', 'aria-hidden': 'true' }), 'Gathering the tools…'));
-    $('#result-count').textContent = 'Loading the collection…';
+    $('#extension-grid').replaceChildren(h('div', { class: 'loading-note' }, h('span', { class: 'loading-dot', 'aria-hidden': 'true' }), t("Gathering the tools…")));
+    $('#result-count').textContent = t("Loading the collection…");
     try {
       const response = await fetch(new URL('data/extensions.json', document.baseURI), { cache: 'no-cache' });
       if (!response.ok) throw new Error('Catalog unavailable');
@@ -57,7 +59,7 @@
     } catch {
       $('#extension-grid').hidden = true;
       $('#catalog-error').hidden = false;
-      $('#result-count').textContent = 'Collection unavailable';
+      $('#result-count').textContent = t("Collection unavailable");
     } finally {
       state.loading = false;
       $('#extension-grid').setAttribute('aria-busy', 'false');
@@ -65,12 +67,12 @@
   }
   function populateFilters() {
     for (const [selector, values, all] of [
-      ['#category', [...new Set(state.tools.map(tool => tool.category))].sort(), 'All categories'],
-      ['#platform', [...new Set(state.tools.flatMap(tool => tool.platforms))].sort(), 'All platforms']
+      ['#category', [...new Set(state.tools.map(tool => tool.category))].sort(), t("All categories")],
+      ['#platform', [...new Set(state.tools.flatMap(tool => tool.platforms))].sort(), t("All platforms")]
     ]) {
       const select = $(selector);
       const previous = select.value;
-      select.replaceChildren(h('option', { value: 'all' }, all), ...values.map(value => h('option', { value }, value)));
+      select.replaceChildren(h('option', { value: 'all' }, all), ...values.map(value => h('option', { value }, t(value))));
       if (values.includes(previous)) select.value = previous;
     }
   }
@@ -79,27 +81,27 @@
     const category = $('#category').value;
     const platform = $('#platform').value;
     const filtered = state.tools.filter(tool => {
-      const searchable = [tool.name, tool.summary, tool.description, tool.category, ...tool.features, ...tool.platforms].join(' ').toLocaleLowerCase();
+      const searchable = [tool.name, tool.summary, tool.description, tool.category, ...tool.features, ...tool.platforms, t(tool.summary), t(tool.description), t(tool.category), ...tool.features.map(feature => t(feature))].join(' ').toLocaleLowerCase();
       return (!query || searchable.includes(query)) && (category === 'all' || tool.category === category) && (platform === 'all' || tool.platforms.includes(platform));
     });
     $('#extension-grid').replaceChildren(...filtered.map(card));
     $('#catalog-empty').hidden = filtered.length !== 0;
-    $('#result-count').textContent = `${filtered.length} ${filtered.length === 1 ? 'extension' : 'extensions'}${filtered.length === state.tools.length ? ' in the collection' : ` of ${state.tools.length}`}`;
+    $('#result-count').textContent = filtered.length === state.tools.length ? t('Extensions: {count}', { count: filtered.length }) : t('Extensions: {count} / {total}', { count: filtered.length, total: state.tools.length });
     $('#clear-filters').hidden = !query && category === 'all' && platform === 'all';
   }
   function card(tool) {
     const details = `#extension/${encodeURIComponent(tool.slug)}`;
     const shot = tool.screenshots[0];
-    const visual = h('a', { class: 'card-visual', href: details, 'aria-label': `Explore ${tool.name}` }, image(shot?.src || tool.icon, shot?.alt || `${tool.name} interface preview`, { width: '1160', height: '720' }), h('span', { class: 'preview-label' }, 'Interface preview'));
-    const install = h('button', { type: 'button', class: 'card-install', 'aria-label': `Installation options for ${tool.name}` }, tool.kind === 'mac-source' ? 'Add to MacHelper ↗' : 'Get extension ↗');
+    const visual = h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) }, image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('span', { class: 'preview-label' }, t("Interface preview")));
+    const install = h('button', { type: 'button', class: 'card-install', 'aria-label': t('Installation options for {name}', { name: tool.name }) }, tool.kind === 'mac-source' ? t("Add to MacHelper ↗") : t("Get extension ↗"));
     install.addEventListener('click', () => navigate(tool.slug, 'install'));
     return h('article', { class: 'extension-card' }, visual,
       h('div', { class: 'card-content' },
-        h('div', { class: 'card-kicker' }, h('span', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'NATIVE MACOS TOOL' : 'MACOS SOURCE TOOL') : 'BROWSER COMPANION'), h('span', { class: 'card-version' }, `v${tool.version || '—'}`)),
-        h('div', { class: 'card-heading' }, image(tool.icon, '', { class: 'card-icon', width: '42', height: '42' }), h('div', {}, h('h3', {}, h('a', { href: details }, tool.name)), h('p', {}, tool.category))),
-        h('p', { class: 'card-summary' }, tool.summary),
-        h('ul', { class: 'card-features' }, tool.features.slice(0, 2).map(feature => h('li', {}, feature))),
-        h('div', { class: 'card-bottom' }, h('div', { class: 'platform-labels', 'aria-label': 'Platforms' }, tool.platforms.map(label => h('span', {}, label))), h('div', { class: 'card-links' }, textLink('Details', details, { 'aria-label': `Details for ${tool.name}` }), install))));
+        h('div', { class: 'card-kicker' }, h('span', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("NATIVE MACOS TOOL") : t("MACOS SOURCE TOOL")) : t("BROWSER COMPANION")), h('span', { class: 'card-version' }, `v${tool.version || '—'}`)),
+        h('div', { class: 'card-heading' }, image(tool.icon, '', { class: 'card-icon', width: '42', height: '42' }), h('div', {}, h('h3', {}, h('a', { href: details }, tool.name)), h('p', {}, t(tool.category)))),
+        h('p', { class: 'card-summary' }, t(tool.summary)),
+        h('ul', { class: 'card-features' }, tool.features.slice(0, 2).map(feature => h('li', {}, t(feature)))),
+        h('div', { class: 'card-bottom' }, h('div', { class: 'platform-labels', 'aria-label': t("Platforms") }, tool.platforms.map(label => h('span', {}, label))), h('div', { class: 'card-links' }, textLink(t("Details"), details, { 'aria-label': t('Details for {name}', { name: tool.name }) }), install))));
   }
   function resetFilters() {
     $('#search').value = '';
@@ -117,16 +119,16 @@
         link.setAttribute('download', '');
         link.removeAttribute('target'); link.removeAttribute('rel');
         const header = link.classList.contains('header-download');
-        link.replaceChildren(document.createTextNode(header ? 'Get MacHelper ' : 'Download for Mac '), h('span', { 'aria-hidden': 'true' }, header ? '↗' : '↓'));
+        link.replaceChildren(document.createTextNode(header ? t("Get MacHelper ") : t("Download for Mac ")), h('span', { 'aria-hidden': 'true' }, header ? '↗' : '↓'));
       }
       else {
-        link.textContent = 'MacHelper source ↗';
+        link.textContent = t("MacHelper source ↗");
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
       }
     });
     document.querySelectorAll('[data-helper-source]').forEach(link => { link.href = sourceURL(); });
-    $('#helper-meta').textContent = [helper.version && `v${helper.version}`, helper.minimumOS || 'macOS 14+', helper.architecture || 'Apple Silicon', helper.releaseChannel || 'Developer preview'].filter(Boolean).join(' · ');
+    $('#helper-meta').textContent = [helper.version && `v${helper.version}`, helper.minimumOS || 'macOS 14+', helper.architecture || 'Apple Silicon', t(helper.releaseChannel || 'Developer preview')].filter(Boolean).join(' · ');
   }
   function navigate(slug, tab = 'overview') {
     state.pendingTab = tab;
@@ -150,18 +152,19 @@
       state.previousHash = '#browse';
     }
     state.activeSlug = slug;
-    const close = h('button', { class: 'dialog-close', type: 'button', 'aria-label': 'Close details' }, '×');
+    const close = h('button', { class: 'dialog-close', type: 'button', 'aria-label': t("Close details") }, '×');
     close.addEventListener('click', () => dialog.close());
     const content = $('#dialog-content');
     if (!tool) {
-      content.replaceChildren(h('div', { class: 'dialog-topbar' }, h('p', { class: 'eyebrow' }, 'THE COLLECTION'), close), h('div', { class: 'dialog-body' }, h('h2', { id: 'dialog-title' }, 'Tool not found.'), h('p', { class: 'detail-description' }, 'This link may have changed. Close this window to browse the current collection.')));
+      content.replaceChildren(h('div', { class: 'dialog-topbar' }, h('p', { class: 'eyebrow' }, t("THE COLLECTION")), close), h('div', { class: 'dialog-body' }, h('h2', { id: 'dialog-title' }, t("Tool not found.")), h('p', { class: 'detail-description' }, t("This link may have changed. Close this window to browse the current collection."))));
     } else {
-      const overviewTab = h('button', { type: 'button', role: 'tab', id: 'overview-tab', 'aria-controls': 'overview-panel', 'aria-selected': 'false' }, 'Overview');
-      const installTab = h('button', { type: 'button', role: 'tab', id: 'install-tab', 'aria-controls': 'install-panel', 'aria-selected': 'false' }, 'Installation');
+      const overviewTab = h('button', { type: 'button', role: 'tab', id: 'overview-tab', 'aria-controls': 'overview-panel', 'aria-selected': 'false' }, t("Overview"));
+      const installTab = h('button', { type: 'button', role: 'tab', id: 'install-tab', 'aria-controls': 'install-panel', 'aria-selected': 'false' }, t("Installation"));
       const overview = h('section', { id: 'overview-panel', role: 'tabpanel', 'aria-labelledby': 'overview-tab', class: 'dialog-body' }, overviewContent(tool));
       const installation = h('section', { id: 'install-panel', role: 'tabpanel', 'aria-labelledby': 'install-tab', class: 'dialog-body' }, installContent(tool));
       const selectTab = (name, focus = false) => {
         const isOverview = name === 'overview';
+        state.activeTab = isOverview ? 'overview' : 'install';
         overviewTab.setAttribute('aria-selected', String(isOverview));
         installTab.setAttribute('aria-selected', String(!isOverview));
         overviewTab.tabIndex = isOverview ? 0 : -1;
@@ -172,14 +175,14 @@
       };
       overviewTab.addEventListener('click', () => selectTab('overview'));
       installTab.addEventListener('click', () => selectTab('install'));
-      const tablist = h('div', { class: 'dialog-tabs', role: 'tablist', 'aria-label': 'Extension details' }, overviewTab, installTab);
+      const tablist = h('div', { class: 'dialog-tabs', role: 'tablist', 'aria-label': t("Extension details") }, overviewTab, installTab);
       tablist.addEventListener('keydown', event => {
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
           event.preventDefault();
           selectTab(event.key === 'Home' ? 'overview' : event.key === 'End' ? 'install' : overview.hidden ? 'overview' : 'install', true);
         }
       });
-      content.replaceChildren(h('div', { class: 'dialog-topbar' }, h('p', { class: 'eyebrow' }, `${tool.kind === 'mac-source' ? 'MACOS TOOL' : 'BROWSER COMPANION'} / ${tool.category.toUpperCase()}`), close), h('div', { class: 'dialog-heading' }, image(tool.icon, '', { width: '60', height: '60' }), h('div', {}, h('h2', { id: 'dialog-title' }, tool.name), h('p', {}, `v${tool.version || '—'} · Free & open source`))), tablist, overview, installation);
+      content.replaceChildren(h('div', { class: 'dialog-topbar' }, h('p', { class: 'eyebrow' }, `${tool.kind === 'mac-source' ? t("MACOS TOOL") : t("BROWSER COMPANION")} / ${t(tool.category)}`), close), h('div', { class: 'dialog-heading' }, image(tool.icon, '', { width: '60', height: '60' }), h('div', {}, h('h2', { id: 'dialog-title' }, tool.name), h('p', {}, `v${tool.version || '—'} · ${t('Free & open source')}`))), tablist, overview, installation);
       selectTab(tab === 'install' ? 'install' : 'overview');
     }
     if (!dialog.open) { dialog.showModal(); document.body.classList.add('modal-open'); }
@@ -187,28 +190,28 @@
     close.focus({ preventScroll: true });
   }
   function overviewContent(tool) {
-    const main = h('div', {}, h('p', { class: 'detail-description' }, tool.description));
-    if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, 'What it does'), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, feature))));
-    for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, shot.alt || `${tool.name} interface preview`, { width: '1160', height: '720' }), h('figcaption', {}, shot.caption || 'Interface preview · Example content')));
-    if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, 'Access this tool uses'), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
-    const facts = h('dl', {}, h('dt', {}, 'Platforms'), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, 'Package'), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'Editable native Swift source' : 'Editable JavaScript source') : 'Browser extension ZIP'), h('dt', {}, 'Version'), h('dd', {}, tool.version || '—'));
+    const main = h('div', {}, h('p', { class: 'detail-description' }, t(tool.description)));
+    if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, t("What it does")), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, t(feature)))));
+    for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, t(shot.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('figcaption', {}, t(shot.caption) || t("Interface preview · Example content"))));
+    if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
+    const facts = h('dl', {}, h('dt', {}, t("Platforms")), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, t("Package")), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("Editable native Swift source") : t("Editable JavaScript source")) : t("Browser extension ZIP")), h('dt', {}, t("Version")), h('dd', {}, tool.version || '—'));
     if (tool.updatedAt) {
       const date = new Date(`${String(tool.updatedAt).slice(0, 10)}T00:00:00`);
-      if (!Number.isNaN(date.valueOf())) facts.append(h('dt', {}, 'Updated'), h('dd', {}, new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(date)));
+      if (!Number.isNaN(date.valueOf())) facts.append(h('dt', {}, t("Updated")), h('dd', {}, new Intl.DateTimeFormat(i18n?.locale || 'en', { dateStyle: 'medium' }).format(date)));
     }
-    const share = h('button', { type: 'button', class: 'link-button' }, 'Copy details link ↗');
+    const share = h('button', { type: 'button', class: 'link-button' }, t("Copy details link ↗"));
     share.addEventListener('click', () => copy(new URL(`#extension/${encodeURIComponent(tool.slug)}`, base).href, share));
-    const side = h('aside', { class: 'detail-facts' }, facts, textLink('View complete source', url(tool.sourceUrl) || sourceURL(), external), share);
+    const side = h('aside', { class: 'detail-facts' }, facts, textLink(t("View complete source"), url(tool.sourceUrl) || sourceURL(), external), share);
     if (tool.kind === 'mac-source') {
-      main.append(h('h3', { class: 'detail-subheading' }, 'Make it yours'),
-        h('p', { class: 'detail-description' }, 'In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.'),
-        textLink('Create or customize with your AI assistant', new URL('developer-guide.html', base).href));
-      side.append(textLink('Download the AI extension guide', new URL('AI_EXTENSION_GUIDE.md', base).href, { download: 'AI_EXTENSION_GUIDE.md' }));
+      main.append(h('h3', { class: 'detail-subheading' }, t("Make it yours")),
+        h('p', { class: 'detail-description' }, t("In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.")),
+        textLink(t("Create or customize with your AI assistant"), new URL('developer-guide.html', base).href));
+      side.append(textLink(t("Download the AI extension guide"), new URL('AI_EXTENSION_GUIDE.md', base).href, { download: 'AI_EXTENSION_GUIDE.md' }));
     }
     return h('div', { class: 'detail-grid' }, main, side);
   }
   function permissionLabel(value) {
-    return ({ 'selection.read': 'Read text you select through macOS Accessibility.', 'clipboard.read': 'Read clipboard text only when you choose the clipboard action.', 'ai.transform': 'Send text to your shared AI connection for an explicit action.', 'ui.panel': 'Display a nearby floating result panel.', 'native.execute': 'Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox.', nativeMessaging: 'Connect the browser extension to MacHelper on your Mac.', storage: 'Save extension preferences in browser storage.' })[value] || value;
+    return ({ 'selection.read': t("Read text you select through macOS Accessibility."), 'clipboard.read': t("Read clipboard text only when you choose the clipboard action."), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
   }
   function installContent(tool) {
     const sourceTool = tool.kind === 'mac-source';
@@ -220,34 +223,34 @@
       const scheme = new URL('machelper://install');
       scheme.searchParams.set('catalog', catalog);
       scheme.searchParams.set('extension', tool.id);
-      const open = h('a', { class: 'button button-blue', href: scheme.href }, 'Open MacHelper', h('span', { 'aria-hidden': 'true' }, '↗'));
+      const open = h('a', { class: 'button button-blue', href: scheme.href }, t("Open MacHelper"), h('span', { 'aria-hidden': 'true' }, '↗'));
       const installStatus = h('p', { class: 'install-status', role: 'status' });
-      open.addEventListener('click', () => { installStatus.textContent = 'If MacHelper didn’t open, install it below, then try again. Your browser may ask permission to open the app.'; });
-      callout.append(h('h3', {}, `Add ${tool.name} to MacHelper`), h('p', {}, 'Open the MacHelper app to install the complete editable tool package and review its requested access.'), open, h('p', { class: 'install-help' }, 'This website cannot check whether MacHelper is installed on your Mac.'), installStatus);
+      open.addEventListener('click', () => { installStatus.textContent = t("If MacHelper didn’t open, install it below, then try again. Your browser may ask permission to open the app."); });
+      callout.append(h('h3', {}, t('Add {name} to MacHelper', { name: tool.name })), h('p', {}, t("Open the MacHelper app to install the complete editable tool package and review its requested access.")), open, h('p', { class: 'install-help' }, t("This website cannot check whether MacHelper is installed on your Mac.")), installStatus);
       const fallbacks = h('div', { class: 'install-fallbacks' });
-      fallbacks.append(textLink(helperURL() ? 'Download MacHelper first' : 'Build MacHelper from source', helperURL() || sourceURL(), helperURL() ? { download: '' } : external));
-      if (packageURL) fallbacks.append(textLink('Download complete tool source', packageURL, { download: '' }));
-      const catalogCopy = h('button', { type: 'button', class: 'link-button' }, 'Copy catalog URL');
+      fallbacks.append(textLink(helperURL() ? t("Download MacHelper first") : t("Build MacHelper from source"), helperURL() || sourceURL(), helperURL() ? { download: '' } : external));
+      if (packageURL) fallbacks.append(textLink(t("Download complete tool source"), packageURL, { download: '' }));
+      const catalogCopy = h('button', { type: 'button', class: 'link-button' }, t("Copy catalog URL"));
       catalogCopy.addEventListener('click', () => copy(catalog, catalogCopy));
       fallbacks.append(catalogCopy);
       container.append(callout, fallbacks);
-      if (tool.runtime === 'native') container.append(h('p', { class: 'install-help' }, 'Native Swift source requires MacHelper 6 and Xcode Command Line Tools. Review native.execute before enabling. Saved code is compiled locally and its worker is replaced without restarting MacHelper.'));
+      if (tool.runtime === 'native') container.append(h('p', { class: 'install-help' }, t("Native Swift source requires MacHelper 6 and Xcode Command Line Tools. Review native.execute before enabling. Saved code is compiled locally and its worker is replaced without restarting MacHelper.")));
     } else {
-      callout.append(h('h3', {}, 'Add the browser companion'), h('p', {}, 'For Chrome or Edge on your Mac. Install and open MacHelper first so the extension can use your shared AI connection.'));
-      if (packageURL) callout.append(h('a', { class: 'button button-blue', href: packageURL, download: '' }, 'Download extension ZIP', h('span', { 'aria-hidden': 'true' }, '↓')));
-      callout.append(h('p', { class: 'install-help' }, 'Install from the ZIP with Developer mode → Load unpacked. Chrome Web Store and Edge Add-ons listings are not available yet.'));
+      callout.append(h('h3', {}, t("Add the browser companion")), h('p', {}, t("For Chrome or Edge on your Mac. Install and open MacHelper first so the extension can use your shared AI connection.")));
+      if (packageURL) callout.append(h('a', { class: 'button button-blue', href: packageURL, download: '' }, t("Download extension ZIP"), h('span', { 'aria-hidden': 'true' }, '↓')));
+      callout.append(h('p', { class: 'install-help' }, t("Install from the ZIP with Developer mode → Load unpacked. Chrome Web Store and Edge Add-ons listings are not available yet.")));
       container.append(callout);
       const pages = h('div', { class: 'browser-pages' });
       for (const address of ['chrome://extensions', 'edge://extensions']) {
-        const button = h('button', { type: 'button', 'aria-label': `Copy ${address}` }, 'Copy');
+        const button = h('button', { type: 'button', 'aria-label': t('Copy {address}', { address }) }, t("Copy"));
         button.addEventListener('click', () => copy(address, button));
         pages.append(h('div', { class: 'browser-page' }, h('code', {}, address), button));
       }
       container.append(pages);
     }
-    if (tool.installSteps.length) container.append(h('h3', { class: 'detail-subheading' }, 'Installation, step by step'), h('ol', { class: 'install-steps' }, tool.installSteps.map(step => h('li', {}, step))));
-    const preview = /preview/i.test(state.data?.macHelper?.releaseChannel || 'Developer preview');
-    container.append(h('p', { class: 'install-footnote' }, `MacHelper for Mac supports ${state.data?.macHelper?.architecture || 'Apple Silicon'}, ${state.data?.macHelper?.minimumOS || 'macOS 14+'}. Unzip the app, move it to Applications, and open it. ${preview ? 'This developer preview is not notarized; macOS may require you to review it in Privacy & Security. ' : ''}Prefer to build it yourself? The full source is available below.`), textLink('Review the project source', sourceURL(), external));
+    if (tool.installSteps.length) container.append(h('h3', { class: 'detail-subheading' }, t("Installation, step by step")), h('ol', { class: 'install-steps' }, tool.installSteps.map(step => h('li', {}, t(step)))));
+    const preview = /preview/i.test(state.data?.macHelper?.releaseChannel || t("Developer preview"));
+    container.append(h('p', { class: 'install-footnote' }, t('MacHelper supports {architecture}, {minimumOS}. Unzip the app, move it to Applications, and open it.', { architecture: state.data?.macHelper?.architecture || 'Apple Silicon', minimumOS: state.data?.macHelper?.minimumOS || 'macOS 14+' }) + ' ' + (preview ? t('This developer preview is not notarized; macOS may require you to review it in Privacy & Security.') + ' ' : '') + t('Prefer to build it yourself? The full source is available below.')), textLink(t("Review the project source"), sourceURL(), external));
     return container;
   }
   async function copy(value, sender) {
@@ -255,16 +258,16 @@
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
       await navigator.clipboard.writeText(value);
-      toast('Copied to clipboard.');
+      toast(t("Copied to clipboard."));
     } catch {
       let input = sender.parentElement.querySelector('.copy-fallback');
       if (!input) {
-        input = h('input', { class: 'copy-fallback', type: 'text', readonly: '', 'aria-label': 'Copy this link manually' });
+        input = h('input', { class: 'copy-fallback', type: 'text', readonly: '', 'aria-label': t("Copy this link manually") });
         sender.parentElement.append(input);
       }
       input.value = value;
       input.focus(); input.select();
-      toast('Select and copy the link manually.');
+      toast(t("Select and copy the link manually."));
     }
   }
   let toastTimer;
@@ -292,6 +295,19 @@
     if (event.target !== dialog) return;
     const rect = dialog.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+  });
+  window.addEventListener('market-language-change', () => {
+    if (state.data) {
+      const returnHref = state.returnFocus?.getAttribute('href') || state.returnFocus?.closest('.extension-card')?.querySelector('a')?.getAttribute('href');
+      populateFilters(); renderCards(); updateHelperLinks();
+      if (dialog.open && returnHref) state.returnFocus = [...document.querySelectorAll('.extension-card a')].find(link => link.getAttribute('href') === returnHref) || $('#search');
+      if (dialog.open && state.activeSlug) openTool(state.activeSlug, state.activeTab);
+    } else {
+      $('#result-count').textContent = t(state.loading ? 'Loading the collection…' : 'Collection unavailable');
+      const loading = $('#extension-grid .loading-note');
+      if (loading) loading.replaceChildren(h('span', { class: 'loading-dot', 'aria-hidden': 'true' }), t('Gathering the tools…'));
+    }
+    $('#toast').hidden = true;
   });
   loadCatalog();
 })();

@@ -1,4 +1,5 @@
 import AppKit
+import MacHelper
 import ApplicationServices
 
 /// Output returned by a source tool. Prompt construction, target language,
@@ -111,7 +112,7 @@ public final class SelectionTranslationCapability {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             clearSelection()
             manualSelection = true
-            panels.showError("Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.",
+            panels.showError(L("Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again."),
                              near: CGRect(x: point.x, y: point.y, width: 1, height: 20), canRetry: false)
             return
         }
@@ -169,15 +170,15 @@ public final class SelectionTranslationCapability {
                 } else if let perform = self.onPerform {
                     result = try await perform(selection.text)
                 } else {
-                    throw CapabilityError.invalid("This tool has no action configured. Reload its source extension and try again.")
+                    throw CapabilityError.invalid(L("This tool has no action configured. Reload its source extension and try again."))
                 }
                 guard self.operationGate.accepts(ticket, selection: self.state,
                                                 running: self.isRunning, cancelled: Task.isCancelled) else { return }
                 guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    throw CapabilityError.invalid("The tool returned an empty result.")
+                    throw CapabilityError.invalid(L("The tool returned an empty result."))
                 }
                 guard result.text.utf8.count <= CapabilityFrame.maximumBytes else {
-                    throw CapabilityError.invalid("The tool returned too much text to display.")
+                    throw CapabilityError.invalid(L("The tool returned too much text to display."))
                 }
                 self.operationGate.finish(ticket)
                 self.panels.showResult(result, near: selection.bounds)

@@ -1,9 +1,12 @@
 import AppKit
+import MacHelper
 
 @MainActor
 final class GeneralSettingsViewController: NSViewController {
     private let login: LoginItemManager
-    private let toggle = NSButton(checkboxWithTitle: "Launch MacHelper at login", target: nil, action: nil)
+    private let toggle = NSButton(checkboxWithTitle: L("Launch MacHelper at login"), target: nil, action: nil)
+    private let languagePicker = NSPopUpButton()
+    var onLanguageChange: ((String) -> Bool)?
     private let status = NSTextField(wrappingLabelWithString: "")
     var registrationError: String?
 
@@ -21,19 +24,19 @@ final class GeneralSettingsViewController: NSViewController {
         let document = GeneralSettingsDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = document
-        let title = NSTextField(labelWithString: "General")
+        let title = NSTextField(labelWithString: L("General"))
         title.font = .systemFont(ofSize: 24, weight: .semibold)
-        let subtitle = NSTextField(wrappingLabelWithString: "Startup and background behavior.")
+        let subtitle = NSTextField(wrappingLabelWithString: L("Language, startup, and background behavior."))
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
-        let section = NSTextField(labelWithString: "Startup")
+        let section = NSTextField(labelWithString: L("Startup"))
         section.font = .systemFont(ofSize: 13, weight: .semibold)
         toggle.target = self
         toggle.action = #selector(changeLogin)
         status.font = .systemFont(ofSize: 12)
-        let note = NSTextField(wrappingLabelWithString: "MacHelper keeps running when you close this window. Click its Dock icon to reopen Settings, or use the menu bar. Your enabled extensions start with it.")
+        let note = NSTextField(wrappingLabelWithString: L("MacHelper keeps running when you close this window. Click its Dock icon to reopen Settings, or use the menu bar. Your enabled extensions start with it."))
         note.textColor = .secondaryLabelColor
-        let button = NSButton(title: "Open Login Items…", target: self, action: #selector(openLoginItems))
+        let button = NSButton(title: L("Open Login Items…"), target: self, action: #selector(openLoginItems))
         note.font = .systemFont(ofSize: 12)
         let header = NSStackView(views: [title, subtitle])
         header.orientation = .vertical
@@ -43,7 +46,23 @@ final class GeneralSettingsViewController: NSViewController {
         startup.orientation = .vertical
         startup.alignment = .leading
         startup.spacing = 14
-        let stack = NSStackView(views: [header, startup])
+        let languageTitle = NSTextField(labelWithString: L("Interface language"))
+        languageTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        languagePicker.addItem(withTitle: L("System language"))
+        languagePicker.addItems(withTitles: AppLocalization.supportedLanguages.map(\.name))
+        languagePicker.selectItem(at: languageIndex)
+        languagePicker.target = self
+        languagePicker.action = #selector(changeLanguage)
+        languagePicker.identifier = NSUserInterfaceItemIdentifier("interface-language")
+        languagePicker.setAccessibilityLabel(L("Interface language"))
+        let languageNote = NSTextField(wrappingLabelWithString: L("Choose the language used in MacHelper."))
+        languageNote.font = .systemFont(ofSize: 12)
+        languageNote.textColor = .secondaryLabelColor
+        let language = NSStackView(views: [languageTitle, languagePicker, languageNote])
+        language.orientation = .vertical
+        language.alignment = .leading
+        language.spacing = 10
+        let stack = NSStackView(views: [header, language, startup])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 28
@@ -77,8 +96,19 @@ final class GeneralSettingsViewController: NSViewController {
         loadViewIfNeeded()
         if login.isEnabled || login.requiresApproval { registrationError = nil }
         toggle.state = login.isEnabled || login.requiresApproval ? .on : .off
-        status.stringValue = registrationError ?? login.statusMessage
+        status.stringValue = registrationError.map { L("Startup error: %@", L($0)) } ?? L(login.statusMessage)
         status.textColor = registrationError == nil ? .secondaryLabelColor : .systemRed
+    }
+
+    private var languageIndex: Int {
+        AppLocalization.supportedLanguages.firstIndex { $0.code == AppLocalization.shared.language }.map { $0 + 1 } ?? 0
+    }
+
+    @objc private func changeLanguage() {
+        let index = languagePicker.indexOfSelectedItem
+        let languages = AppLocalization.supportedLanguages
+        let code = index > 0 && languages.indices.contains(index - 1) ? languages[index - 1].code : "system"
+        if onLanguageChange?(code) != true { languagePicker.selectItem(at: languageIndex) }
     }
 
     @objc private func changeLogin() {

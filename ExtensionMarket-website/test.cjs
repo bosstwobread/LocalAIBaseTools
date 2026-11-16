@@ -5,6 +5,8 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const localesScript = fs.readFileSync(path.join(__dirname, 'locales.js'), 'utf8');
+const i18nScript = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const catalogPath = path.join(__dirname, 'dist/data/extensions.json');
 if (!fs.existsSync(catalogPath)) throw new Error('Build the static fixture first: python3 ExtensionMarket-website/build.py --without-app');
@@ -12,9 +14,12 @@ const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 const clone = value => JSON.parse(JSON.stringify(value));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function page({ base = 'https://market.example/extension-market/', data = clone(catalog), failFirst = false } = {}) {
+async function page({ base = 'https://market.example/extension-market/', data = clone(catalog), failFirst = false, languages = ['en-US'], storedLanguage = null, storageDisabled = false } = {}) {
   const dom = new JSDOM(html, { url: base, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
+  Object.defineProperty(window.navigator, 'languages', { value: languages });
+  if (storedLanguage) window.localStorage.setItem('localaibasetools.website.language', storedLanguage);
+  if (storageDisabled) Object.defineProperty(window, 'localStorage', { get() { throw new Error('Storage disabled fixture'); } });
   const requests = [];
   window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   window.HTMLDialogElement.prototype.close = function () {
@@ -26,6 +31,8 @@ async function page({ base = 'https://market.example/extension-market/', data = 
     if (failFirst && requests.length === 1) throw new Error('Offline fixture');
     return { ok: true, json: async () => data };
   };
+  window.eval(localesScript);
+  window.eval(i18nScript);
   window.eval(script);
   await delay(0);
   return { dom, window, document: window.document, requests, close: () => window.close() };
@@ -200,7 +207,7 @@ test('metadata is rendered as text and unsafe links never become executable DOM'
     assert.match(view.document.querySelector('.extension-grid').textContent, /<img id=/);
     view.window.location.hash = `#extension/${tool.slug}`;
     await until(() => view.document.querySelector('#tool-dialog').open);
-    assert.equal(view.document.querySelectorAll('script').length, 1, 'Only the static application script should exist');
+    assert.equal(view.document.querySelectorAll('script').length, 3, 'Only the static catalog, localization, and application scripts should exist');
     assert.match(view.document.querySelector('.detail-description').textContent, /<script>/);
     assert.ok([...view.document.querySelectorAll('a')].every(node => !node.href.startsWith('javascript:')));
     assert.ok([...view.document.querySelectorAll('img')].every(node => !node.src.startsWith('javascript:')));
@@ -238,4 +245,184 @@ test('unknown declared source runtimes fail catalog validation', async () => {
     assert.equal(view.document.querySelector('#catalog-error').hidden, false);
     assert.equal(view.document.querySelector('#extension-grid').hidden, true);
   } finally { view.close(); }
+});
+
+test('browser language detection, explicit choice and storage failures have predictable fallbacks', async () => {
+  for (const [languages, storedLanguage, expected] of [
+    [['fr-CA', 'en-US'], null, 'fr'], [['zh-HK'], null, 'zh-Hant'],
+    [['zh-Hans-TW'], null, 'zh-Hans'], [['zh-Hant-CN'], null, 'zh-Hant'],
+    [['zz-ZZ', 'pt-BR'], null, 'pt'], [['zz-ZZ'], null, 'en'],
+    [['ja-JP'], 'de-DE', 'de'], [['ja-JP'], 'not-a-language', 'ja']
+  ]) {
+    const view = await page({ languages, storedLanguage });
+    try {
+      assert.equal(view.document.documentElement.lang, expected);
+      assert.equal(view.document.querySelector('#site-language').value, expected);
+      assert.equal(view.document.querySelectorAll('#site-language option').length, 13);
+      assert.equal(view.document.querySelector('#site-language option[value=ja]').textContent, '日本語');
+    } finally { view.close(); }
+  }
+  const view = await page({ languages: ['es-MX'], storageDisabled: true });
+  try {
+    assert.equal(view.document.documentElement.lang, 'es');
+    input(view, '#site-language', 'ko', 'change');
+    assert.equal(view.document.documentElement.lang, 'ko');
+    assert.equal(view.window.MarketI18n.setLocale('unavailable'), false);
+    assert.equal(view.document.documentElement.lang, 'ko');
+  } finally { view.close(); }
+});
+
+test('switching language updates marketing, filters, metadata and an open installation dialog without new fetches', async () => {
+  const view = await page();
+  try {
+    input(view, '#category', 'Translation', 'change');
+    view.document.querySelector('.card-install').click();
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    const catalogURL = view.document.querySelector('a[href^="machelper:"]').href;
+    input(view, '#site-language', 'zh-Hans', 'change');
+    assert.equal(view.document.documentElement.lang, 'zh-Hans');
+    assert.equal(view.document.querySelector('#site-language').getAttribute('aria-label'), '网站语言');
+    assert.equal(view.document.querySelector('#search').placeholder, '搜索工具、功能、平台…');
+    assert.equal(view.document.querySelector('#category').value, 'Translation');
+    assert.equal(view.document.querySelector('#category option[value=Translation]').textContent, '翻译');
+    assert.equal(view.document.querySelectorAll('.extension-card').length, 1);
+    assert.equal(view.document.querySelector('#install-panel').hidden, false);
+    assert.equal(view.document.querySelector('#install-tab').textContent, '安装');
+    assert.match(view.document.querySelector('.card-summary').textContent, /可编辑/);
+    assert.match(view.document.querySelector('#install-panel').textContent, /审核/);
+    assert.equal(view.document.querySelector('a[href^="machelper:"]').href, catalogURL);
+    assert.equal(view.document.querySelector('#dialog-title').textContent, 'Translation');
+    assert.equal(view.window.localStorage.getItem('localaibasetools.website.language'), 'zh-Hans');
+    assert.equal(view.requests.length, 1);
+    view.document.querySelector('.dialog-close').click();
+    input(view, '#search', '上下文');
+    // Search uses translated metadata as well as the canonical English source.
+    assert.equal(view.document.querySelectorAll('.extension-card').length, 0);
+    input(view, '#search', '单词');
+    assert.equal(view.document.querySelectorAll('.extension-card').length, 1);
+    input(view, '#site-language', 'en', 'change');
+    assert.equal(view.document.querySelector('#search').placeholder, 'Search tools, features, platforms…');
+    assert.match(view.document.querySelector('#hero-title').textContent, /Your AI/);
+  } finally { view.close(); }
+});
+
+test('Arabic mirrors reading direction and localizes accessibility, tool permissions and clipboard status', async () => {
+  const data = clone(catalog);
+  data.extensions.find(tool => tool.kind === 'mac-source').permissions.push('native.execute');
+  const view = await page({ languages: ['ar-EG'], data });
+  try {
+    assert.equal(view.document.documentElement.dir, 'rtl');
+    assert.equal(view.document.querySelector('.main-nav').getAttribute('aria-label'), 'التنقل الرئيسي');
+    assert.equal(view.document.querySelector('.get-identity img').alt, 'أيقونة تطبيق MacHelper');
+    assert.match(view.document.querySelector('.card-visual img').alt, /معاينة/);
+    view.window.location.hash = '#extension/translation';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /ليست بيئة عزل/);
+    const sourceLink = view.document.querySelector('#overview-panel a[download="AI_EXTENSION_GUIDE.md"]');
+    assert.match(sourceLink.textContent, /دليل/);
+    const copy = view.document.querySelector('.detail-facts button');
+    copy.click();
+    await until(() => !view.document.querySelector('#toast').hidden);
+    assert.equal(view.document.querySelector('.copy-fallback').getAttribute('aria-label'), 'انسخ هذا الرابط يدويًا');
+    assert.equal(view.document.querySelector('.copy-fallback').value, 'https://market.example/extension-market/#extension/translation');
+    input(view, '#site-language', 'fr', 'change');
+    assert.equal(view.document.documentElement.dir, 'ltr');
+    assert.equal(view.document.querySelector('#overview-tab').textContent, 'Présentation');
+    assert.equal(view.document.querySelector('#toast').hidden, true);
+  } finally { view.close(); }
+});
+
+test('every supported locale renders the main site, first-party details and install text with complete placeholders', async () => {
+  const baseline = await page();
+  let expectedKeys;
+  try {
+    const catalogs = baseline.window.MARKET_TRANSLATIONS;
+    const localeKeys = Object.keys(catalogs);
+    assert.equal(localeKeys.length, 12);
+    expectedKeys = Object.keys(catalogs['zh-Hans']).sort();
+    for (const code of localeKeys) {
+      assert.deepEqual(Object.keys(catalogs[code]).sort(), expectedKeys, `${code}: complete authored catalog`);
+      for (const [key, value] of Object.entries(catalogs[code])) {
+        assert.equal(typeof value, 'string'); assert.ok(value.trim(), `${code}: ${key}`);
+        const placeholders = text => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort();
+        assert.deepEqual(placeholders(value), placeholders(key), `${code}: ${key} placeholders`);
+      }
+    }
+  } finally { baseline.close(); }
+  for (const code of ['en', 'zh-Hans', 'zh-Hant', 'es', 'fr', 'de', 'ja', 'ko', 'pt', 'ar', 'hi', 'ru', 'it']) {
+    const view = await page({ storedLanguage: code });
+    try {
+      assert.equal(view.document.documentElement.lang, code);
+      const tr = message => view.window.MarketI18n.t(message);
+      assert.equal(view.document.querySelector('.hero-description').textContent, tr('A collection of useful little extensions, built around the AI connection you already have. Open source. Yours to make your own.'));
+      assert.equal(view.document.querySelector('#search').getAttribute('placeholder'), tr('Search tools, features, platforms…'));
+      for (const tool of catalog.extensions) {
+        view.window.location.hash = `#extension/${tool.slug}`;
+        await until(() => view.document.querySelector('#dialog-title')?.textContent === tool.name);
+        assert.equal(view.document.querySelector('.detail-description').textContent, tr(tool.description));
+        assert.ok([...view.document.querySelectorAll('#overview-panel .detail-list li')].some(node => node.textContent === tr(tool.features[0])));
+        view.document.querySelector('#install-tab').click();
+        assert.ok([...view.document.querySelectorAll('.install-steps li')].some(node => node.textContent === tr(tool.installSteps[0])));
+        assert.doesNotMatch(view.document.querySelector('#install-panel').textContent, /\{(?:name|count|total|architecture|minimumOS)\}/);
+        view.document.querySelector('.dialog-close').click();
+      }
+    } finally { view.close(); }
+  }
+});
+
+test('localized errors, unknown tool text and untrusted metadata remain safe text', async () => {
+  const data = clone(catalog);
+  const tool = data.extensions[0];
+  tool.description = '<img id="locale-injected" src=x onerror=alert(1)>';
+  const view = await page({ storedLanguage: 'zh-Hant', failFirst: true, data });
+  try {
+    assert.equal(view.document.querySelector('#catalog-error').hidden, false);
+    assert.equal(view.document.querySelector('#result-count').textContent, '工具集合無法使用');
+    view.document.querySelector('#retry-catalog').click();
+    await until(() => view.document.querySelectorAll('.extension-card').length === 2);
+    view.window.location.hash = `#extension/${tool.slug}`;
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    assert.equal(view.document.querySelector('.detail-description').textContent, tool.description);
+    assert.equal(view.document.querySelector('#locale-injected'), null);
+    view.document.querySelector('.dialog-close').click();
+    view.window.location.hash = '#extension/not-an-installed-tool';
+    await until(() => view.document.querySelector('#dialog-title')?.textContent === '找不到工具。');
+    assert.equal(view.document.querySelector('#dialog-content .detail-description').textContent, '連結可能已變更。關閉視窗後可瀏覽目前工具集合。');
+  } finally { view.close(); }
+});
+
+test('authored interface copy and first-party catalog text have translations in every non-English locale', () => {
+  const dom = new JSDOM(html);
+  try {
+    const { document, NodeFilter } = dom.window;
+    const keys = new Set();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.textContent.trim() || node.parentElement.closest('script,style,code,noscript,[aria-hidden="true"]')) continue;
+      keys.add(node.textContent.replace(/\s+/g, ' ').trim());
+    }
+    for (const element of document.querySelectorAll('[aria-label],[placeholder],[title],[alt],meta[name="description"]')) {
+      for (const attribute of ['aria-label', 'placeholder', 'title', 'alt', 'content']) {
+        const text = element.getAttribute(attribute);
+        if (text) keys.add(text);
+      }
+    }
+    keys.add(document.title);
+    // Extract only literal first arguments from authored t() calls. Interpolated
+    // technical IDs and unknown third-party metadata intentionally use fallback.
+    for (const match of script.matchAll(/\bt\(((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'))/g)) {
+      keys.add(Function(`return ${match[1]}`)().trim());
+    }
+    for (const tool of catalog.extensions) {
+      for (const value of [tool.summary, tool.description, tool.category, ...tool.features, ...tool.installSteps, ...tool.screenshots.flatMap(shot => [shot.alt, shot.caption])]) keys.add(value);
+    }
+    const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', 'Translation/', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
+    const translations = {};
+    // The translation asset is trusted application source, never remote data.
+    require('node:vm').runInNewContext(localesScript, { window: translations });
+    for (const [locale, table] of Object.entries(translations.MARKET_TRANSLATIONS)) {
+      for (const key of keys) if (!unchanged.has(key)) assert.ok(Object.hasOwn(table, key), `${locale}: missing ${key}`);
+    }
+  } finally { dom.window.close(); }
 });

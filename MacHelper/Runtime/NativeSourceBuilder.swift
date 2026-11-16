@@ -108,7 +108,7 @@ private final class NativeBuildOperation: @unchecked Sendable {
         }
         let stage = cacheDirectory.appendingPathComponent(".build-" + UUID().uuidString, isDirectory: true)
         try privateDirectory(stage)
-        defer { try? FileManager.default.removeItem(at: stage) }
+        defer { removeStage(stage) }
         let sdk = stage.appendingPathComponent("MacHelperNativeSDK.swift")
         let source = stage.appendingPathComponent("Extension.swift")
         let binary = stage.appendingPathComponent("MacHelperNativeWorker")
@@ -175,6 +175,22 @@ private final class NativeBuildOperation: @unchecked Sendable {
             guard values.isDirectory == true, values.isSymbolicLink != true else { throw NativeSourceBuildError.invalid("The native build cache must be an ordinary private directory.") }
         } else { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+    }
+
+    private func removeStage(_ directory: URL) {
+        // A compiler child may finish a module-cache filesystem operation just
+        // after receiving SIGKILL. Removing a changing directory can report
+        // ENOTEMPTY; retry only this operation's private staging directory.
+        // This runs on the detached build thread, never the application's UI.
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        repeat {
+            do { try FileManager.default.removeItem(at: directory); return }
+            catch {
+                if !FileManager.default.fileExists(atPath: directory.path) { return }
+                if ProcessInfo.processInfo.systemUptime >= deadline { return }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+        } while true
     }
 
     private func compilerDiagnostic(_ data: Data) -> String {
@@ -256,8 +272,16 @@ private final class NativeBuildOperation: @unchecked Sendable {
             Thread.sleep(forTimeInterval: 0.015)
         }
         lock.lock(); processID = nil; let wasCancelled = cancelled; lock.unlock()
-        // No compiler subprocess may keep our capture pipe alive after exit.
-        if kill(-pid, 0) == 0 { _ = kill(-pid, SIGKILL) }
+        // Reaping the driver does not mean its frontend/linker children have
+        // exited. Give the killed process group a bounded chance to disappear
+        // before stage cleanup, even when a child closed its capture pipe early.
+        if kill(-pid, 0) == 0 {
+            _ = kill(-pid, SIGKILL)
+            let groupDeadline = ProcessInfo.processInfo.systemUptime + 1
+            while kill(-pid, 0) == 0, ProcessInfo.processInfo.systemUptime < groupDeadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
         _ = readGroup.wait(timeout: .now() + 2)
         try? output.fileHandleForReading.close()
         if wasCancelled { throw CancellationError() }

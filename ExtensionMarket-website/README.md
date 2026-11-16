@@ -27,12 +27,14 @@ with Chrome/Edge Developer mode installation instructions.
 ## Files
 
 - `index.html`, `styles.css`, `app.js`: buildless responsive interface.
+- `i18n.js`, `locales.js`: language detection, saved selection, safe text rendering,
+  and authored interface/first-party tool translations.
 - `assets/`: app/tool artwork and clearly labelled illustrative previews.
 - `marketplace.config.json`: public URL, tool descriptions, and display metadata.
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
   while the current catalog lists only the latest versions. This includes the
-  original Translation 4.1.0 and 4.2.0 source/ZIP inventories. Translation 4.1.0's
+  original Translation 4.1.0, 4.2.0, and 4.3.0 source/ZIP inventories. Translation 4.1.0's
   retained ZIP SHA-256 is `3f2f881578751ddcf445fc868212db96819c068369d786c29f72acd3c602be75`.
 - `build.py`: discovers actual extension manifests, builds the source catalog,
   complete source ZIPs, and the prebuilt MacHelper app ZIP in `dist/`. Its explicit
@@ -49,6 +51,33 @@ with Chrome/Edge Developer mode installation instructions.
 - `Dockerfile`, `nginx.conf`, `.dockerignore`: unprivileged static web container.
 - `deploy.py`, `DEPLOYMENT.md`: the existing server's Docker/registry/Caddy
   deployment and rollback workflow. Private credentials stay outside this repo.
+
+
+## Interface languages
+
+The header language selector offers English, Simplified Chinese, Traditional
+Chinese, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi,
+Russian, and Italian, using each language's native name. On the first visit,
+the site matches browser language preferences; an explicit selection is saved
+in this browser's local storage and takes priority on later visits. Unsupported
+languages fall back to English. If storage is unavailable, switching still works
+for the current page. The website and MacHelper keep independent language choices.
+
+Changing language updates navigation, explanations, search/filter labels, current
+first-party tool descriptions, access notices, installation steps, errors, and
+an open detail dialog. Search matches both translated and original metadata;
+category/platform values, filter selections, package URLs, and tool names stay
+stable. Arabic uses right-to-left reading order. Preview artwork deliberately
+retains its example English/Chinese text, while captions and accessible labels
+follow the interface language. No AI call or translation service is used.
+
+The technical AI guide and its downloadable reference documents remain English
+and are labelled accordingly. Source code, prompts, model IDs, and user data are
+not translated. Unknown third-party metadata retains its original text. Add new
+interface copy and first-party metadata translations to every catalog in
+`locales.js`; `i18n.js` supplies safe fallback and placeholder interpolation.
+The frontend checks exercise all 13 languages, language detection/persistence,
+RTL, accessible labels, dynamic dialogs, localized search, and unchanged URLs.
 
 ## Build and check
 

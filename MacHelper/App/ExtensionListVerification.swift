@@ -51,7 +51,7 @@ enum ExtensionListVerification {
             let native = "com.example.list-native"
             for (id, name) in [(a, "A fixture"), (b, "B fixture"), (c, "C fixture")] {
                 let author = root.appendingPathComponent("authors/" + id)
-                try writePackage(id: id, name: name, native: false, to: author)
+                try writePackage(id: id, name: name, native: false, localized: id == b, to: author)
                 try await current.importSource(from: author)
             }
             try await current.setEnabled(true, for: a)
@@ -156,6 +156,57 @@ enum ExtensionListVerification {
                       "Native cancellation prevented the next selected extension from enabling.")
             checks.append("cancelled native approval never builds or runs native code and does not block another selected enable")
 
+            // An external extension owns these labels, including an English
+            // override. A resource-only edit must refresh its already-open form
+            // from the running generation rather than stale prepared settings.
+            try await current.updateSetting("choice", value: "two", for: b)
+            let beforeLocalizedReload = try pid(current, b); workers.append(beforeLocalizedReload)
+            controller.selectTool(b)
+            try await drain(controller)
+            guard let installedB = current.sourceURL(for: b) else { throw Failure(message: "Fixture B source disappeared.") }
+            let settingsFile = state.appendingPathComponent("ExtensionSettings/" + b + "/settings.json")
+            let settingsBytes = try Data(contentsOf: settingsFile)
+            let promptFile = installedB.appendingPathComponent("prompts/fixture.txt")
+            let promptBytes = try Data(contentsOf: promptFile)
+            let sourceBytes = try Data(contentsOf: installedB.appendingPathComponent("main.js"))
+            try check(labelValues(in: controller.view).contains("Initial localized setting") &&
+                      labelValues(in: controller.view).contains("Initial localized prompt"),
+                      "Extension-owned localization did not render schema or prompt labels.")
+            guard let initialPopup = popup(label: "Initial localized setting", in: controller.view) else {
+                throw Failure(message: "The localized settings control was not accessible by its extension-owned label.")
+            }
+            try check(initialPopup.itemTitles == ["Initial first option", "Initial second option"] &&
+                      initialPopup.selectedItem?.representedObject as? String == "two",
+                      "Extension-owned option labels changed the stored option identity.")
+            let beforeReloadCount = current.tools.first { $0.id == b }?.reloadCount ?? 0
+            try writeLocalizations(to: installedB, updated: true)
+            try await eventually("Edited extension labels did not hot reload into the open form.") {
+                controller.refreshDisplay()
+                return (current.tools.first { $0.id == b }?.reloadCount ?? 0) > beforeReloadCount &&
+                    labelValues(in: controller.view).contains("Updated localized setting") &&
+                    labelValues(in: controller.view).contains("Updated localized prompt")
+            }
+            let afterLocalizedReload = try pid(current, b); workers.append(afterLocalizedReload)
+            guard let updatedPopup = popup(label: "Updated localized setting", in: controller.view) else {
+                throw Failure(message: "The open settings control retained its stale localized label after reload.")
+            }
+            try check(afterLocalizedReload != beforeLocalizedReload && current.workerPID(for: c) == stableC &&
+                      current.workerPID(for: a) == nil && current.workerPID(for: native) == nil,
+                      "A localization resource edit failed to replace its own worker or touched another tool.")
+            try check(updatedPopup.itemTitles == ["Updated first option", "Updated second option"] &&
+                      updatedPopup.selectedItem?.representedObject as? String == "two" &&
+                      current.settings(for: b)["choice"] as? String == "two",
+                      "Reloaded translated labels reset a stored setting or its selected option identity.")
+            try check(try Data(contentsOf: settingsFile) == settingsBytes &&
+                      Data(contentsOf: promptFile) == promptBytes &&
+                      Data(contentsOf: installedB.appendingPathComponent("main.js")) == sourceBytes,
+                      "Localizing interface labels rewrote settings, a source prompt, or command code.")
+            let unchangedCommand = try await current.performCommand(for: b, text: "localization fixture input")
+            try check(unchangedCommand.text == "localization fixture input" &&
+                      (try current.promptValue("sourcePrompt", for: b)) == String(decoding: promptBytes, as: UTF8.self),
+                      "Localizing the form changed command execution or the original source prompt.")
+            checks.append("extension-owned schema and option labels hot reload in the open form while settings, prompt bytes, command behavior, and other workers remain unchanged")
+
             try check(getpid() == hostPID, "The host restarted during list actions.")
             await current.stopAll()
             try await eventually("List verification left a worker process running.") { workers.allSatisfy { !processExists($0) } }
@@ -169,17 +220,43 @@ enum ExtensionListVerification {
         }
     }
 
-    private static func writePackage(id: String, name: String, native: Bool, to folder: URL) throws {
+    private static func writePackage(id: String, name: String, native: Bool, localized: Bool = false, to folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let manifest = SourceExtensionManifest(runtime: native ? "native" : "javascript", identifier: id,
             displayName: name, version: "1.0.0", summary: "Synthetic extension-list fixture",
             entryPoint: native ? "Main.swift" : "main.js", permissions: native ? ["native.execute"] : [],
-            commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")])
+            commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")],
+            settingsSchema: localized ? "settings.schema.json" : nil,
+            localizations: localized ? "localizations.json" : nil)
         try JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("extension.json"))
         let source = native
             ? "@main struct NativeListFixture { static func main() { MacHelperNative.run(commands: [\"greet\": { input in [\"text\": input.text] }]) } }\n"
             : "MacHelper.define({commands:{greet(input){return {text:input.text};}}});\n"
         try Data(source.utf8).write(to: folder.appendingPathComponent(manifest.entryPoint))
+        if localized {
+            let schema = """
+            {"schemaVersion":1,"fields":[
+              {"key":"choice","label":"Fixture setting","type":"select","default":"one","options":[
+                {"value":"one","label":"First option"},{"value":"two","label":"Second option"}]},
+              {"key":"sourcePrompt","label":"Fixture prompt","type":"prompt","path":"prompts/fixture.txt"}
+            ]}
+            """
+            try Data(schema.utf8).write(to: folder.appendingPathComponent("settings.schema.json"))
+            try FileManager.default.createDirectory(at: folder.appendingPathComponent("prompts"), withIntermediateDirectories: true)
+            try Data("Keep this exact prompt.\nDo not translate this source file.\n".utf8)
+                .write(to: folder.appendingPathComponent("prompts/fixture.txt"))
+            try writeLocalizations(to: folder, updated: false)
+        }
+    }
+
+    private static func writeLocalizations(to folder: URL, updated: Bool) throws {
+        let table = SourceTextLocalizations(translations: ["en": [
+            "Fixture setting": updated ? "Updated localized setting" : "Initial localized setting",
+            "Fixture prompt": updated ? "Updated localized prompt" : "Initial localized prompt",
+            "First option": updated ? "Updated first option" : "Initial first option",
+            "Second option": updated ? "Updated second option" : "Initial second option"
+        ]])
+        try JSONEncoder().encode(table).write(to: folder.appendingPathComponent("localizations.json"), options: [.atomic])
     }
 
     private static func select(_ ids: Set<String>, manager: SourceExtensionManager, controller: ExtensionsViewController) async throws {
@@ -217,6 +294,16 @@ enum ExtensionListVerification {
         if view.identifier?.rawValue == id { return view }
         for child in view.subviews { if let value = find(id, in: child) { return value } }
         return nil
+    }
+
+    private static func popup(label: String, in view: NSView) -> NSPopUpButton? {
+        if let popup = view as? NSPopUpButton, popup.accessibilityLabel() == label { return popup }
+        for child in view.subviews { if let value = popup(label: label, in: child) { return value } }
+        return nil
+    }
+
+    private static func labelValues(in view: NSView) -> [String] {
+        ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap { labelValues(in: $0) }
     }
 
     private static func pid(_ manager: SourceExtensionManager, _ id: String) throws -> Int32 {

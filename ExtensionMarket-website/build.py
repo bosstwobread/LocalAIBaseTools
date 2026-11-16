@@ -85,6 +85,37 @@ def validate_source_files(manifest, files):
         raise ValueError("Native source packages and source entry points require UTF-8 text, not prebuilt binaries.") from error
 
 
+    resource_suffixes = {".js", ".json", ".txt", ".md", ".prompt"}
+    if manifest["runtime"] == "native":
+        resource_suffixes.add(".swift")
+    resources = {name: data for name, data in files.items()
+                 if not name.lower().startswith("readme") and Path(name).suffix.lower() in resource_suffixes}
+    if sum(map(len, resources.values())) > 96 * 1024:
+        raise ValueError("The source runtime text resources exceed 96 KiB.")
+    path = manifest.get("localizations")
+    if path is not None:
+        if not isinstance(path, str) or not path.endswith(".json") or len(path.encode("utf-8")) > 512 or \
+                len(path.split("/")) > 12 or any(not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_. -]{0,119}", part) for part in path.split("/")):
+            raise ValueError("The UI translation catalog must use a safe relative JSON resource path.")
+        data = resources.get(path)
+        if data is None or len(data) > 64 * 1024:
+            raise ValueError("The UI translation catalog is missing or exceeds 64 KiB.")
+        try:
+            catalog = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as error:
+            raise ValueError("The UI translation catalog must be UTF-8 JSON.") from error
+        if not isinstance(catalog, dict) or type(catalog.get("schemaVersion")) is not int or catalog["schemaVersion"] != 1 or \
+                not isinstance(catalog.get("translations"), dict) or len(catalog["translations"]) > 32:
+            raise ValueError("The UI translation catalog is invalid.")
+        for locale, table in catalog["translations"].items():
+            if not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}", locale) or not isinstance(table, dict) or len(table) > 256:
+                raise ValueError("The UI translation catalog has invalid language tables.")
+            for source, translation in table.items():
+                if not isinstance(translation, str) or not source or not translation or \
+                        len(source.encode("utf-8")) > 2000 or len(translation.encode("utf-8")) > 8000 or "\0" in source or "\0" in translation:
+                    raise ValueError("The UI translation catalog has invalid labels.")
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -183,7 +214,7 @@ def build(output, app, without_app=False):
         stage.mkdir()
         for relative, data in historical_files().items():
             write_package(stage / relative, data)
-        for filename in ["index.html", "styles.css", "app.js"]:
+        for filename in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js"]:
             shutil.copy2(HERE / filename, stage / filename)
         shutil.copytree(HERE / "assets", stage / "assets")
         shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")

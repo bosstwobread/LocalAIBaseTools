@@ -2,7 +2,9 @@
 
 This is a public implementation guide for an AI coding assistant. Give it to your AI together with a description of the behavior you want and, when modifying a tool, that tool's complete source folder. Users can create extensions in a separate repository; no changes to MacHelper or this repository are required for the supported source capabilities.
 
-**Compatibility:** the example requires MacHelper 4.5 or later for source-backed prompt editors and unchanged `systemPrompt` transport. The current MacHelper app is 6.1.0. Native source workers and runtime migration require MacHelper 6 or later. Use the contracts below rather than guessing APIs from other extension platforms.
+**Compatibility:** the example requires MacHelper 4.5 or later for source-backed prompt editors and unchanged `systemPrompt` transport. Native source workers and runtime migration require MacHelper 6 or later. Use the contracts below rather than guessing APIs from other extension platforms.
+
+When changing the LocalAIBaseTools repository itself, also read its root `AGENTS.md` and `DEVELOPMENT.md` before editing and check the development checklist again before finishing. Independent extension repositories can keep their own development instructions.
 
 ## 1. Establish the task and choose the format
 
@@ -17,6 +19,8 @@ For a new tool, choose a unique lowercase reverse-domain identifier such as `com
 | Chrome/Edge browser extension | Page-specific DOM controls, such as buttons next to messages | Reload the unpacked browser extension and affected tabs. Browser packages are outside MacHelper's source-worker runtime. |
 
 Both source runtimes use the same **Extensions** list, **Install Source**, **Edit Source**, settings, permissions review, and **Reload** controls. MacHelper validates the manifest's explicit `runtime`; it does not guess from a folder name or silently turn JavaScript into Swift. Native settings use the same host-rendered schema. Do not add tool-specific Swift settings screens to MacHelper.
+
+**Interface localization (MacHelper 6.2+):** the host has 13 interface languages selected in General. To translate your tool's description and schema labels, add `"localizations": "localizations.json"` to its manifest and include that resource in the complete source inventory. Its format is `{"schemaVersion":1,"translations":{"fr":{"Translate to":"Traduire en"},"zh-Hans":{"Translate to":"翻译为"}}}`. Keys are exact original display strings; translated values affect presentation only. The host uses these tables for the tool name/summary and settings field/option labels, with language/English/original-text fallback. The optional file is UTF-8 JSON at most 64 KiB and still counts toward the 96 KiB runtime resource budget. It accepts up to 32 locale tables, each with at most 256 labels; see the source reference for bounds. Never use UI localization to rewrite prompt files, setting values, identifiers, user input, or AI output. Existing tools without this resource remain valid. A saved localization resource participates in normal source validation and hot reload.
 
 JavaScript has no arbitrary file, network, shell, audio-recording, or native framework API. Native code runs as a trusted executable under the current user and requires the additional `native.execute` approval. A separate process is not an operating-system sandbox. Use native code only for a concrete need and keep automatic inference, client-message submission, and unrelated data access out of extension behavior. Legacy schema-1 `.machextension` bundles need migration to the new source SDK; their `NSViewController` interface cannot be copied across the process boundary.
 

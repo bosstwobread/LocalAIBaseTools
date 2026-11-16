@@ -1,0 +1,39 @@
+# Translation — editable source extension
+
+Translation 4.3 requires MacHelper 4.5 or later. This folder is its complete JavaScript source, manifest, settings schema, prompts, and license. It needs no separate app or compiler.
+
+Enable Translation in **MacHelper → Extensions**, then choose it from the installed list. Select text in a supported Mac app and click the floating icon. Results stream into a nearby panel; drag its header to move it without interrupting the response. Copy is available after completion. Esc, selection changes, and app switching dismiss/cancel the result.
+
+## Edit the actual prompts
+
+The **Translation prompt** and **Word lookup prompt** text boxes show `prompts/translate.txt` and `prompts/word-in-context.txt` directly. Save an edit to update that source file and reload the tool. Unsaved edits can be reverted. Prompts are not copied into the preferences file. Saving refuses conflicting external edits rather than overwriting them.
+
+Each AI call sends the chosen prompt file verbatim in `systemPrompt`. MacHelper adds no translation instructions, style suffix, or action/tone wrapper to this explicit-prompt path. Selected content and settings are separate user-message data:
+
+- Normal selections: a JSON object containing `text` and `targetLanguage`.
+- One selected word: a JSON object containing `selectedWord`, `surroundingSentence`, `targetLanguage`, and localized `labels` (`meaning`, `sentence`, `word`, and `unavailable`).
+
+The default prompts explain these data fields, treat selected content as untrusted, and request translation or word meaning. Change the prompt to change those instructions. Shared provider tools remain disabled independently of the prompt. The returned text and streamed text are displayed without extra prefixes or notes added by the tool.
+
+There is no Writing style preset. Any desired tone or output format belongs in the prompt. Changing the target-language selector changes input data, not the prompt text.
+
+## Selected words
+
+One lexical word uses the supplied sentence to explain its contextual meaning, then translate the full sentence. The default word prompt requests the localized section headings from `labels`. Contractions and hyphenated words are supported. Unspaced-script selections use word segmentation when available so a whole phrase does not become a word lookup.
+
+If context is unavailable, invalid, oversized, or unrelated to the word, `surroundingSentence` is `null`. The default prompt requests general meanings and the localized context-unavailable note without inventing a sentence. Word lookup is limited to 128 UTF-16 units; context is limited to 2,000 UTF-16 units and 8,000 UTF-8 bytes. Longer selections use ordinary translation.
+
+## Source files and reload
+
+- `main.js`: word detection, input-data construction, AI call, and streaming.
+- `prompts/translate.txt`: complete ordinary-translation instructions.
+- `prompts/word-in-context.txt`: complete word-lookup instructions.
+- `settings.schema.json`: target-language choices and source-backed prompt editors.
+- `extension.json`: identity, commands, runtime, and declared capabilities.
+- `LICENSE`: MIT license.
+
+**Edit Source** opens the installed working folder in VS Code when available. Saving JavaScript, prompts, or schemas starts a validated new worker generation. Invalid edits retain the last working generation, and settings remain separate from source. Explicit prompt saves also work while the tool is disabled without starting JavaScript or requesting AI.
+
+`MacHelper.define` registers commands, `MacHelper.readText` reads frozen resources from the current generation, and `MacHelper.ai.transform` requests shared AI only during an explicit action. Its progress callback passes cumulative output to `input.reportProgress`. Cancellation, source reload, or a changed selection prevents stale output from replacing a newer result.
+
+The marketplace catalog includes every source file with its SHA-256. Existing editable installations are not overwritten by repeat marketplace installs. Older published source versions remain available at their immutable URLs. See `docs/Source-Extensions.md` in the main repository for the format and protocol.

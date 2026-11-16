@@ -99,6 +99,10 @@ def main():
                 item = archive.getinfo("MacHelper.app/Contents/MacOS/" + binary)
                 assert (item.external_attr >> 16) & 0o111, "Executable permissions were lost in the app archive."
             assert "MacHelper.app/Contents/Resources/AppIcon.icns" in archive.namelist()
+            locales = {path.stem: path for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")}
+            assert set(app_info["CFBundleLocalizations"]) == set(locales), "App language metadata is stale."
+            for code, source in locales.items():
+                assert archive.read("MacHelper.app/Contents/Resources/Localization/" + code + ".json") == source.read_bytes(), "App language catalog is stale: " + code
             for relative, original in {**{path: path for path in PUBLIC_DOCUMENTS}, **PUBLIC_SDK_FILES}.items():
                 assert archive.read("MacHelper.app/Contents/Resources/" + relative) == (ROOT / original).read_bytes(), "App guide/reference is stale: " + relative
             assert all(Path(name).name != "AI_DEPLOYMENT.md" for name in archive.namelist()), "Private deployment runbook entered the app download."

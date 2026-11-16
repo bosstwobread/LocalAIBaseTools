@@ -10,12 +10,14 @@ The current products are:
 
 | Component | Current version | What it does |
 | --- | --- | --- |
-| MacHelper | 6.1.0 | App with Dock and menu-bar access, sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, and local AI transports. |
-| Translation | 4.3.0 | Editable JavaScript tool that translates selected text and single words using complete user-editable prompt files, with streamed results. |
+| MacHelper | 6.2.0 | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, and local AI transports. |
+| Translation | 4.4.0 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
 | MessageHelper — Upwork | 1.3.0 | Chrome/Edge extension that translates messages and previews polished drafts on supported Upwork pages. |
 | Extension Market | Static website | Search, tool details, illustrated previews, source downloads, and reviewed installation links into MacHelper. |
 
 The public marketplace is [local-ai-extension.nelson007.com](https://local-ai-extension.nelson007.com/). Version numbers above are a snapshot; the manifests and release configuration remain the source of truth.
+
+The website and MacHelper expose 13 interface languages: English, both Chinese scripts, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi, Russian, and Italian. The website detects browser preferences and stores explicit choices locally; MacHelper has a separate persistent General preference with a System language option. Arabic uses right-to-left layout. Native catalogs live in `MacHelper/Runtime/Localization`; website catalogs are owned by the website. UI changes require matching catalog keys and format parameters. Extension-specific labels come from an optional manifest-declared localization resource, not host-specific settings code. Changing interface language refreshes presentation without restarting source workers, changing the translation target, or rewriting prompts. Technical guides and diagnostics can retain their original language.
 
 “Local AI connection” describes where the integration runs. ChatGPT requests still use an online account and remote inference. Ollama and LM Studio can run inference on the user's Mac. The project does not guarantee free or unlimited provider usage.
 

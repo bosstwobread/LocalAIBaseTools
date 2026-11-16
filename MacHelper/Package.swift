@@ -12,9 +12,9 @@ let package = Package(
     ],
     dependencies: [.package(path: "ExtensionSDK")],
     targets: [
-        .target(name: "MacHelper", dependencies: [.product(name: "MacHelperExtensionSDK", package: "ExtensionSDK")], path: "Runtime"),
+        .target(name: "MacHelper", dependencies: [.product(name: "MacHelperExtensionSDK", package: "ExtensionSDK")], path: "Runtime", resources: [.copy("Localization")]),
         .executableTarget(name: "MacHelperHost", dependencies: ["MacHelper"], path: "Host"),
-        .target(name: "MacHelperCapabilities", path: "Capabilities"),
+        .target(name: "MacHelperCapabilities", dependencies: ["MacHelper"], path: "Capabilities"),
         .executableTarget(name: "MacHelperScriptWorker", path: "ScriptWorker"),
         .executableTarget(name: "MacHelperApp", dependencies: ["MacHelper", "MacHelperCapabilities"], path: "App"),
         .testTarget(name: "MacHelperTests", dependencies: ["MacHelper"], path: "Tests/MacHelperTests"),

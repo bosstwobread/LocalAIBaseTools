@@ -10,6 +10,8 @@ Browser extensions remain separate browser packages and can continue using the [
 
 Give your AI assistant the public [AI extension guide](../AI_EXTENSION_GUIDE.md), your requested behavior, and the complete source folder if modifying a tool. It includes a minimal independently importable package, exact prompt transport, capability limits, tests, and catalog distribution guidance. An author can work in a separate repository; MacHelper requires no tool-specific settings code or rebuild.
 
+For a multilingual settings page on MacHelper 6.2+, include an optional manifest-declared `localizations` JSON resource with translations of your tool's original labels and description. The [source contract](Source-Extensions.md#extension-owned-interface-translations-machelper-62) defines its format and limits. UI translations belong in extension source and hot reload with it; changing the interface language must never rewrite prompt files, setting values, or selected text.
+
 For an installed tool, **Edit Source** opens its working copy. For a new tool, create a source folder and use **Install Source…**. Import copies the folder, so later edits to the original authoring folder do not affect the installed copy. Save installed source changes for automatic validated reload. A fork intended to coexist with its original needs a different identifier.
 
 ## Source extension workflow

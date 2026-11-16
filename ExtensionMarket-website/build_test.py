@@ -21,7 +21,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.site = self.root / "ExtensionMarket-website"
         self.site.mkdir()
-        for name in ["index.html", "styles.css", "app.js"]:
+        for name in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js"]:
             shutil.copy2(SOURCE / name, self.site / name)
         shutil.copytree(SOURCE / "assets", self.site / "assets")
         (self.root / "MacHelper/Assets").mkdir(parents=True)
@@ -82,6 +82,49 @@ class NativeSourcePackagingTests(unittest.TestCase):
                         self.build()
                 finally:
                     candidate.unlink()
+
+
+    def test_declared_localizations_are_bounded_validated_and_packaged(self):
+        self.manifest["localizations"] = "localizations.json"
+        self.write_manifest()
+        locale_file = self.package / "localizations.json"
+        valid = {"schemaVersion": 1, "translations": {"ar": {"Run": "تشغيل"}, "zh-Hans": {"Run": "运行"}}}
+        locale_file.write_text(json.dumps(valid, ensure_ascii=False))
+        tools, _ = self.build()
+        with zipfile.ZipFile(self.site / "dist" / tools[0]["packageUrl"]) as archive:
+            self.assertEqual(json.loads(archive.read("com.example.native-tool.macsource/localizations.json")), valid)
+        old = (self.site / "dist/catalog.json").read_bytes()
+        cases = [
+            b"not json", b"[]", json.dumps({"schemaVersion": True, "translations": {}}).encode(),
+            json.dumps({"schemaVersion": 1, "translations": {"../ar": {}}}).encode(),
+            json.dumps({"schemaVersion": 1, "translations": {"en": {"Run": 3}}}).encode(),
+            json.dumps({"schemaVersion": 1, "translations": {"en": {"Run": "x" * 8001}}}).encode(),
+            json.dumps({"schemaVersion": 1, "translations": {"en": {"Run": "a\0b"}}}).encode(),
+            b" " * (64 * 1024 + 1),
+        ]
+        for data in cases:
+            with self.subTest(data_size=len(data)):
+                locale_file.write_bytes(data)
+                with self.assertRaises(ValueError):
+                    self.build()
+                self.assertEqual((self.site / "dist/catalog.json").read_bytes(), old)
+        locale_file.unlink()
+        with self.assertRaises(ValueError):
+            self.build()
+        for path in ["../localizations.json", "localizations.txt", "README-localizations.json"]:
+            with self.subTest(path=path):
+                self.manifest["localizations"] = path
+                self.write_manifest()
+                with self.assertRaises(ValueError):
+                    self.build()
+
+    def test_localization_resources_count_toward_runtime_text_limit(self):
+        self.manifest["localizations"] = "localizations.json"
+        self.write_manifest()
+        (self.package / "localizations.json").write_text(json.dumps({"schemaVersion": 1, "translations": {}}))
+        (self.package / "large-prompt.txt").write_bytes(b"x" * (96 * 1024))
+        with self.assertRaises(ValueError):
+            self.build()
 
     def test_unapproved_native_or_mismatched_runtime_cannot_replace_public_output(self):
         self.build()

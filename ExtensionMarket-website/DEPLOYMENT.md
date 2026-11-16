@@ -75,3 +75,13 @@ python3 ExtensionMarket-website/deploy.py --rollback DEPLOYED_TAG --deploy
 Rollback checks the active container's release label and refuses to overwrite concurrent Caddy edits. The old container is restored with its previous running/stopped state; on a first deployment, rollback removes the new website and restores the previous route configuration. Existing service health is checked again.
 
 Do not delete Docker volumes, prune the server globally, remove Serenity rollback containers, or replace Caddy's certificate/config volumes. Retained ExtensionMarket releases/images can be removed separately after a deliberate retention decision. If a process is forcibly killed, review the journal and container state before removing a stale `/root/extension-market/.deploy-lock`; an active deployment uses that lock to protect its transaction.
+
+
+## Language assets
+
+The same static deployment serves all 13 interface languages. `build.py` copies
+`locales.js` and `i18n.js` alongside `app.js`; no server-side language service,
+extra container, or AI connection is needed. Publish these assets and the HTML
+from the same verified build so the selector and translations agree. Visitor
+language preferences stay in browser local storage. The technical authoring guide
+continues to be served in English with its original code and prompts intact.

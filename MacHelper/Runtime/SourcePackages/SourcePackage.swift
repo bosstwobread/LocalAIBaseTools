@@ -26,14 +26,17 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let permissions: [String]
     public let commands: [SourceExtensionCommand]
     public let settingsSchema: String?
+    public let localizations: String?
 
     public init(schemaVersion: Int = 2, runtime: String = "javascript", identifier: String,
                 displayName: String, version: String, summary: String, entryPoint: String = "main.js",
-                permissions: [String], commands: [SourceExtensionCommand], settingsSchema: String? = nil) {
+                permissions: [String], commands: [SourceExtensionCommand], settingsSchema: String? = nil,
+                localizations: String? = nil) {
         self.schemaVersion = schemaVersion; self.runtime = runtime; self.identifier = identifier
         self.displayName = displayName; self.version = version; self.summary = summary
         self.entryPoint = entryPoint; self.permissions = permissions; self.commands = commands
         self.settingsSchema = settingsSchema
+        self.localizations = localizations
     }
 
     public func validate() throws {
@@ -47,6 +50,12 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         }
         try SourcePackageRules.validatePath(entryPoint)
         if let settingsSchema { try SourcePackageRules.validatePath(settingsSchema) }
+        if let localizations {
+            try SourcePackageRules.validatePath(localizations)
+            guard localizations.hasSuffix(".json") else {
+                throw SourcePackageError.invalid("The extension UI translation catalog must be a JSON resource.")
+            }
+        }
         var allowed: Set<String> = ["selection.read", "clipboard.read", "ai.transform", "ui.panel"]
         if runtime == "native" { allowed.insert("native.execute") }
         guard permissions.count <= allowed.count, Set(permissions).count == permissions.count,
@@ -78,6 +87,7 @@ public struct SourcePackageSnapshot: Sendable {
     public let fingerprint: String
     public let isLocallyModified: Bool
     public let fileHashes: [String: String]
+    public let localizations: SourceTextLocalizations?
 }
 
 public enum SourcePackageRules {
@@ -185,6 +195,15 @@ public enum SourcePackageInspector {
                 throw SourcePackageError.invalid("The extension settings schema is missing or invalid JSON.")
             }
         }
+        let localizations: SourceTextLocalizations?
+        if let path = manifest.localizations {
+            guard let text = resources[path], text.utf8.count <= 64 * 1024,
+                  let table = try? JSONDecoder().decode(SourceTextLocalizations.self, from: Data(text.utf8)) else {
+                throw SourcePackageError.invalid("The extension UI translation catalog is missing or invalid JSON.")
+            }
+            try table.validate()
+            localizations = table
+        } else { localizations = nil }
         var digestInput = Data()
         for key in hashes.keys.sorted() { digestInput.append(Data((key + "\0" + hashes[key]! + "\n").utf8)) }
         let receiptURL = root.appendingPathComponent(SourcePackageRules.receiptName)
@@ -192,7 +211,8 @@ public enum SourcePackageInspector {
             .flatMap { try? JSONDecoder().decode(SourcePackageReceipt.self, from: $0) }
         let modified = receipt.map { $0.identifier != manifest.identifier || $0.hashes != hashes } ?? false
         return SourcePackageSnapshot(manifest: manifest, rootURL: root, entrySource: entry, resources: resources,
-                                     fingerprint: SourcePackageRules.digest(digestInput), isLocallyModified: modified, fileHashes: hashes)
+                                     fingerprint: SourcePackageRules.digest(digestInput), isLocallyModified: modified,
+                                     fileHashes: hashes, localizations: localizations)
     }
 
     static func sourceFiles(in root: URL) throws -> [String] {

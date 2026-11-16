@@ -20,31 +20,30 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let availableList = NSStackView()
     private let installedCount = NSTextField(labelWithString: "")
     private let availableCount = NSTextField(labelWithString: "")
-    private let selectAllButton = NSButton(checkboxWithTitle: "Select All", target: nil, action: nil)
-    private let selectionCount = NSTextField(labelWithString: "0 selected")
-    private let batchReloadButton = NSButton(title: "Reload", target: nil, action: nil)
-    private let batchEditButton = NSButton(title: "Edit Source", target: nil, action: nil)
-    private let batchEnableButton = NSButton(title: "Enable", target: nil, action: nil)
-    private let batchDisableButton = NSButton(title: "Disable", target: nil, action: nil)
+    private let selectAllButton = NSButton(checkboxWithTitle: L("Select All"), target: nil, action: nil)
+    private let selectionCount = NSTextField(labelWithString: L("%ld selected", 0))
+    private let batchReloadButton = NSButton(title: L("Reload"), target: nil, action: nil)
+    private let batchEditButton = NSButton(title: L("Edit Source"), target: nil, action: nil)
+    private let batchEnableButton = NSButton(title: L("Enable"), target: nil, action: nil)
+    private let batchDisableButton = NSButton(title: L("Disable"), target: nil, action: nil)
     private let overviewMessage = NSTextField(wrappingLabelWithString: "")
     private let detailTitle = NSTextField(labelWithString: "")
     private let versionLabel = NSTextField(labelWithString: "")
-    private let backButton = NSButton(title: "All Extensions", target: nil, action: nil)
-    private let toggle = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    private let backButton = NSButton(title: L("All Extensions"), target: nil, action: nil)
+    private let toggle = NSButton(checkboxWithTitle: L("Enabled"), target: nil, action: nil)
     private let summary = NSTextField(wrappingLabelWithString: "")
     private let status = NSTextField(wrappingLabelWithString: "")
     private let sourceState = NSTextField(wrappingLabelWithString: "")
     private let sourceHelp = NSTextField(wrappingLabelWithString: "")
     private let permissionStatus = NSTextField(wrappingLabelWithString: "")
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
-    private let installButton = NSButton(title: "Install Source…", target: nil, action: nil)
-    private let marketplaceButton = NSButton(title: "Marketplace…", target: nil, action: nil)
-    private let catalogButton = NSButton(title: "Add Catalog…", target: nil, action: nil)
-    private let guideButton = NSButton(title: "AI Extension Guide…", target: nil, action: nil)
-    private let editButton = NSButton(title: "Edit Source", target: nil, action: nil)
-    private let reloadButton = NSButton(title: "Reload", target: nil, action: nil)
-    private let aiButton = NSButton(title: "AI Connection…", target: nil, action: nil)
-    private let accessibilityButton = NSButton(title: "Accessibility Settings…", target: nil, action: nil)
+    private let installButton = NSButton(title: L("Install Source…"), target: nil, action: nil)
+    private let marketplaceButton = NSButton(title: L("Marketplace…"), target: nil, action: nil)
+    private let catalogButton = NSButton(title: L("Add Catalog…"), target: nil, action: nil)
+    private let guideButton = NSButton(title: L("AI Extension Guide…"), target: nil, action: nil)
+    private let editButton = NSButton(title: L("Edit Source"), target: nil, action: nil)
+    private let reloadButton = NSButton(title: L("Reload"), target: nil, action: nil)
+    private let accessibilityButton = NSButton(title: L("Accessibility Settings…"), target: nil, action: nil)
     private let permissionRow = NSStackView()
     private let aiRow = NSStackView()
     private let settingsScroll = NSScrollView()
@@ -82,10 +81,10 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         manager.onApproveNativeExecution = { [weak self] manifest in
             guard self != nil else { return false }
             let alert = NSAlert()
-            alert.messageText = "Enable native extension “" + manifest.displayName + "”?"
-            alert.informativeText = "This extension runs compiled Swift code in a separate process with your Mac user account’s access. Enable only source you trust. Changes rebuild and restart this extension while MacHelper stays open."
-            alert.addButton(withTitle: "Enable Native Extension")
-            alert.addButton(withTitle: "Cancel")
+            alert.messageText = L("Enable native extension “%@”?", manifest.displayName)
+            alert.informativeText = L("This extension runs compiled Swift code in a separate process with your Mac user account’s access. Enable only source you trust. Changes rebuild and restart this extension while MacHelper stays open.")
+            alert.addButton(withTitle: L("Enable Native Extension"))
+            alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn
         }
     }
@@ -105,22 +104,22 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             ])
         }
         installButton.target = self; installButton.action = #selector(installSource)
-        installButton.toolTip = "Install a JavaScript or native Swift extension source folder."
+        installButton.toolTip = L("Install a JavaScript or native Swift extension source folder.")
         marketplaceButton.target = self; marketplaceButton.action = #selector(openMarketplace)
         catalogButton.target = self; catalogButton.action = #selector(addCatalog)
         guideButton.target = self; guideButton.action = #selector(openExtensionGuide)
-        guideButton.toolTip = "Give this guide to your AI assistant to create an extension or customize an existing one."
+        guideButton.toolTip = L("Give this guide to your AI assistant to create an extension or customize an existing one.")
         selectAllButton.target = self; selectAllButton.action = #selector(selectAllInstalled)
         selectAllButton.allowsMixedState = true
-        selectAllButton.setAccessibilityLabel("Select all installed extensions")
+        selectAllButton.setAccessibilityLabel(L("Select all installed extensions"))
         batchReloadButton.target = self; batchReloadButton.action = #selector(reloadSelected)
-        batchReloadButton.toolTip = "Reload selected enabled extensions. Disabled tools stay disabled."
+        batchReloadButton.toolTip = L("Reload selected enabled extensions. Disabled tools stay disabled.")
         batchEditButton.target = self; batchEditButton.action = #selector(editSelectedSources)
-        batchEditButton.toolTip = "Open every selected extension source folder."
+        batchEditButton.toolTip = L("Open every selected extension source folder.")
         batchEnableButton.target = self; batchEnableButton.action = #selector(enableSelected)
         batchDisableButton.target = self; batchDisableButton.action = #selector(disableSelected)
-        batchEnableButton.toolTip = "Enable selected disabled extensions."
-        batchDisableButton.toolTip = "Disable selected enabled extensions."
+        batchEnableButton.toolTip = L("Enable selected disabled extensions.")
+        batchDisableButton.toolTip = L("Disable selected enabled extensions.")
         for (control, id) in [(selectAllButton, "batch-select-all"), (batchReloadButton, "batch-reload"),
                               (batchEditButton, "batch-edit-source"), (batchEnableButton, "batch-enable"),
                               (batchDisableButton, "batch-disable")] {
@@ -129,16 +128,15 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         selectionCount.identifier = NSUserInterfaceItemIdentifier("batch-selection-count")
         overviewMessage.identifier = NSUserInterfaceItemIdentifier("extension-overview-message")
         editButton.target = self; editButton.action = #selector(editSource)
-        editButton.toolTip = "Open this tool’s installed source folder in VS Code, or Finder if VS Code is unavailable."
+        editButton.toolTip = L("Open this tool’s installed source folder in VS Code, or Finder if VS Code is unavailable.")
         reloadButton.target = self; reloadButton.action = #selector(reloadSource)
-        aiButton.target = self; aiButton.action = #selector(openAISettings)
         accessibilityButton.target = self; accessibilityButton.action = #selector(openAccessibility)
         toggle.target = self; toggle.action = #selector(toggleEnabled)
         backButton.target = self; backButton.action = #selector(backToOverview)
-        backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: nil)
+        backButton.image = NSImage(systemSymbolName: AppLocalization.shared.isRightToLeft ? "chevron.right" : "chevron.left", accessibilityDescription: nil)
         backButton.imagePosition = .imageLeading
         backButton.bezelStyle = .inline
-        backButton.setAccessibilityLabel("Back to all extensions")
+        backButton.setAccessibilityLabel(L("Back to all extensions"))
         marketplaceButton.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: nil)
         marketplaceButton.imagePosition = .imageLeading
         marketplaceButton.bezelColor = .controlAccentColor
@@ -150,8 +148,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     private func buildOverview() {
         configureScroll(overviewScroll, document: overviewDocument, stack: overviewStack, in: overview)
-        let title = Self.label("Extensions", size: 24, weight: .semibold)
-        let subtitle = Self.label("Manage the tools installed on this Mac.", size: 13, color: .secondaryLabelColor)
+        let title = Self.label(L("Extensions"), size: 24, weight: .semibold)
+        let subtitle = Self.label(L("Manage the tools installed on this Mac."), size: 13, color: .secondaryLabelColor)
         let heading = Self.column([title, subtitle], spacing: 7)
         let header = NSStackView(views: [heading, Self.flexibleSpace(), marketplaceButton])
         header.alignment = .centerY
@@ -160,27 +158,28 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         let toolbar = NSStackView(views: [installButton, catalogButton, guideButton])
         toolbar.spacing = 8
         overviewStack.addArrangedSubview(toolbar)
-        let authoringNote = Self.label("Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.", size: 12, color: .secondaryLabelColor)
+        let authoringNote = Self.label(L("Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source."), size: 12, color: .secondaryLabelColor)
         authoringNote.maximumNumberOfLines = 0
         addFullWidth(authoringNote, to: overviewStack)
         overviewMessage.font = .systemFont(ofSize: 12)
         addFullWidth(overviewMessage, to: overviewStack)
         addFullWidth(Self.separator(), to: overviewStack)
-        addFullWidth(sectionHeading("Installed", count: installedCount), to: overviewStack)
+        addFullWidth(sectionHeading(L("Installed"), count: installedCount), to: overviewStack)
         selectionCount.font = .systemFont(ofSize: 11)
         selectionCount.textColor = .secondaryLabelColor
-        let batchActions = NSStackView(views: [selectAllButton, selectionCount, Self.flexibleSpace(),
-            batchReloadButton, batchEditButton, batchEnableButton, batchDisableButton])
-        batchActions.spacing = 8
-        batchActions.alignment = .centerY
+        let selectionActions = NSStackView(views: [selectAllButton, selectionCount, Self.flexibleSpace()])
+        selectionActions.spacing = 8
+        let lifecycleActions = NSStackView(views: [batchReloadButton, batchEditButton, batchEnableButton, batchDisableButton])
+        lifecycleActions.spacing = 8
+        let batchActions = Self.column([selectionActions, lifecycleActions], spacing: 10)
         addFullWidth(batchActions, to: overviewStack)
         configureList(installedList)
         addFullWidth(installedList, to: overviewStack)
-        let availableHeading = sectionHeading("Available from catalogs", count: availableCount)
+        let availableHeading = sectionHeading(L("Available from catalogs"), count: availableCount)
         overviewStack.setCustomSpacing(25, after: installedList)
         configureList(availableSection)
         addFullWidth(availableHeading, to: availableSection)
-        let note = Self.label("Open a tool to learn more, then enable it to install its source.", size: 12, color: .secondaryLabelColor)
+        let note = Self.label(L("Open a tool to learn more, then enable it to install its source."), size: 12, color: .secondaryLabelColor)
         note.maximumNumberOfLines = 2
         addFullWidth(note, to: availableSection)
         configureList(availableList)
@@ -229,15 +228,15 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         errorLabel.textColor = .systemRed
         addFullWidth(errorLabel, to: detailStack)
         addFullWidth(Self.separator(), to: detailStack)
-        detailStack.addArrangedSubview(Self.label("Settings", size: 15, weight: .semibold))
+        detailStack.addArrangedSubview(Self.label(L("Settings"), size: 15, weight: .semibold))
         configureList(form)
         form.spacing = 18
         addFullWidth(form, to: detailStack)
         detailStack.setCustomSpacing(24, after: form)
         addFullWidth(Self.separator(), to: detailStack)
-        let aiNote = Self.label("Provider and model are shared across your tools.", size: 12, color: .secondaryLabelColor)
+        let aiNote = Self.label(L("Provider and model are shared across your tools."), size: 12, color: .secondaryLabelColor)
         aiNote.maximumNumberOfLines = 2
-        aiRow.addArrangedSubview(aiButton); aiRow.addArrangedSubview(aiNote)
+        aiRow.addArrangedSubview(aiNote)
         aiRow.spacing = 10; aiRow.alignment = .centerY
         addFullWidth(aiRow, to: detailStack)
         permissionStatus.font = .systemFont(ofSize: 12)
@@ -311,6 +310,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     private var busy: Bool { operationTask != nil }
     var hasPendingOperations: Bool { busy || !operations.isEmpty }
+    var hasUnsavedPromptChanges: Bool { promptDrafts.values.contains { $0.isDirty } || !pendingValues.isEmpty }
 
     func selectTool(_ id: String) {
         requestedSelectionID = id
@@ -344,7 +344,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             self.requestedSelectionID = nil
             if changed { settingsDocument.scroll(.zero) }
             if manager.sourceURL(for: requestedSelectionID) != nil {
-                enqueue(title: "Loading settings…", toolID: requestedSelectionID, operation: { [manager] in
+                enqueue(title: L("Loading settings…"), toolID: requestedSelectionID, operation: { [manager] in
                     try await manager.prepareSettings(for: requestedSelectionID)
                 })
             }
@@ -354,24 +354,24 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         detail.isHidden = selectedID == nil
         if selectedID == nil { refreshOverview(tools) }
         let item = tools.first { $0.id == selectedID }
-        detailTitle.stringValue = item?.displayName ?? "Extension"
-        versionLabel.stringValue = item.map { ($0.version.isEmpty ? $0.id : "Version \($0.version)") + ($0.runtime == "native" ? " · Native Swift" : $0.runtime == "javascript" ? " · JavaScript" : "") } ?? ""
+        detailTitle.stringValue = item?.displayName ?? L("Extension")
+        versionLabel.stringValue = item.map { ($0.version.isEmpty ? $0.id : L("Version %@", $0.version)) + ($0.runtime == "native" ? " · " + L("Native Swift") : $0.runtime == "javascript" ? " · JavaScript" : "") } ?? ""
         summary.stringValue = item?.summary ?? ""
         sourceHelp.isHidden = item?.sourceURL == nil
         sourceHelp.stringValue = item?.runtime == "native"
-            ? "Edit Source opens the installed folder. Saving native Swift source rebuilds and replaces only this tool’s worker. MacHelper stays open; a failed build keeps the last working version. Xcode Command Line Tools are required."
-            : "Edit Source opens this tool’s installed folder. Saving code, prompts, or settings reloads its worker automatically while enabled. If disabled, your changes take effect when you enable it."
-        toggle.title = item?.sourceURL == nil ? "Install & Enable" : "Enabled"
+            ? L("Edit Source opens the installed folder. Saving native Swift source rebuilds and replaces only this tool’s worker. MacHelper stays open; a failed build keeps the last working version. Xcode Command Line Tools are required.")
+            : L("Edit Source opens this tool’s installed folder. Saving code, prompts, or settings reloads its worker automatically while enabled. If disabled, your changes take effect when you enable it.")
+        toggle.title = item?.sourceURL == nil ? L("Install & Enable") : L("Enabled")
         toggle.state = item?.isEnabled == true ? .on : .off
         status.stringValue = (workingToolID == nil || workingToolID == selectedID ? workingTitle : nil)
-            ?? item?.status ?? ""
+            ?? item.map { L($0.status) } ?? ""
         if let item {
-            sourceState.stringValue = item.sourceURL == nil ? "Complete editable source will be downloaded when you enable this tool."
-                : "\(item.isLocallyModified ? "Source edited locally" : "Local source ready")  ·  \(item.reloadCount) reload\(item.reloadCount == 1 ? "" : "s")"
+            sourceState.stringValue = item.sourceURL == nil ? L("Complete editable source will be downloaded when you enable this tool.")
+                : (item.isLocallyModified ? L("Source edited locally") : L("Local source ready")) + "  ·  " + (item.reloadCount == 1 ? L("%ld reload", item.reloadCount) : L("%ld reloads", item.reloadCount))
             sourceState.toolTip = item.sourceURL?.path
         }
         let message = selectedID.flatMap { operationErrors[$0]?.message } ?? globalError ?? item?.error
-        errorLabel.stringValue = message ?? ""
+        errorLabel.stringValue = message.map { L("Extension error: %@", L($0)) } ?? ""
         errorLabel.isHidden = message == nil
         status.textColor = message == nil ? .secondaryLabelColor : .systemRed
         if selectedID != nil { refreshForm(for: selectedID) }
@@ -380,16 +380,17 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         aiRow.isHidden = !permissions.contains("ai.transform")
         refreshPermission()
         updateEnabledControls()
+        applyAppLanguageDirection(to: view)
     }
 
     private func refreshOverview(_ tools: [SourceToolInfo]) {
         let installed = tools.filter { $0.sourceURL != nil }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         let available = tools.filter { $0.sourceURL == nil }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         availableSection.isHidden = available.isEmpty
-        installedCount.stringValue = "\(installed.count) tool\(installed.count == 1 ? "" : "s")"
-        availableCount.stringValue = "\(available.count) tool\(available.count == 1 ? "" : "s")"
+        installedCount.stringValue = installed.count == 1 ? L("%ld tool", installed.count) : L("%ld tools", installed.count)
+        availableCount.stringValue = available.count == 1 ? L("%ld tool", available.count) : L("%ld tools", available.count)
         overviewSelection.reconcile(items: batchItems)
-        overviewMessage.stringValue = globalError ?? workingTitle ?? batchSummary ?? ""
+        overviewMessage.stringValue = globalError.map { L("Extension error: %@", L($0)) } ?? workingTitle ?? batchSummary ?? ""
         overviewMessage.textColor = globalError == nil ? .secondaryLabelColor : .systemRed
         overviewMessage.isHidden = overviewMessage.stringValue.isEmpty
         let signature = tools.map { tool in
@@ -409,7 +410,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         ] {
             list.arrangedSubviews.forEach { list.removeArrangedSubview($0); $0.removeFromSuperview() }
             if items.isEmpty {
-                addFullWidth(SourceToolEmptyView(title: emptyTitle, message: emptyText), to: list)
+                addFullWidth(SourceToolEmptyView(title: L(emptyTitle), message: L(emptyText)), to: list)
             } else {
                 for tool in items {
                     let card = SourceToolCard(tool: tool, error: operationErrors[tool.id]?.message,
@@ -417,8 +418,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
                     cards[tool.id] = card
                     if tool.sourceURL != nil {
                         let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(selectInstalled(_:)))
-                        checkbox.setAccessibilityLabel("Select " + tool.displayName)
-                        checkbox.toolTip = "Select this extension for list actions."
+                        checkbox.setAccessibilityLabel(L("Select %@", tool.displayName))
+                        checkbox.toolTip = L("Select this extension for list actions.")
                         checkbox.identifier = NSUserInterfaceItemIdentifier("select-extension-" + tool.id)
                         checkbox.widthAnchor.constraint(equalToConstant: 18).isActive = true
                         selectionCheckboxes[tool.id] = checkbox
@@ -446,7 +447,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         overviewSelection.reconcile(items: items)
         let count = overviewSelection.selectedIDs.count
         let installed = items.filter(\.installed).count
-        selectionCount.stringValue = "\(count) selected"
+        selectionCount.stringValue = L("%ld selected", count)
         selectAllButton.state = count == 0 ? .off : count == installed ? .on : .mixed
         selectAllButton.isEnabled = !busy && installed > 0
         for (id, checkbox) in selectionCheckboxes {
@@ -463,7 +464,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     private func refreshPermission() {
         let granted = manager.accessibilityGranted
-        permissionStatus.stringValue = granted ? "Accessibility enabled" : "Allow selection access in other apps."
+        permissionStatus.stringValue = granted ? L("Accessibility enabled") : L("Allow selection access in other apps.")
         permissionStatus.textColor = granted ? .secondaryLabelColor : .systemOrange
     }
 
@@ -473,8 +474,10 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             manager.sourceURL(for: id) == nil ? "available" : busy ? "loading" : operationErrors[id] == nil ? "ready" : "failed"
         } ?? "unselected"
         let signature = schema?.fields.map { field in
-            [field.key, field.label, field.type, field.path ?? "", String(describing: field.defaultValue),
-             field.options.map { $0.value + ":" + $0.label }.joined(separator: "|")].joined(separator: "\u{1f}")
+            [field.key, id.map { manager.localizedText(field.label, for: $0) } ?? field.label,
+             field.type, field.path ?? "", String(describing: field.defaultValue),
+             field.options.map { option in option.value + ":" + (id.map { manager.localizedText(option.label, for: $0) } ?? option.label) }
+                .joined(separator: "|")].joined(separator: "\u{1f}")
         }.joined(separator: "\u{1e}") ?? "none:" + emptyState
         if id != formToolID || signature != formSignature {
             if isEditingFormText, id == formToolID { pendingFormRebuild = true; return }
@@ -508,27 +511,27 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         guard let id, let schema else {
             let message: String
             if let id {
-                if manager.sourceURL(for: id) == nil { message = "Install and enable this tool to download its source and settings." }
-                else if busy { message = "Loading this tool’s settings…" }
-                else if operationErrors[id] != nil { message = "The tool’s settings could not be loaded. Review the error above or repair its source." }
-                else { message = "This tool has no additional settings." }
+                if manager.sourceURL(for: id) == nil { message = L("Install and enable this tool to download its source and settings.") }
+                else if busy { message = L("Loading this tool’s settings…") }
+                else if operationErrors[id] != nil { message = L("The tool’s settings could not be loaded. Review the error above or repair its source.") }
+                else { message = L("This tool has no additional settings.") }
             }
-            else { message = "Choose a tool to view its settings." }
-            let note = NSTextField(wrappingLabelWithString: message)
+            else { message = L("Choose a tool to view its settings.") }
+            let note = NSTextField(wrappingLabelWithString: L(message))
             note.textColor = .secondaryLabelColor
             form.addArrangedSubview(note)
             note.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
             return
         }
         if schema.fields.isEmpty {
-            let note = NSTextField(labelWithString: "This tool has no additional settings.")
+            let note = NSTextField(labelWithString: L("This tool has no additional settings."))
             note.textColor = .secondaryLabelColor
             form.addArrangedSubview(note)
         }
         for field in schema.fields {
             if field.type == "prompt", let path = field.path {
                 let key = SettingKey(toolID: id, key: field.key)
-                let editor = SourcePromptEditorView(label: field.label, path: path)
+                let editor = SourcePromptEditorView(label: manager.localizedText(field.label, for: id), path: path)
                 editor.onChange = { [weak self] text in
                     guard let self, var draft = self.promptDrafts[key] else { return }
                     draft.text = text; self.promptDrafts[key] = draft
@@ -547,16 +550,16 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             }
             let control: NSControl
             if field.type == "boolean" {
-                let checkbox = NSButton(checkboxWithTitle: field.label, target: self, action: #selector(settingChanged(_:)))
+                let checkbox = NSButton(checkboxWithTitle: manager.localizedText(field.label, for: id), target: self, action: #selector(settingChanged(_:)))
                 control = checkbox
                 form.addArrangedSubview(checkbox)
             } else {
-                let label = NSTextField(labelWithString: field.label)
+                let label = NSTextField(labelWithString: manager.localizedText(field.label, for: id))
                 label.font = .systemFont(ofSize: 12, weight: .medium)
                 if field.type == "select" {
                     let popup = NSPopUpButton()
                     for option in field.options {
-                        popup.addItem(withTitle: option.label)
+                        popup.addItem(withTitle: manager.localizedText(option.label, for: id))
                         popup.lastItem?.representedObject = option.value
                     }
                     popup.target = self; popup.action = #selector(settingChanged(_:))
@@ -574,7 +577,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
                 row.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
                 control.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
             }
-            control.setAccessibilityLabel(field.label)
+            control.setAccessibilityLabel(manager.localizedText(field.label, for: id))
             controls[field.key] = control
             bindings[ObjectIdentifier(control)] = FormBinding(toolID: id, key: field.key)
         }
@@ -681,21 +684,21 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         let ids = overviewSelection.targets(for: action, items: batchItems)
         guard !ids.isEmpty else { return }
         let skipped = overviewSelection.selectedIDs.count - ids.count
-        let verb: String
-        let completed: String
+        let batchTitle: String
+        let progressFormat: String
         switch action {
-        case .reload: verb = "Reloading"; completed = "Reloaded"
-        case .enable: verb = "Enabling"; completed = "Enabled"
-        case .disable: verb = "Disabling"; completed = "Disabled"
+        case .reload: batchTitle = L("Reloading selected extensions…"); progressFormat = "Reloading %@ (%ld/%ld)…"
+        case .enable: batchTitle = L("Enabling selected extensions…"); progressFormat = "Enabling %@ (%ld/%ld)…"
+        case .disable: batchTitle = L("Disabling selected extensions…"); progressFormat = "Disabling %@ (%ld/%ld)…"
         case .editSource: return
         }
-        enqueue(title: verb + " selected extensions…", operation: { [weak self] in
+        enqueue(title: batchTitle, operation: { [weak self] in
             guard let self else { return }
             var succeeded = 0, failed = 0, cancelled = 0
             for (index, id) in ids.enumerated() {
                 let item = self.manager.tools.first { $0.id == id }
                 let reloadCount = item?.reloadCount ?? 0
-                self.workingTitle = "\(verb) \(item?.displayName ?? id) (\(index + 1)/\(ids.count))…"
+                self.workingTitle = L(progressFormat, item?.displayName ?? id, index + 1, ids.count)
                 self.workingToolID = id
                 self.operationErrors.removeValue(forKey: id)
                 self.refreshDisplay()
@@ -708,17 +711,23 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
                     self.operationErrors[id] = OperationFailure(message: error.localizedDescription, reloadCount: reloadCount)
                 }
             }
-            var summary = "\(completed) \(succeeded) extension\(succeeded == 1 ? "" : "s")."
+            var summary: String
+            switch action {
+            case .reload: summary = succeeded == 1 ? L("Reloaded %ld extension.", succeeded) : L("Reloaded %ld extensions.", succeeded)
+            case .enable: summary = succeeded == 1 ? L("Enabled %ld extension.", succeeded) : L("Enabled %ld extensions.", succeeded)
+            case .disable: summary = succeeded == 1 ? L("Disabled %ld extension.", succeeded) : L("Disabled %ld extensions.", succeeded)
+            case .editSource: return
+            }
             if skipped > 0 {
                 switch action {
-                case .reload: summary += " Skipped \(skipped) disabled extension\(skipped == 1 ? "" : "s")."
-                case .enable: summary += " \(skipped) already enabled."
-                case .disable: summary += " \(skipped) already disabled."
+                case .reload: summary += " " + (skipped == 1 ? L("Skipped %ld disabled extension.", skipped) : L("Skipped %ld disabled extensions.", skipped))
+                case .enable: summary += " " + L("%ld already enabled.", skipped)
+                case .disable: summary += " " + L("%ld already disabled.", skipped)
                 case .editSource: break
                 }
             }
-            if failed > 0 { summary += " \(failed) failed; open the marked tool for details." }
-            if cancelled > 0 { summary += " \(cancelled) cancelled." }
+            if failed > 0 { summary += " " + L("%ld failed; open the marked tool for details.", failed) }
+            if cancelled > 0 { summary += " " + L("%ld cancelled.", cancelled) }
             self.batchSummary = summary
         })
     }
@@ -726,7 +735,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     @objc private func toggleEnabled() {
         guard let id = selectedID else { return }
         let enabled = toggle.state == .on
-        let title = enabled ? (manager.sourceURL(for: id) == nil ? "Downloading source and enabling…" : "Enabling…") : "Disabling…"
+        let title = enabled ? (manager.sourceURL(for: id) == nil ? L("Downloading source and enabling…") : L("Enabling…")) : L("Disabling…")
         enqueue(title: title, toolID: id, operation: { [weak self] in
             try await self?.lifecycleAction(enabled ? .enable : .disable, for: id)
         })
@@ -735,7 +744,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     @objc private func reloadSource() {
         guard let id = selectedID else { return }
         view.window?.makeFirstResponder(nil)
-        enqueue(title: "Reloading source…", toolID: id, operation: { [weak self] in try await self?.lifecycleAction(.reload, for: id) })
+        enqueue(title: L("Reloading source…"), toolID: id, operation: { [weak self] in try await self?.lifecycleAction(.reload, for: id) })
     }
 
     @objc private func settingChanged(_ control: NSControl) {
@@ -759,7 +768,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private func saveSetting(_ binding: FormBinding, value: Any) {
         let key = SettingKey(toolID: binding.toolID, key: binding.key)
         pendingValues[key] = value
-        enqueue(title: "Saving settings…", toolID: binding.toolID, operation: { [manager] in
+        enqueue(title: L("Saving settings…"), toolID: binding.toolID, operation: { [manager] in
             try await manager.updateSetting(binding.key, value: value, for: binding.toolID)
         }, success: { [weak self] in
             guard let self, let pending = self.pendingValues[key], Self.equal(pending, value) else { return }
@@ -781,14 +790,14 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             editor.display(text: draft.text, busy: busy, dirty: draft.isDirty, conflict: conflict)
         } catch {
             editor.display(text: promptDrafts[key]?.text ?? "", busy: true, dirty: false, conflict: false,
-                           problem: "The validated prompt could not be loaded. Repair the extension source and reload.")
+                           problem: L("The validated prompt could not be loaded. Repair the extension source and reload."))
         }
     }
 
     private func savePrompt(_ key: SettingKey) {
         guard let draft = promptDrafts[key], draft.isDirty else { return }
         let value = draft.text, expected = draft.baseline
-        enqueue(title: "Saving prompt…", toolID: key.toolID, operation: { [manager] in
+        enqueue(title: L("Saving prompt…"), toolID: key.toolID, operation: { [manager] in
             try await manager.updatePrompt(key.key, value: value, expectedValue: expected, for: key.toolID)
         }, success: { [weak self] in
             guard let self, var latest = self.promptDrafts[key] else { return }
@@ -798,7 +807,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func revertPrompt(_ key: SettingKey) {
-        enqueue(title: "Reading saved prompt…", toolID: key.toolID, operation: { [manager] in
+        enqueue(title: L("Reading saved prompt…"), toolID: key.toolID, operation: { [manager] in
             if manager.tools.first(where: { $0.id == key.toolID })?.isEnabled == true {
                 try await manager.reload(key.toolID)
             } else { try await manager.prepareSettings(for: key.toolID) }
@@ -814,18 +823,18 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     @objc private func installSource() {
         let panel = NSOpenPanel()
-        panel.message = "Choose a JavaScript or native Swift extension source folder containing extension.json. It is installed disabled, with its source available to edit."
+        panel.message = L("Choose a JavaScript or native Swift extension source folder containing extension.json. It is installed disabled, with its source available to edit.")
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let source = panel.url else { return }
         if ["machextension", "bundle"].contains(source.pathExtension.lowercased()) {
-            globalError = "This compiled bundle uses the legacy native API. Migrate its source to the native worker SDK in the AI Extension Guide, then install the new source folder here."
+            globalError = L("This compiled bundle uses the legacy native API. Migrate its source to the native worker SDK in the AI Extension Guide, then install the new source folder here.")
             refreshDisplay()
             return
         }
         let previous = Set(manager.tools.map(\.id))
-        enqueue(title: "Installing source…", operation: { [manager] in try await manager.importSource(from: source) }, success: { [weak self] in
+        enqueue(title: L("Installing source…"), operation: { [manager] in try await manager.importSource(from: source) }, success: { [weak self] in
             guard let self else { return }
             if let item = self.manager.tools.first(where: { !previous.contains($0.id) }) { self.selectTool(item.id) }
         })
@@ -833,24 +842,24 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     @objc private func addCatalog() {
         let alert = NSAlert()
-        alert.messageText = "Add a tool catalog"
-        alert.informativeText = "Enter the catalog JSON URL. Tools are downloaded when you enable them."
-        alert.addButton(withTitle: "Add Catalog")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L("Add a tool catalog")
+        alert.informativeText = L("Enter the catalog JSON URL. Tools are downloaded when you enable them.")
+        alert.addButton(withTitle: L("Add Catalog"))
+        alert.addButton(withTitle: L("Cancel"))
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
         input.placeholderString = "https://example.com/catalog.json"
-        input.setAccessibilityLabel("Catalog URL")
+        input.setAccessibilityLabel(L("Catalog URL"))
         alert.accessoryView = input
         alert.window.initialFirstResponder = input
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let string = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: string), let scheme = url.scheme?.lowercased(),
               ["https", "http", "file"].contains(scheme), scheme == "file" || url.host != nil else {
-            globalError = "Enter a complete catalog URL."
+            globalError = L("Enter a complete catalog URL.")
             refreshDisplay()
             return
         }
-        enqueue(title: "Loading catalog…", operation: { [manager] in try await manager.addCatalog(from: url) })
+        enqueue(title: L("Loading catalog…"), operation: { [manager] in try await manager.addCatalog(from: url) })
     }
 
     @objc private func editSource() {
@@ -872,11 +881,11 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             guard let self else { return }
             if let error {
                 for (id, _) in sources {
-                    self.operationErrors[id] = OperationFailure(message: "Could not open source: " + error.localizedDescription,
+                    self.operationErrors[id] = OperationFailure(message: L("Could not open source: %@", error.localizedDescription),
                                                                 reloadCount: counts[id] ?? 0)
                 }
             } else {
-                self.batchSummary = "Opened source for \(sources.count) extension\(sources.count == 1 ? "" : "s")."
+                self.batchSummary = sources.count == 1 ? L("Opened source for %ld extension.", sources.count) : L("Opened source for %ld extensions.", sources.count)
             }
             self.refreshDisplay()
         }
@@ -893,7 +902,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         } else {
             for (id, source) in sources {
                 if !workspace.open(source) {
-                    operationErrors[id] = OperationFailure(message: "The source folder could not be opened.", reloadCount: counts[id] ?? 0)
+                    operationErrors[id] = OperationFailure(message: L("The source folder could not be opened."), reloadCount: counts[id] ?? 0)
                 }
             }
             refreshDisplay()
@@ -905,17 +914,16 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         do {
             let url = try bundledGuide ?? MarketplaceConfiguration.websiteURL().appendingPathComponent("AI_EXTENSION_GUIDE.md")
             guard NSWorkspace.shared.open(url) else {
-                globalError = "The AI Extension Guide could not be opened. Check your default app for Markdown files or visit the marketplace."
+                globalError = L("The AI Extension Guide could not be opened. Check your default app for Markdown files or visit the marketplace.")
                 refreshDisplay()
                 return
             }
         } catch {
-            globalError = "The AI Extension Guide could not be opened: " + error.localizedDescription
+            globalError = L("The AI Extension Guide could not be opened: %@", error.localizedDescription)
             refreshDisplay()
         }
     }
 
-    @objc private func openAISettings() { manager.openAISettings() }
     @objc private func openAccessibility() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
     }
@@ -983,8 +991,8 @@ private final class SourcePromptEditorView: NSView, NSTextViewDelegate {
     var onRevert: (() -> Void)?
     var onEndEditing: (() -> Void)?
     private let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 0, height: 164))
-    private let saveButton = NSButton(title: "Save Prompt", target: nil, action: nil)
-    private let revertButton = NSButton(title: "Revert", target: nil, action: nil)
+    private let saveButton = NSButton(title: L("Save Prompt"), target: nil, action: nil)
+    private let revertButton = NSButton(title: L("Revert"), target: nil, action: nil)
     private let message = NSTextField(wrappingLabelWithString: "")
     var isEditing: Bool { window?.firstResponder === textView }
 
@@ -1050,9 +1058,9 @@ private final class SourcePromptEditorView: NSView, NSTextViewDelegate {
         saveButton.isEnabled = !busy && dirty && !conflict
         revertButton.isEnabled = !busy && (dirty || conflict)
         message.stringValue = problem ?? (conflict
-            ? "The source changed outside this editor. Your draft is retained; Revert loads the current saved prompt."
-            : dirty ? "Unsaved changes. Save Prompt writes this source file and reloads the enabled tool."
-            : "The source prompt is sent exactly as written. Changes are saved only with Save Prompt.")
+            ? L("The source changed outside this editor. Your draft is retained; Revert loads the current saved prompt.")
+            : dirty ? L("Unsaved changes. Save Prompt writes this source file and reloads the enabled tool.")
+            : L("The source prompt is sent exactly as written. Changes are saved only with Save Prompt."))
         message.textColor = problem != nil || conflict ? .systemOrange : .secondaryLabelColor
     }
     func textDidChange(_ notification: Notification) { onChange?(textView.string) }
@@ -1091,10 +1099,10 @@ private final class SourceToolCard: NSButton {
         identifier = NSUserInterfaceItemIdentifier("source-tool-" + tool.id)
         let installed = tool.sourceURL != nil
         let problem = error ?? tool.error
-        let state = problem != nil ? "Needs attention" : !installed ? "Available"
-            : tool.isRunning ? "Running" : tool.isEnabled ? "Enabled" : "Disabled"
+        let state = problem != nil ? L("Needs attention") : !installed ? L("Available")
+            : tool.isRunning ? L("Running") : tool.isEnabled ? L("Enabled") : L("Disabled")
         setAccessibilityLabel(tool.displayName + ", " + state + ". " + tool.summary)
-        setAccessibilityHelp("Open tool details and settings")
+        setAccessibilityHelp(L("Open tool details and settings"))
         toolTip = problem ?? tool.summary
 
         let icon = NSView()
@@ -1121,8 +1129,8 @@ private final class SourceToolCard: NSButton {
         let badge = NSTextField(labelWithString: state)
         badge.font = .systemFont(ofSize: 11, weight: .medium)
         badge.textColor = problem != nil ? .systemOrange : tool.isRunning ? .systemGreen : .secondaryLabelColor
-        let metadata = NSTextField(labelWithString: (tool.version.isEmpty ? "" : "Version " + tool.version)
-            + (tool.isLocallyModified ? "  ·  Edited locally" : ""))
+        let metadata = NSTextField(labelWithString: (tool.version.isEmpty ? "" : L("Version %@", tool.version))
+            + (tool.isLocallyModified ? "  ·  " + L("Edited locally") : ""))
         metadata.font = .systemFont(ofSize: 11)
         metadata.textColor = .tertiaryLabelColor
         metadata.lineBreakMode = .byTruncatingTail
@@ -1138,7 +1146,7 @@ private final class SourceToolCard: NSButton {
             label.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true
         }
         let chevron = NSImageView()
-        chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        chevron.image = NSImage(systemSymbolName: AppLocalization.shared.isRightToLeft ? "chevron.left" : "chevron.right", accessibilityDescription: nil)
         chevron.contentTintColor = .tertiaryLabelColor
         let row = NSStackView(views: [icon, labels, chevron])
         row.distribution = .fill
@@ -1176,7 +1184,7 @@ private final class SourceToolEmptyView: NSView {
         layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         let heading = NSTextField(labelWithString: title)
         heading.font = .systemFont(ofSize: 14, weight: .medium)
-        let note = NSTextField(wrappingLabelWithString: message)
+        let note = NSTextField(wrappingLabelWithString: L(message))
         note.font = .systemFont(ofSize: 12)
         note.textColor = .secondaryLabelColor
         note.maximumNumberOfLines = 3

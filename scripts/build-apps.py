@@ -71,7 +71,9 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "6.1.0", "CFBundleVersion": "610", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.2.0", "CFBundleVersion": "620", "CFBundleIconFile": "AppIcon",
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": sorted(path.stem for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")),
         "MacHelperMarketplaceURL": args.marketplace_url,
         "CFBundleURLTypes": [{"CFBundleURLName": "com.localaibasetools.marketplace", "CFBundleURLSchemes": ["machelper"], "CFBundleTypeRole": "Viewer"}],
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",
@@ -84,6 +86,7 @@ def main():
     shutil.copy2(helper_bin / "MacHelperScriptWorker", worker)
     sign(worker, identity)
     resources = contents / "Resources"
+    shutil.copytree(ROOT / "MacHelper/Runtime/Localization", resources / "Localization")
     (resources / "SourceCatalog").mkdir(parents=True)
     # Explicit public documentation only; AI_DEPLOYMENT.md stays local.
     for relative in ["AI_EXTENSION_GUIDE.md", "docs/Extension-Development.md", "docs/Source-Extensions.md", "docs/Native-Extensions.md", "docs/MacHelper-Protocol.md"]:

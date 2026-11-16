@@ -1,4 +1,5 @@
 import AppKit
+import MacHelper
 
 /// Separates a readable preview from an authoritative, copyable final result.
 struct CapabilityPresentationState {
@@ -146,8 +147,11 @@ final class FloatingCapabilityPanels {
     private let output = NSTextView()
     private let scroll = NSScrollView()
     private let footer = NSTextField(labelWithString: "")
-    private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
-    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let copyButton = NSButton(title: L("Copy"), target: nil, action: nil)
+    private let retryButton = NSButton(title: L("Retry"), target: nil, action: nil)
+    private var closeButton: NSButton?
+    private var iconButton: NSButton?
+    private var languageObserver: NSObjectProtocol?
     private let dragHandle = CapabilityPanelDragHandle()
     private var presentation = CapabilityPresentationState()
     private var placement = CapabilityPanelPlacement()
@@ -162,6 +166,33 @@ final class FloatingCapabilityPanels {
         resultPanel = Self.panel(title: toolTitle, size: NSSize(width: 380, height: 268))
         buildIcon()
         buildResult()
+        refreshLanguage()
+        languageObserver = NotificationCenter.default.addObserver(forName: .macHelperLanguageDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshLanguage()
+                self?.dismiss()
+            }
+        }
+    }
+
+    deinit { if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) } }
+
+    private func refreshLanguage() {
+        copyButton.title = L("Copy")
+        retryButton.title = L("Retry")
+        closeButton?.toolTip = L("Dismiss (Esc)")
+        closeButton?.setAccessibilityLabel(L("Dismiss result"))
+        iconButton?.toolTip = L("%@ · selected text", toolTitle)
+        dragHandle.toolTip = L("Drag to move this panel")
+        dragHandle.setAccessibilityLabel(L("Move result panel"))
+        output.setAccessibilityLabel(L("Result text"))
+        output.baseWritingDirection = .natural
+        func applyDirection(_ view: NSView) {
+            if view is NSTextView { return }
+            view.userInterfaceLayoutDirection = AppLocalization.shared.isRightToLeft ? .rightToLeft : .leftToRight
+            for child in view.subviews { applyDirection(child) }
+        }
+        if let content = resultPanel.contentView { applyDirection(content) }
     }
 
     var isVisible: Bool { iconPanel.isVisible || resultPanel.isVisible }
@@ -195,11 +226,11 @@ final class FloatingCapabilityPanels {
     func showLoading(near anchor: CGRect) {
         presentation.begin()
         title.stringValue = toolTitle + "…"
-        updateText("Working…", resetScroll: true)
-        footer.stringValue = "MacHelper · shared AI settings"
+        updateText(L("Working…"), resetScroll: true)
+        footer.stringValue = L("MacHelper · shared AI settings")
         footer.toolTip = nil
         copyButton.isEnabled = false
-        copyButton.title = "Copy"
+        copyButton.title = L("Copy")
         output.isSelectable = false
         retryButton.isHidden = true
         presentResult(near: anchor, resetScroll: true)
@@ -209,7 +240,7 @@ final class FloatingCapabilityPanels {
         guard presentation.progress(response) else { return }
         title.stringValue = (presentation.title ?? toolTitle) + "…"
         if !presentation.text.isEmpty { updateText(presentation.text) }
-        footer.stringValue = presentation.model.map { "Working… · " + $0 } ?? "Working…"
+        footer.stringValue = presentation.model.map { L("Working… · %@", $0) } ?? L("Working…")
         footer.toolTip = presentation.model
         copyButton.isEnabled = false
         output.isSelectable = false
@@ -221,7 +252,7 @@ final class FloatingCapabilityPanels {
         presentation.complete(response)
         title.stringValue = presentation.title ?? toolTitle
         updateText(response.text)
-        footer.stringValue = presentation.model ?? "MacHelper · shared AI settings"
+        footer.stringValue = presentation.model ?? L("MacHelper · shared AI settings")
         footer.toolTip = presentation.model
         copyButton.isEnabled = presentation.copyText != nil
         output.isSelectable = true
@@ -231,10 +262,10 @@ final class FloatingCapabilityPanels {
 
     func showError(_ message: String, near anchor: CGRect, canRetry: Bool = true) {
         presentation.fail(message)
-        title.stringValue = presentation.isIncomplete ? "Incomplete · " + toolTitle : "Couldn’t complete " + toolTitle
+        title.stringValue = presentation.isIncomplete ? L("Incomplete · %@", toolTitle) : L("Couldn’t complete %@", toolTitle)
         updateText(presentation.text)
-        footer.stringValue = presentation.isIncomplete ? "Incomplete: " + message
-            : canRetry ? "Check MacHelper settings and try again." : "Copy text, then choose the clipboard action."
+        footer.stringValue = presentation.isIncomplete ? L("Incomplete: %@", message)
+            : canRetry ? L("Check MacHelper settings and try again.") : L("Copy text, then choose the clipboard action.")
         footer.toolTip = message
         copyButton.isEnabled = false
         output.isSelectable = false
@@ -273,9 +304,10 @@ final class FloatingCapabilityPanels {
         let button = NSButton(image: NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: toolTitle) ?? NSImage(systemSymbolName: "sparkles", accessibilityDescription: toolTitle)!,
                               target: self, action: #selector(perform))
         button.isBordered = false
+        iconButton = button
         button.contentTintColor = .controlAccentColor
         button.imageScaling = .scaleProportionallyDown
-        button.toolTip = toolTitle + " · selected text"
+        button.toolTip = L("%@ · selected text", toolTitle)
         button.translatesAutoresizingMaskIntoConstraints = false
         background.addSubview(button)
         NSLayoutConstraint.activate([
@@ -292,11 +324,12 @@ final class FloatingCapabilityPanels {
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss result")!,
+        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: L("Dismiss result"))!,
                              target: self, action: #selector(dismiss))
         close.isBordered = false
         close.contentTintColor = .secondaryLabelColor
-        close.toolTip = "Dismiss (Esc)"
+        closeButton = close
+        close.toolTip = L("Dismiss (Esc)")
         let grip = NSImageView()
         grip.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: nil)
         grip.contentTintColor = .tertiaryLabelColor
@@ -306,8 +339,8 @@ final class FloatingCapabilityPanels {
         dragContents.distribution = .fill
         dragContents.translatesAutoresizingMaskIntoConstraints = false
         dragHandle.addSubview(dragContents)
-        dragHandle.toolTip = "Drag to move this panel"
-        dragHandle.setAccessibilityLabel("Move result panel")
+        dragHandle.toolTip = L("Drag to move this panel")
+        dragHandle.setAccessibilityLabel(L("Move result panel"))
         NSLayoutConstraint.activate([
             grip.widthAnchor.constraint(equalToConstant: 12),
             dragContents.leadingAnchor.constraint(equalTo: dragHandle.leadingAnchor),
@@ -347,7 +380,7 @@ final class FloatingCapabilityPanels {
         output.isVerticallyResizable = true
         output.autoresizingMask = [.width]
         output.textContainer?.widthTracksTextView = true
-        output.setAccessibilityLabel("Result text")
+        output.setAccessibilityLabel(L("Result text"))
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
@@ -461,7 +494,7 @@ final class FloatingCapabilityPanels {
         // This is the only clipboard write and requires a deliberate Copy click.
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(resultText, forType: .string)
-        copyButton.title = "Copied"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in self?.copyButton.title = "Copy" }
+        copyButton.title = L("Copied")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in self?.copyButton.title = L("Copy") }
     }
 }
