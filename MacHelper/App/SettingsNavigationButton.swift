@@ -12,6 +12,29 @@ func applyAppLanguageDirection(to view: NSView) {
 }
 
 /// Shared navigation, separate from settings defined by individual extensions.
+private final class SettingsNavigationButtonCell: NSButtonCell {
+    private let iconWidth: CGFloat = 20
+    private let iconSpacing: CGFloat = 4
+
+    private var rightToLeft: Bool { controlView?.userInterfaceLayoutDirection == .rightToLeft }
+
+    override func titleRect(forBounds rect: NSRect) -> NSRect {
+        let original = super.titleRect(forBounds: rect)
+        let reserved = iconWidth + iconSpacing
+        return NSRect(x: rightToLeft ? rect.minX : rect.minX + reserved, y: original.minY,
+                      width: max(0, rect.width - reserved), height: original.height)
+    }
+
+    override func imageRect(forBounds rect: NSRect) -> NSRect {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return .zero }
+        let scale = min(1, iconWidth / image.size.width, rect.height / image.size.height)
+        let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        let slotX = rightToLeft ? rect.maxX - iconWidth : rect.minX
+        return NSRect(x: slotX + (iconWidth - size.width) / 2, y: rect.midY - size.height / 2,
+                      width: size.width, height: size.height)
+    }
+}
+
 @MainActor
 final class SettingsNavigationButton: NSButton {
     var isSelected = false {
@@ -24,6 +47,7 @@ final class SettingsNavigationButton: NSButton {
 
     init(title: String, symbol: String, target: AnyObject, action: Selector) {
         super.init(frame: .zero)
+        cell = SettingsNavigationButtonCell(textCell: title)
         self.title = title
         self.target = target
         self.action = action

@@ -75,7 +75,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "6.3.1", "CFBundleVersion": "631", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.3.2", "CFBundleVersion": "632", "CFBundleIconFile": "AppIcon",
         "CFBundleDevelopmentRegion": "en",
         "CFBundleLocalizations": sorted(path.stem for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")),
         "MacHelperMarketplaceURL": args.marketplace_url,
