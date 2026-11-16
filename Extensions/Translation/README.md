@@ -1,6 +1,6 @@
 # Translation — editable source extension
 
-Translation 4.4 requires MacHelper 4.5 or later for translation, and MacHelper 6.2 or later for localized interface labels. This folder is its complete JavaScript source, manifest, settings schema, prompts, UI translations, and license. It needs no separate app or compiler.
+Translation 4.4.1 requires MacHelper 4.5 or later for translation, and MacHelper 6.2 or later for localized interface labels. This folder is its complete JavaScript source, manifest, settings schema, prompts, UI translations, and license. It needs no separate app or compiler. It requests only selection, AI, and result-panel permissions; the unused clipboard-reading declaration has been removed. Copying a finished result remains an explicit user action.
 
 MacHelper's interface language is chosen under General and is separate from this tool's target language. The extension owns `localizations.json`, which translates its description and settings labels into 13 interface languages. Prompt source files stay exactly as authored; changing the interface language never rewrites prompts or changes the target language.
 

@@ -45,5 +45,5 @@
     }
     return response;
   }
-  globalThis.MessageHelper = Object.freeze({languages, tones, defaults, settings, request, validateText, validateModel});
+  globalThis.MessageHelper = Object.freeze({languages, tones, settings, request, validateText});
 })();

@@ -2,14 +2,12 @@ import Foundation
 import Darwin
 import MacHelper
 
-struct SettingsModelCatalog: Decodable, Sendable {
+struct SettingsModelCatalog: Sendable {
     struct Model: Decodable, Sendable {
         let model: String
         let displayName: String
-        let isDefault: Bool
     }
     let models: [Model]
-    let defaultModel: String?
 }
 
 enum SettingsHostError: LocalizedError {
@@ -54,7 +52,6 @@ enum SettingsHostClient {
         let id: String
         let ok: Bool
         let models: [SettingsModelCatalog.Model]?
-        let defaultModel: String?
         let error: String?
     }
 
@@ -107,7 +104,7 @@ enum SettingsHostClient {
         guard response.id == id else { throw SettingsHostError.invalidResponse }
         guard response.ok else { throw SettingsHostError.host(response.error ?? "The AI service could not be reached.") }
         guard let models = response.models else { throw SettingsHostError.invalidResponse }
-        return SettingsModelCatalog(models: models, defaultModel: response.defaultModel)
+        return SettingsModelCatalog(models: models)
     }
 
     private static func waitForExit(_ process: Process, seconds: TimeInterval) {

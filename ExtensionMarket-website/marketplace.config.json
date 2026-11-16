@@ -3,7 +3,7 @@
   "baseUrl": "https://local-ai-extension.nelson007.com/",
   "sourceUrl": "https://github.com/bosstwobread/LocalAIBaseTools",
   "macHelper": {
-    "version": "6.2.0",
+    "version": "6.2.1",
     "minimumOS": "macOS 14+",
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
@@ -12,7 +12,6 @@
     "Translation": {
       "slug": "translation",
       "category": "Translation",
-      "featured": true,
       "icon": "assets/translation-icon.svg",
       "screenshots": [{
         "src": "assets/translation-preview.svg",
@@ -27,7 +26,6 @@
       "id": "com.localaibasetools.messagehelper-upwork",
       "slug": "messagehelper-upwork",
       "category": "Writing",
-      "featured": false,
       "icon": "assets/messagehelper-icon.svg",
       "screenshots": [{
         "src": "assets/messagehelper-preview.svg",

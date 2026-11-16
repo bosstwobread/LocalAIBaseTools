@@ -33,7 +33,6 @@ private final class NativeHost {
     private let client = AIProviderClient()
     private let settingsStore = HelperSettingsStore()
     private var decoder = NativeFrameDecoder()
-    private var queue: [HelperRequest] = []
     private var activeTask: Task<Void, Never>?
     private var ended = false
     private var exitContinuation: CheckedContinuation<Void, Never>?
@@ -95,11 +94,10 @@ private final class NativeHost {
                 }
                 if request.action == .ping {
                     write(.init(id: request.id))
-                } else if activeTask != nil || !queue.isEmpty {
+                } else if activeTask != nil {
                     write(.init(id: request.id, error: "MacHelper is busy. Wait for the current requests to finish."))
                 } else {
-                    queue.append(request)
-                    startNext()
+                    start(request)
                 }
             }
         } catch {
@@ -108,9 +106,8 @@ private final class NativeHost {
         }
     }
 
-    private func startNext() {
-        guard !ended, activeTask == nil, !queue.isEmpty else { return }
-        let request = queue.removeFirst()
+    private func start(_ request: HelperRequest) {
+        guard !ended, activeTask == nil else { return }
         activeTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -139,7 +136,6 @@ private final class NativeHost {
             }
             await self.client.disconnect()
             self.activeTask = nil
-            self.startNext()
         }
     }
 
@@ -175,7 +171,6 @@ private final class NativeHost {
         guard !ended else { return }
         ended = true
         FileHandle.standardInput.readabilityHandler = nil
-        queue.removeAll()
         activeTask?.cancel()
         Task { [self] in
             await client.disconnect()

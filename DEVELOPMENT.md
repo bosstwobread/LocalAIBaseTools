@@ -4,7 +4,7 @@ For every change, read this file before editing and check it again before callin
 
 Check each item below. If an item does not apply, leave it unchanged and say why when relevant.
 
-- [ ] **Check the impact.** Read [AGENTS.md](AGENTS.md) and identify which parts are affected: MacHelper, extensions, shared APIs, installers, or the marketplace. Keep the same behavior consistent wherever it appears.
+- [ ] **Check the impact.** Read [AGENTS.md](AGENTS.md) and identify which parts are affected: MacHelper, extensions, shared APIs, installers, or the marketplace. Keep the same behavior consistent wherever it appears. Remove proven unused code; preserve published interfaces and necessary compatibility paths.
 - [ ] **Update the explanation.** Update related UI labels/help, [README](README.md), [project design](PROJECT_DESIGN.md), [AI extension guide](AI_EXTENSION_GUIDE.md), detailed `docs/`, SDK examples, and [website](ExtensionMarket-website/README.md) descriptions, instructions, or previews. Removed controls must not remain in current instructions. Change only material affected by the task.
 - [ ] **Keep languages consistent.** For interface text changes, update every supported language catalog and preserve format parameters. Extension labels belong in extension source. Never translate or rewrite user prompts, settings values, model IDs, or selected text just because the interface language changes.
 - [ ] **Check release details.** When preparing a release, keep app/tool versions and website download metadata consistent. Check current-version statements too; minimum supported versions and historical examples have different purposes.

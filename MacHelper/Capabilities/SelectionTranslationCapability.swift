@@ -1,6 +1,5 @@
-import AppKit
+import Foundation
 import MacHelper
-import ApplicationServices
 
 /// Output returned by a source tool. Prompt construction, target language,
 /// provider/model selection, and all editable tool behavior belong to the caller.
@@ -46,20 +45,14 @@ struct CapabilityOperationGate {
 /// asynchronous operation and can be reloaded without rebuilding this module.
 @MainActor
 public final class SelectionTranslationCapability {
-    public var onPerform: (@MainActor (String) async throws -> CapabilityTranslationResult)?
-    public var onPerformStreaming: (@MainActor (String, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult)?
     public var onPerformSelectionStreaming: (@MainActor (CapabilitySelectionInput, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult)?
-    public var onPresentOverlay: (() -> Void)?
     public var onStatusChange: (() -> Void)?
     public private(set) var isRunning = false
-    public var accessibilityGranted: Bool { AXIsProcessTrusted() }
-    public var isShowingOverlay: Bool { panels.isVisible }
 
     private let monitor = SelectionMonitor()
     private let panels: FloatingCapabilityPanels
     private var state = SelectionState()
     private var operationTask: Task<Void, Never>?
-    private var manualSelection = false
     private var operationGate = CapabilityOperationGate()
 
     public init(title: String, systemSymbolName: String = "character.bubble") {
@@ -73,7 +66,6 @@ public final class SelectionTranslationCapability {
         monitor.onFrontApplicationChange = { [weak self] in self?.clearSelection() }
         monitor.onSelectionGesture = { [weak self] selecting in
             guard let self, selecting else { return }
-            self.manualSelection = false
             self.state.rearmAfterSelectionGesture()
         }
         monitor.onPermissionChange = { [weak self] _ in self?.onStatusChange?() }
@@ -93,44 +85,16 @@ public final class SelectionTranslationCapability {
         onStatusChange?()
     }
 
-    /// The source tool supplies demo text. No selection permission is needed.
-    public func runDemo(text: String) {
-        guard isRunning else { return }
-        onPresentOverlay?()
-        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1000, height: 800)
-        useManualSelection(text, at: CGPoint(x: screen.midX - 120, y: screen.midY))
-        if let selection = state.selection { panels.showIcon(near: selection.bounds) }
-    }
-
-    /// Reads the current pasteboard only on an explicit host/menu/button action.
-    /// It never synthesizes Copy, changes a draft, or automatically writes data.
-    public func translateClipboard() {
-        guard isRunning else { return }
-        onPresentOverlay?()
-        let point = NSEvent.mouseLocation
-        guard let text = NSPasteboard.general.string(forType: .string),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            clearSelection()
-            manualSelection = true
-            panels.showError(L("Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again."),
-                             near: CGRect(x: point.x, y: point.y, width: 1, height: 20), canRetry: false)
-            return
-        }
-        useManualSelection(text, at: point)
-        performSelection()
-    }
-
     public func dismiss() {
         operationGate.invalidate()
         operationTask?.cancel()
         operationTask = nil
         state.dismiss()
-        manualSelection = false
         panels.hide()
     }
 
     private func receive(_ value: SelectionReadResult) {
-        guard isRunning, !manualSelection else { return }
+        guard isRunning else { return }
         let selection: TextSelection?
         switch value {
         case .selection(let found): selection = found
@@ -152,8 +116,7 @@ public final class SelectionTranslationCapability {
         operationTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let input = self.onPerformSelectionStreaming == nil ? CapabilitySelectionInput(text: selection.text)
-                    : await self.monitor.input(for: selection)
+                let input = await self.monitor.input(for: selection)
                 guard self.operationGate.accepts(ticket, selection: self.state,
                                                 running: self.isRunning, cancelled: Task.isCancelled) else { return }
                 let progress: @MainActor (CapabilityTranslationResult) -> Void = { [weak self] progress in
@@ -165,10 +128,6 @@ public final class SelectionTranslationCapability {
                 let result: CapabilityTranslationResult
                 if let streaming = self.onPerformSelectionStreaming {
                     result = try await streaming(input, progress)
-                } else if let streaming = self.onPerformStreaming {
-                    result = try await streaming(selection.text, progress)
-                } else if let perform = self.onPerform {
-                    result = try await perform(selection.text)
                 } else {
                     throw CapabilityError.invalid(L("This tool has no action configured. Reload its source extension and try again."))
                 }
@@ -196,13 +155,4 @@ public final class SelectionTranslationCapability {
         state.observe(nil)
     }
 
-    private func useManualSelection(_ text: String, at point: CGPoint) {
-        clearSelection()
-        manualSelection = true
-        // Demo/explicit clipboard commands are deliberate input actions too.
-        state.rearmAfterSelectionGesture()
-        state.observe(TextSelection(text: text, sourcePID: ProcessInfo.processInfo.processIdentifier,
-                                    rangeLocation: -1, rangeLength: text.utf16.count,
-                                    bounds: CGRect(x: point.x, y: point.y, width: 1, height: 20)))
-    }
 }

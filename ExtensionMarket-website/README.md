@@ -34,7 +34,8 @@ with Chrome/Edge Developer mode installation instructions.
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
   while the current catalog lists only the latest versions. This includes the
-  original Translation 4.1.0, 4.2.0, and 4.3.0 source/ZIP inventories. Translation 4.1.0's
+  original Translation 4.1.0, 4.2.0, 4.3.0, and 4.4.0 source/ZIP inventories and the
+  MessageHelper-Upwork 1.3.0 ZIP. Translation 4.1.0's
   retained ZIP SHA-256 is `3f2f881578751ddcf445fc868212db96819c068369d786c29f72acd3c602be75`.
 - `build.py`: discovers actual extension manifests, builds the source catalog,
   complete source ZIPs, and the prebuilt MacHelper app ZIP in `dist/`. Its explicit

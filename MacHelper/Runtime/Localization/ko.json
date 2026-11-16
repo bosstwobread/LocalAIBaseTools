@@ -57,7 +57,6 @@
   "Connection error: %@": "연결 오류: %@",
   "Copied": "복사됨",
   "Copy": "복사",
-  "Copy text, then choose the clipboard action.": "텍스트를 복사한 다음 클립보드 작업을 선택하세요.",
   "Could not open source: %@": "소스를 열지 못했습니다: %@",
   "Couldn’t complete %@": "%@ 완료 실패",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "동일한 컨트롤로 JavaScript와 네이티브 Swift 도구를 만들거나 수정하세요. AI 가이드를 참조하거나 소스 폴더를 설치하고, 소스 편집으로 설치된 도구를 여세요.",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "언어, 시작 및 백그라운드 동작입니다.",
   "Launch MacHelper at login": "로그인 시 MacHelper 실행",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "로그인 시 실행이 아직 설정되지 않았습니다. 활성화하여 MacHelper를 등록하세요.",
+  "Legacy clipboard declaration (no shared clipboard reader)": "이전 클립보드 권한 선언(공유 클립보드 읽기 기능 없음)",
   "Load this extension's validated source before editing a prompt.": "프롬프트를 편집하기 전에 검증된 확장 프로그램 소스를 로드하세요.",
   "Loading catalog…": "카탈로그 로드 중…",
   "Loading models…": "모델 로드 중…",
@@ -157,7 +157,6 @@
   "Paste": "붙여넣기",
   "Provider and model are shared across your tools.": "공급자와 모델은 모든 도구에서 공유됩니다.",
   "Quit MacHelper": "MacHelper 종료",
-  "Read clipboard text when you request it": "요청할 때 클립보드 텍스트 읽기",
   "Read selected text across apps": "다른 앱에서 선택한 텍스트 읽기",
   "Reading saved prompt…": "저장된 프롬프트 읽는 중…",
   "Refresh": "새로 고침",
@@ -242,6 +241,5 @@
   "Validating source…": "소스 검증 중…",
   "Version %@": "버전 %@",
   "Working…": "처리 중…",
-  "Working… · %@": "처리 중… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "클립보드에 텍스트가 없습니다. 직접 텍스트를 복사한 후 클립보드 작업을 다시 선택하세요."
+  "Working… · %@": "처리 중… · %@"
 }

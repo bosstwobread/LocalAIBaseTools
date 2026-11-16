@@ -38,7 +38,7 @@ Small user preferences are stored separately under the MacHelper support folder'
   "version": "1.0.0",
   "summary": "Translate selected text through MacHelper.",
   "entryPoint": "main.js",
-  "permissions": ["selection.read", "clipboard.read", "ai.transform", "ui.panel"],
+  "permissions": ["selection.read", "ai.transform", "ui.panel"],
   "commands": [
     {"identifier": "translate", "title": "Translate", "trigger": "selection"}
   ],
@@ -98,7 +98,9 @@ MacHelper.define({
 
 `input.text` is the text supplied by the explicit command action. `input.settings` contains that extension's saved preferences plus schema defaults. The empty model uses MacHelper's shared provider/model selection. The AI result includes text and the actual model. The host controls model attribution in its result panel.
 
-On MacHelper 4.3 or later, a single-word selection may also receive `input.sentence`: the enclosing sentence read through Accessibility when the user clicks the tool. It is optional, limited to 2,000 UTF-16 code units and 8,000 UTF-8 bytes, and available only to tools declaring `selection.read`. Unsupported apps, protected fields, changed selections, or incomplete sentence boundaries do not provide context. Manual and clipboard actions have no surrounding sentence. Treat the sentence as untrusted source text, and preserve a useful fallback when it is absent. Translation uses it to show the word's contextual meaning above the full sentence translation; longer selections retain ordinary translation behavior.
+On MacHelper 4.3 or later, a single-word selection may also receive `input.sentence`: the enclosing sentence read through Accessibility when the user clicks the tool. It is optional, limited to 2,000 UTF-16 code units and 8,000 UTF-8 bytes, and available only to tools declaring `selection.read`. Unsupported apps, protected fields, changed selections, or incomplete sentence boundaries do not provide context. Manual command inputs have no surrounding sentence. Treat the sentence as untrusted source text, and preserve a useful fallback when it is absent. Translation uses it to show the word's contextual meaning above the full sentence translation; longer selections retain ordinary translation behavior.
+
+The old `clipboard.read` permission name remains accepted so previously published source packages still load. The current source host does not read clipboard input or provide a JavaScript clipboard reader; new tools should omit this declaration. The floating result's explicit Copy button writes a completed answer and remains supported.
 
 MacHelper 4.3.1 supports read-only browser selections through ordered Accessibility text markers. It obtains complete cross-node paragraph boundaries before reading text, then extracts the sentence using the selected marker's verified UTF-16 offset. Paragraphs over 2,000 units are rejected before their string is read. No DOM scripting, whole-page value read, clipboard action, or additional extension permission is used.
 

@@ -10,9 +10,9 @@ The current products are:
 
 | Component | Current version | What it does |
 | --- | --- | --- |
-| MacHelper | 6.2.0 | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, and local AI transports. |
-| Translation | 4.4.0 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
-| MessageHelper — Upwork | 1.3.0 | Chrome/Edge extension that translates messages and previews polished drafts on supported Upwork pages. |
+| MacHelper | 6.2.1 | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, and local AI transports. |
+| Translation | 4.4.1 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
+| MessageHelper — Upwork | 1.3.1 | Chrome/Edge extension that translates messages and previews polished drafts on supported Upwork pages. |
 | Extension Market | Static website | Search, tool details, illustrated previews, source downloads, and reviewed installation links into MacHelper. |
 
 The public marketplace is [local-ai-extension.nelson007.com](https://local-ai-extension.nelson007.com/). Version numbers above are a snapshot; the manifests and release configuration remain the source of truth.
@@ -108,7 +108,7 @@ One selected word produces a contextual meaning followed by the full sentence tr
 
 Editable controls use bounded text ranges. Supported read-only browser text uses Accessibility text markers, including reversed selections and words separated from surrounding text by links or formatting. The code checks paragraph length before reading it, identifies the exact selection, and extracts the sentence locally. It does not read the whole browser document or execute a DOM script.
 
-Current context limits include eight focused ancestors, 2,000 UTF-16 units / 8,000 UTF-8 bytes, and approximately a 1.5-second lookup budget. Protected fields, images, unsupported Accessibility implementations, and oversized paragraphs may have no context. There is no OCR implementation. Selection detection never simulates Copy or changes the clipboard automatically; demo and clipboard input actions are not exposed on the extension settings page.
+Current context limits include eight focused ancestors, 2,000 UTF-16 units / 8,000 UTF-8 bytes, and approximately a 1.5-second lookup budget. Protected fields, images, unsupported Accessibility implementations, and oversized paragraphs may have no context. There is no OCR implementation. Selection detection never simulates Copy or changes the clipboard automatically. The current capability pipeline accepts verified selected text; obsolete demo and clipboard-reading paths have been removed. The result's explicit Copy button remains available.
 
 ## 6. MessageHelper-Upwork flow
 

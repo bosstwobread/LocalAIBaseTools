@@ -57,7 +57,6 @@
   "Connection error: %@": "連線錯誤：%@",
   "Copied": "已複製",
   "Copy": "複製",
-  "Copy text, then choose the clipboard action.": "請先複製文字，再選擇剪貼簿操作。",
   "Could not open source: %@": "無法開啟原始碼：%@",
   "Couldn’t complete %@": "無法完成 %@",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "使用相同控制項建立或自訂 JavaScript 和原生 Swift 工具。可查閱 AI 指南，透過「安裝原始碼」匯入資料夾，或用「編輯原始碼」開啟已安裝工具。",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "語言、啟動和背景執行方式。",
   "Launch MacHelper at login": "登入時啟動 MacHelper",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "尚未設定登入時啟動。啟用後將註冊 MacHelper。",
+  "Legacy clipboard declaration (no shared clipboard reader)": "舊版剪貼簿權限宣告（不提供共用剪貼簿讀取功能）",
   "Load this extension's validated source before editing a prompt.": "編輯提示詞前，請先載入此擴充功能已驗證的原始碼。",
   "Loading catalog…": "正在載入目錄…",
   "Loading models…": "正在載入模型…",
@@ -157,7 +157,6 @@
   "Paste": "貼上",
   "Provider and model are shared across your tools.": "服務提供者和模型由各工具共用。",
   "Quit MacHelper": "結束 MacHelper",
-  "Read clipboard text when you request it": "在您要求時讀取剪貼簿文字",
   "Read selected text across apps": "讀取各 App 中的選取文字",
   "Reading saved prompt…": "正在讀取已儲存提示詞…",
   "Refresh": "重新整理",
@@ -242,6 +241,5 @@
   "Validating source…": "正在驗證原始碼…",
   "Version %@": "版本 %@",
   "Working…": "處理中…",
-  "Working… · %@": "處理中… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "剪貼簿中沒有文字。請自行複製文字，然後再次選擇剪貼簿操作。"
+  "Working… · %@": "處理中… · %@"
 }

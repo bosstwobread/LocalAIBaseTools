@@ -57,7 +57,6 @@
   "Connection error: %@": "Verbindungsfehler: %@",
   "Copied": "Kopiert",
   "Copy": "Kopieren",
-  "Copy text, then choose the clipboard action.": "Kopiere Text und wähle dann die Zwischenablage-Aktion.",
   "Could not open source: %@": "Quellcode konnte nicht geöffnet werden: %@",
   "Couldn’t complete %@": "%@ konnte nicht abgeschlossen werden",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "Erstelle oder passe JavaScript- und Swift-Tools mit denselben Bedienelementen an. Nutze den KI-Leitfaden, installiere einen Quellordner oder öffne ein installiertes Tool mit Quellcode bearbeiten.",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "Sprache, Start und Hintergrundverhalten.",
   "Launch MacHelper at login": "MacHelper bei Anmeldung starten",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "Der Anmeldestart ist noch nicht eingerichtet. Aktiviere ihn, um MacHelper zu registrieren.",
+  "Legacy clipboard declaration (no shared clipboard reader)": "Alte Zwischenablage-Berechtigung (kein gemeinsamer Lesezugriff)",
   "Load this extension's validated source before editing a prompt.": "Lade den geprüften Erweiterungsquellcode, bevor du einen Prompt bearbeitest.",
   "Loading catalog…": "Katalog wird geladen…",
   "Loading models…": "Modelle werden geladen…",
@@ -157,7 +157,6 @@
   "Paste": "Einfügen",
   "Provider and model are shared across your tools.": "Anbieter und Modell werden von allen Tools gemeinsam verwendet.",
   "Quit MacHelper": "MacHelper beenden",
-  "Read clipboard text when you request it": "Zwischenablage auf deine Anfrage lesen",
   "Read selected text across apps": "Markierten Text in anderen Apps lesen",
   "Reading saved prompt…": "Gespeicherter Prompt wird gelesen…",
   "Refresh": "Aktualisieren",
@@ -242,6 +241,5 @@
   "Validating source…": "Quellcode wird geprüft…",
   "Version %@": "Version %@",
   "Working…": "Wird verarbeitet…",
-  "Working… · %@": "Wird verarbeitet… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "Die Zwischenablage enthält keinen Text. Kopiere selbst Text und wähle die Aktion erneut."
+  "Working… · %@": "Wird verarbeitet… · %@"
 }

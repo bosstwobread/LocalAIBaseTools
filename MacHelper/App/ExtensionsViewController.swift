@@ -327,8 +327,6 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         refreshDisplay()
     }
 
-    var selectedToolID: String? { selectedID }
-
     func refreshDisplay() {
         guard isViewLoaded else { return }
         let tools = manager.tools

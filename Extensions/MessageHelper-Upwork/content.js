@@ -389,6 +389,6 @@
     attributes: true, attributeFilter: ['contenteditable', 'data-room-id', 'hidden', 'aria-hidden', 'class', 'style', 'disabled', 'readonly']});
   window.addEventListener('popstate', schedule);
   window.addEventListener('hashchange', schedule);
-  globalThis.MessageHelperContent = Object.freeze({scan, readDraft, conversationKey});
+  globalThis.MessageHelperContent = Object.freeze({scan});
   scan();
 })();

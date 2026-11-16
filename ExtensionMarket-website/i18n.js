@@ -62,16 +62,16 @@
     for (const [element, attribute, original] of attributes) if (element.isConnected) element.setAttribute(attribute, t(original));
     select.value = locale;
   }
-  function setLocale(value, persist = true) {
+  function setLocale(value) {
     const next = canonical(value);
     if (!next) return false;
     locale = next;
-    if (persist) { try { localStorage.setItem(storageKey, locale); } catch { /* Choice still applies for this page. */ } }
+    try { localStorage.setItem(storageKey, locale); } catch { /* Choice still applies for this page. */ }
     apply();
     window.dispatchEvent(new CustomEvent('market-language-change', { detail: { locale } }));
     return true;
   }
   select.addEventListener('change', () => setLocale(select.value));
-  window.MarketI18n = Object.freeze({ t, setLocale, canonical, languages: Object.freeze(languages.map(item => Object.freeze(item))), get locale() { return locale; } });
+  window.MarketI18n = Object.freeze({ t, setLocale, get locale() { return locale; } });
   apply();
 })();

@@ -44,7 +44,6 @@ final class StreamingStateTests: XCTestCase {
         state.fail("Connection lost")
         XCTAssertEqual(state.text, "unfinished sentence")
         XCTAssertTrue(state.isIncomplete)
-        XCTAssertEqual(state.error, "Connection lost")
         XCTAssertNil(state.copyText)
         XCTAssertEqual(state.phase, .failed)
         XCTAssertFalse(state.progress(.init(text: "late output")))
@@ -58,7 +57,6 @@ final class StreamingStateTests: XCTestCase {
         XCTAssertFalse(state.isIncomplete)
         state.begin()
         XCTAssertEqual(state.text, "")
-        XCTAssertNil(state.error)
         XCTAssertNil(state.model)
         XCTAssertNil(state.copyText)
     }

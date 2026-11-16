@@ -57,7 +57,6 @@
   "Connection error: %@": "خطأ في الاتصال: %@",
   "Copied": "تم النسخ",
   "Copy": "نسخ",
-  "Copy text, then choose the clipboard action.": "انسخ النص، ثم اختر إجراء الحافظة.",
   "Could not open source: %@": "تعذّر فتح المصدر: %@",
   "Couldn’t complete %@": "تعذّر إكمال %@",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "أنشئ أو خصّص أدوات JavaScript وSwift بالعناصر نفسها. استخدم دليل الذكاء الاصطناعي، أو استورد مجلد مصدر، أو افتح أداة مثبّتة عبر تحرير المصدر.",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "اللغة وبدء التشغيل والعمل في الخلفية.",
   "Launch MacHelper at login": "تشغيل MacHelper عند تسجيل الدخول",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "لم يُعدّ التشغيل عند تسجيل الدخول بعد. فعّله لتسجيل MacHelper.",
+  "Legacy clipboard declaration (no shared clipboard reader)": "إذن حافظة قديم (لا تتوفر وظيفة مشتركة لقراءة الحافظة)",
   "Load this extension's validated source before editing a prompt.": "حمّل مصدر الإضافة المتحقق منه قبل تحرير الموجّه.",
   "Loading catalog…": "جارٍ تحميل الكتالوج…",
   "Loading models…": "جارٍ تحميل النماذج…",
@@ -157,7 +157,6 @@
   "Paste": "لصق",
   "Provider and model are shared across your tools.": "المزوّد والنموذج مشتركان بين أدواتك.",
   "Quit MacHelper": "إنهاء MacHelper",
-  "Read clipboard text when you request it": "قراءة نص الحافظة عند طلبك",
   "Read selected text across apps": "قراءة النص المحدد في التطبيقات",
   "Reading saved prompt…": "جارٍ قراءة الموجّه المحفوظ…",
   "Refresh": "تحديث",
@@ -242,6 +241,5 @@
   "Validating source…": "جارٍ التحقق من المصدر…",
   "Version %@": "الإصدار %@",
   "Working…": "جارٍ العمل…",
-  "Working… · %@": "جارٍ العمل… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "لا تحتوي الحافظة على نص. انسخ النص بنفسك ثم اختر إجراء الحافظة مجددًا."
+  "Working… · %@": "جارٍ العمل… · %@"
 }

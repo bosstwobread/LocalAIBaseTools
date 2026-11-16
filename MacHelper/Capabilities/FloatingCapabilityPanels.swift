@@ -8,7 +8,6 @@ struct CapabilityPresentationState {
     private(set) var text = ""
     private(set) var model: String?
     private(set) var title: String?
-    private(set) var error: String?
     private(set) var isIncomplete = false
     var copyText: String? { phase == .complete && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : nil }
 
@@ -31,7 +30,6 @@ struct CapabilityPresentationState {
         text = result.text
         model = result.model ?? streamModel
         title = result.title ?? streamTitle
-        error = nil
         isIncomplete = false
     }
 
@@ -39,7 +37,6 @@ struct CapabilityPresentationState {
         isIncomplete = phase == .working && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if !isIncomplete { text = message; model = nil; title = nil }
         phase = .failed
-        error = message
     }
 }
 
@@ -195,7 +192,6 @@ final class FloatingCapabilityPanels {
         if let content = resultPanel.contentView { applyDirection(content) }
     }
 
-    var isVisible: Bool { iconPanel.isVisible || resultPanel.isVisible }
     var isDraggingResultPanel: Bool { placement.isDragging }
     /// Read-only diagnostic geometry for the explicit synthetic fixture.
     var resultFrame: CGRect { resultPanel.frame }
@@ -260,16 +256,16 @@ final class FloatingCapabilityPanels {
         presentResult(near: anchor)
     }
 
-    func showError(_ message: String, near anchor: CGRect, canRetry: Bool = true) {
+    func showError(_ message: String, near anchor: CGRect) {
         presentation.fail(message)
         title.stringValue = presentation.isIncomplete ? L("Incomplete · %@", toolTitle) : L("Couldn’t complete %@", toolTitle)
         updateText(presentation.text)
         footer.stringValue = presentation.isIncomplete ? L("Incomplete: %@", message)
-            : canRetry ? L("Check MacHelper settings and try again.") : L("Copy text, then choose the clipboard action.")
+            : L("Check MacHelper settings and try again.")
         footer.toolTip = message
         copyButton.isEnabled = false
         output.isSelectable = false
-        retryButton.isHidden = !canRetry
+        retryButton.isHidden = false
         presentResult(near: anchor)
     }
 

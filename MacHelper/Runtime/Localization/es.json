@@ -57,7 +57,6 @@
   "Connection error: %@": "Error de conexión: %@",
   "Copied": "Copiado",
   "Copy": "Copiar",
-  "Copy text, then choose the clipboard action.": "Copia el texto y elige la acción del portapapeles.",
   "Could not open source: %@": "No se pudo abrir el código: %@",
   "Couldn’t complete %@": "No se pudo completar %@",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "Crea o personaliza herramientas JavaScript y Swift con los mismos controles. Consulta la guía de IA, importa una carpeta con Instalar código fuente o abre una herramienta con Editar código.",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "Idioma, inicio y funcionamiento en segundo plano.",
   "Launch MacHelper at login": "Abrir MacHelper al iniciar sesión",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "El inicio automático aún no está configurado. Actívalo para registrar MacHelper.",
+  "Legacy clipboard declaration (no shared clipboard reader)": "Permiso de portapapeles heredado (sin lector de portapapeles compartido)",
   "Load this extension's validated source before editing a prompt.": "Carga el código validado de la extensión antes de editar un prompt.",
   "Loading catalog…": "Cargando catálogo…",
   "Loading models…": "Cargando modelos…",
@@ -157,7 +157,6 @@
   "Paste": "Pegar",
   "Provider and model are shared across your tools.": "El proveedor y el modelo se comparten entre tus herramientas.",
   "Quit MacHelper": "Salir de MacHelper",
-  "Read clipboard text when you request it": "Leer el portapapeles cuando lo solicites",
   "Read selected text across apps": "Leer texto seleccionado en otras apps",
   "Reading saved prompt…": "Leyendo el prompt guardado…",
   "Refresh": "Actualizar",
@@ -242,6 +241,5 @@
   "Validating source…": "Validando código…",
   "Version %@": "Versión %@",
   "Working…": "Procesando…",
-  "Working… · %@": "Procesando… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "El portapapeles no contiene texto. Copia el texto y vuelve a elegir la acción del portapapeles."
+  "Working… · %@": "Procesando… · %@"
 }

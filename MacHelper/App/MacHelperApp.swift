@@ -90,8 +90,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             helperExecutableURL: bin.appendingPathComponent("mac-helper-host"),
             bundledCatalogURL: Bundle.main.resourceURL!.appendingPathComponent("SourceCatalog/extensions.json"),
             bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds/Translation"))
-        sourceManager.onOpenAISettings = { [weak self] in self?.showSettings(tab: 0) }
-        sourceManager.onHideSettings = { [weak self] in self?.window?.orderOut(nil) }
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
@@ -397,7 +395,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private func reviewMarketplaceInstall(_ preview: MarketplaceInstallPreview) -> Bool {
         let alert = NSAlert()
         alert.messageText = L("Install %@?", preview.manifest.displayName)
-        let permissionNames = ["selection.read": "Read selected text across apps", "clipboard.read": "Read clipboard text when you request it",
+        let permissionNames = ["selection.read": "Read selected text across apps", "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
                                "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
                                "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
         let permissions = preview.manifest.permissions.map { "• " + L(permissionNames[$0] ?? $0) }.joined(separator: "\n")

@@ -56,6 +56,8 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
                 throw SourcePackageError.invalid("The extension UI translation catalog must be a JSON resource.")
             }
         }
+        // Accept old immutable packages' clipboard declaration for compatibility;
+        // the current source-worker API does not provide a clipboard reader.
         var allowed: Set<String> = ["selection.read", "clipboard.read", "ai.transform", "ui.panel"]
         if runtime == "native" { allowed.insert("native.execute") }
         guard permissions.count <= allowed.count, Set(permissions).count == permissions.count,

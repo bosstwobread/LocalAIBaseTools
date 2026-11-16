@@ -57,7 +57,6 @@
   "Connection error: %@": "Erro de ligação: %@",
   "Copied": "Copiado",
   "Copy": "Copiar",
-  "Copy text, then choose the clipboard action.": "Copie o texto e escolha a ação da área de transferência.",
   "Could not open source: %@": "Não foi possível abrir o código: %@",
   "Couldn’t complete %@": "Não foi possível concluir %@",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "Crie ou personalize ferramentas JavaScript e Swift com os mesmos controlos. Use o guia de IA, importe uma pasta com Instalar código-fonte ou abra uma ferramenta com Editar código.",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "Idioma, arranque e funcionamento em segundo plano.",
   "Launch MacHelper at login": "Abrir MacHelper ao iniciar sessão",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "O arranque ao entrar ainda não está configurado. Ative-o para registar o MacHelper.",
+  "Legacy clipboard declaration (no shared clipboard reader)": "Permissão antiga da área de transferência (sem leitor compartilhado)",
   "Load this extension's validated source before editing a prompt.": "Carregue o código validado da extensão antes de editar um prompt.",
   "Loading catalog…": "A carregar catálogo…",
   "Loading models…": "A carregar modelos…",
@@ -157,7 +157,6 @@
   "Paste": "Colar",
   "Provider and model are shared across your tools.": "O fornecedor e o modelo são partilhados pelas ferramentas.",
   "Quit MacHelper": "Sair do MacHelper",
-  "Read clipboard text when you request it": "Ler a área de transferência quando solicitado",
   "Read selected text across apps": "Ler texto selecionado noutras apps",
   "Reading saved prompt…": "A ler o prompt guardado…",
   "Refresh": "Atualizar",
@@ -242,6 +241,5 @@
   "Validating source…": "A validar código…",
   "Version %@": "Versão %@",
   "Working…": "A processar…",
-  "Working… · %@": "A processar… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "A área de transferência não contém texto. Copie texto e escolha a ação novamente."
+  "Working… · %@": "A processar… · %@"
 }

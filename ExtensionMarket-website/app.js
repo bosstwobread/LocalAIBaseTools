@@ -5,7 +5,7 @@
   const base = new URL('./', document.baseURI);
   const $ = selector => document.querySelector(selector);
   const dialog = $('#tool-dialog');
-  const state = { data: null, tools: [], loading: false, pendingTab: null, activeSlug: null, returnFocus: null, previousHash: '#browse', activeTab: 'overview' };
+  const state = { data: null, tools: [], loading: false, pendingTab: null, activeSlug: null, returnFocus: null, activeTab: 'overview' };
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   const h = (tag, attrs = {}, ...children) => {
     const node = document.createElement(tag);
@@ -149,7 +149,6 @@
     const tool = state.tools.find(item => item.slug === slug);
     if (!dialog.open) {
       state.returnFocus = document.activeElement;
-      state.previousHash = '#browse';
     }
     state.activeSlug = slug;
     const close = h('button', { class: 'dialog-close', type: 'button', 'aria-label': t("Close details") }, '×');
@@ -211,7 +210,7 @@
     return h('div', { class: 'detail-grid' }, main, side);
   }
   function permissionLabel(value) {
-    return ({ 'selection.read': t("Read text you select through macOS Accessibility."), 'clipboard.read': t("Read clipboard text only when you choose the clipboard action."), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
+    return ({ 'selection.read': t("Read text you select through macOS Accessibility."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
   }
   function installContent(tool) {
     const sourceTool = tool.kind === 'mac-source';
@@ -288,7 +287,7 @@
   dialog.addEventListener('close', () => {
     document.body.classList.remove('modal-open');
     state.activeSlug = null;
-    if (location.hash.startsWith('#extension/')) history.replaceState(null, '', state.previousHash);
+    if (location.hash.startsWith('#extension/')) history.replaceState(null, '', '#browse');
     if (state.returnFocus?.isConnected) state.returnFocus.focus({ preventScroll: true });
   });
   dialog.addEventListener('click', event => {

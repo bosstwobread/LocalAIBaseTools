@@ -23,8 +23,6 @@ struct SourceToolInfo {
 final class SourceExtensionManager {
     static let translationID = "com.localaibasetools.translation"
     var onChange: (() -> Void)?
-    var onOpenAISettings: (() -> Void)?
-    var onHideSettings: (() -> Void)?
     var onApproveNativeExecution: ((SourceExtensionManifest) -> Bool)?
     var accessibilityGranted: Bool { AXIsProcessTrusted() }
     private let store: SourcePackageStore
@@ -235,7 +233,6 @@ final class SourceExtensionManager {
         guard let snapshot = try? store.snapshot(for: id), snapshot.manifest.runtime == "native" else { return false }
         return !(state.permissions[id] ?? []).contains("native.execute")
     }
-    func openAISettings() { onOpenAISettings?() }
 
     func updateSetting(_ key: String, value: Any, for id: String) async throws {
         guard !shuttingDown else { throw CancellationError() }
@@ -437,19 +434,10 @@ final class SourceExtensionManager {
             if pending[id] === worker { pending.removeValue(forKey: id) }
             state.enabled[id] = true
             if approving { state.permissions[id] = snapshot.manifest.permissions }
-            capability.onPerform = { [weak self] text in
-                guard let self else { throw CancellationError() }
-                return try await self.performCommand(for: id, text: text)
-            }
-            capability.onPerformStreaming = { [weak self] text, onProgress in
-                guard let self else { throw CancellationError() }
-                return try await self.performCommand(for: id, text: text, onProgress: onProgress)
-            }
             capability.onPerformSelectionStreaming = { [weak self] input, onProgress in
                 guard let self else { throw CancellationError() }
                 return try await self.performCommand(for: id, text: input.text, sentence: input.sentence, onProgress: onProgress)
             }
-            capability.onPresentOverlay = { [weak self] in self?.onHideSettings?() }
             capability.onStatusChange = { [weak self] in self?.notify() }
             if shouldMonitor(snapshot) { capability.start() }
             if let old { await old.worker.stop() }
@@ -662,16 +650,10 @@ final class SourceExtensionManager {
         active[id] = Running(snapshot: snapshot, worker: worker, gate: gate, capability: capability, schema: schema, settings: values)
         preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
         if pending[id] === worker { pending.removeValue(forKey: id) }
-        capability.onPerform = { [weak self] text in guard let self else { throw CancellationError() }; return try await self.performCommand(for: id, text: text) }
-        capability.onPerformStreaming = { [weak self] text, onProgress in
-            guard let self else { throw CancellationError() }
-            return try await self.performCommand(for: id, text: text, onProgress: onProgress)
-        }
         capability.onPerformSelectionStreaming = { [weak self] input, onProgress in
             guard let self else { throw CancellationError() }
             return try await self.performCommand(for: id, text: input.text, sentence: input.sentence, onProgress: onProgress)
         }
-        capability.onPresentOverlay = { [weak self] in self?.onHideSettings?() }
         if shouldMonitor(snapshot) { capability.start() }
         statuses[id] = "Running the last working version while local edits are invalid."
         watch(id)

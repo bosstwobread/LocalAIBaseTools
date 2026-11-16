@@ -57,7 +57,6 @@
   "Connection error: %@": "कनेक्शन त्रुटि: %@",
   "Copied": "कॉपी किया गया",
   "Copy": "कॉपी करें",
-  "Copy text, then choose the clipboard action.": "पाठ कॉपी करें, फिर क्लिपबोर्ड कार्रवाई चुनें।",
   "Could not open source: %@": "स्रोत नहीं खुल सका: %@",
   "Couldn’t complete %@": "%@ पूरा नहीं हो सका",
   "Create or customize JavaScript and native Swift tools with the same controls. Use the AI guide, import a source folder with Install Source, or open an installed tool with Edit Source.": "समान नियंत्रणों से JavaScript और नेटिव Swift टूल बनाएँ या बदलें। AI गाइड पढ़ें, स्रोत फ़ोल्डर स्थापित करें या स्रोत संपादित करें से स्थापित टूल खोलें।",
@@ -120,6 +119,7 @@
   "Language, startup, and background behavior.": "भाषा, स्टार्टअप और पृष्ठभूमि का व्यवहार।",
   "Launch MacHelper at login": "लॉगिन पर MacHelper शुरू करें",
   "Launch at login is not set up yet. Enable it to register MacHelper.": "लॉगिन पर शुरू होना अभी सेट नहीं है। MacHelper पंजीकृत करने के लिए इसे सक्षम करें।",
+  "Legacy clipboard declaration (no shared clipboard reader)": "पुरानी क्लिपबोर्ड अनुमति (साझा क्लिपबोर्ड पढ़ने की सुविधा नहीं)",
   "Load this extension's validated source before editing a prompt.": "प्रॉम्प्ट संपादित करने से पहले सत्यापित एक्सटेंशन स्रोत लोड करें।",
   "Loading catalog…": "कैटलॉग लोड हो रहा है…",
   "Loading models…": "मॉडल लोड हो रहे हैं…",
@@ -157,7 +157,6 @@
   "Paste": "चिपकाएँ",
   "Provider and model are shared across your tools.": "प्रदाता और मॉडल आपके सभी टूल में साझा हैं।",
   "Quit MacHelper": "MacHelper से बाहर निकलें",
-  "Read clipboard text when you request it": "आपके अनुरोध पर क्लिपबोर्ड का पाठ पढ़ना",
   "Read selected text across apps": "अन्य ऐप में चयनित पाठ पढ़ना",
   "Reading saved prompt…": "सहेजा गया प्रॉम्प्ट पढ़ा जा रहा है…",
   "Refresh": "रीफ़्रेश करें",
@@ -242,6 +241,5 @@
   "Validating source…": "स्रोत की जाँच हो रही है…",
   "Version %@": "संस्करण %@",
   "Working…": "प्रक्रिया जारी है…",
-  "Working… · %@": "प्रक्रिया जारी है… · %@",
-  "Your clipboard does not contain text. Copy text yourself, then choose the clipboard action again.": "क्लिपबोर्ड में पाठ नहीं है। स्वयं पाठ कॉपी करें, फिर क्लिपबोर्ड कार्रवाई दोबारा चुनें।"
+  "Working… · %@": "प्रक्रिया जारी है… · %@"
 }

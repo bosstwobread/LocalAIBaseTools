@@ -288,7 +288,7 @@ def build(output, app, without_app=False):
                 "id": identifier, "slug": slug, "name": name, "version": version,
                 "summary": summary, "description": metadata.get("description", summary),
                 "category": metadata.get("category", "Productivity"), "platforms": platforms,
-                "kind": kind, "runtime": runtime, "featured": metadata.get("featured", False),
+                "kind": kind, "runtime": runtime,
                 "icon": metadata.get("icon", "assets/mac-helper.png"),
                 "screenshots": metadata.get("screenshots", []), "features": metadata.get("features", []),
                 "permissions": permissions, "installSteps": metadata.get("installSteps", []),

@@ -27,7 +27,7 @@ Create a folder containing the complete editable source, with a manifest like:
   "version": "1.0.0",
   "summary": "Translate selected text through MacHelper.",
   "entryPoint": "main.js",
-  "permissions": ["selection.read", "clipboard.read", "ai.transform", "ui.panel"],
+  "permissions": ["selection.read", "ai.transform", "ui.panel"],
   "commands": [{"identifier": "translate", "title": "Translate", "trigger": "selection"}],
   "settingsSchema": "settings.schema.json"
 }
