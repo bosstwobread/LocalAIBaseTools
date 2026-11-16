@@ -7,6 +7,7 @@ const { JSDOM } = require('jsdom');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const localesScript = fs.readFileSync(path.join(__dirname, 'locales.js'), 'utf8');
 const i18nScript = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
+const previewCatalogs = JSON.parse(fs.readFileSync(path.join(__dirname, 'preview-locales.json'), 'utf8')).locales;
 const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const catalogPath = path.join(__dirname, 'dist/data/extensions.json');
 if (!fs.existsSync(catalogPath)) throw new Error('Build the static fixture first: python3 ExtensionMarket-website/build.py --without-app');
@@ -34,6 +35,7 @@ async function page({ base = 'https://market.example/extension-market/', data = 
     return { ok: true, json: async () => data };
   };
   window.eval(localesScript);
+  window.MARKET_PREVIEW_TRANSLATIONS = clone(previewCatalogs);
   window.eval(i18nScript);
   window.eval(script);
   await delay(0);
@@ -209,7 +211,7 @@ test('metadata is rendered as text and unsafe links never become executable DOM'
     assert.match(view.document.querySelector('.extension-grid').textContent, /<img id=/);
     view.window.location.hash = `#extension/${tool.slug}`;
     await until(() => view.document.querySelector('#tool-dialog').open);
-    assert.equal(view.document.querySelectorAll('script').length, 3, 'Only the static catalog, localization, and application scripts should exist');
+    assert.deepEqual([...view.document.querySelectorAll('script')].map(node => node.getAttribute('src')), ['./locales.js', './preview-locales.js', './i18n.js', './app.js'], 'Only the allowlisted static localization and application scripts should exist');
     assert.match(view.document.querySelector('.detail-description').textContent, /<script>/);
     assert.ok([...view.document.querySelectorAll('a')].every(node => !node.href.startsWith('javascript:')));
     assert.ok([...view.document.querySelectorAll('img')].every(node => !node.src.startsWith('javascript:')));
@@ -402,11 +404,12 @@ test('authored interface copy and first-party catalog text have translations in 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-      if (!node.textContent.trim() || node.parentElement.closest('script,style,code,noscript,[aria-hidden="true"]')) continue;
+      if (!node.textContent.trim() || node.parentElement.closest('script,style,code,noscript,[aria-hidden="true"],[data-preview-key]')) continue;
       keys.add(node.textContent.replace(/\s+/g, ' ').trim());
     }
     for (const element of document.querySelectorAll('[aria-label],[placeholder],[title],[alt],meta[name="description"]')) {
       for (const attribute of ['aria-label', 'placeholder', 'title', 'alt', 'content']) {
+        if (attribute === 'alt' && /(?:translation|messagehelper)-preview\.svg$/.test(element.getAttribute('src') || '')) continue;
         const text = element.getAttribute(attribute);
         if (text) keys.add(text);
       }
@@ -418,7 +421,7 @@ test('authored interface copy and first-party catalog text have translations in 
       keys.add(Function(`return ${match[1]}`)().trim());
     }
     for (const tool of catalog.extensions) {
-      for (const value of [tool.category, ...tool.screenshots.flatMap(shot => [shot.alt, shot.caption])]) keys.add(value);
+      for (const value of [tool.category, ...tool.screenshots.flatMap(shot => /(?:translation|messagehelper)-preview\.svg$/.test(shot.src) ? [shot.caption] : [shot.alt, shot.caption])]) keys.add(value);
     }
     const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', 'Translation/', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
     const translations = {};
@@ -529,4 +532,78 @@ test('native search fallback stays disabled for blank, overlong, or NUL-containi
     assert.equal(new URL(link.href).searchParams.get('query'),'Explain a selected word');
     assert.equal(link.tabIndex,0);
   }finally{view.close();}
+});
+
+test('illustration copy and every preview location follow all interface languages without AI or changing a query', async () => {
+  let inferenceCalls = 0;
+  const view = await page({ bridge: (_id, message, callback) => {
+    if (message.action === 'search') inferenceCalls++;
+    callback({ok:true, version:'6.3.1', connectorVersion:'1.0.0', compatible:true});
+  }});
+  try {
+    view.document.querySelector('#description-mode').click();
+    const draft = 'Keep this request exactly as I typed it.';
+    input(view, '#need-query', draft);
+    view.window.location.hash = '#extension/translation';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    for (const code of Object.keys(previewCatalogs)) {
+      input(view, '#site-language', code, 'change');
+      for (const element of view.document.querySelectorAll('[data-preview-key]')) {
+        assert.equal(element.textContent, previewCatalogs[code][element.dataset.previewKey], `${code}: decorative illustration copy`);
+      }
+      assert.equal(view.document.querySelector('.preview-popover strong').textContent, previewCatalogs[code]['hero.targetLanguage']);
+      for (const image of view.document.querySelectorAll('img[src*="-preview.svg"]')) {
+        assert.ok(image.src.includes(`/extension-market/assets/localized/${code}/`), `${code}: ${image.src}`);
+        const prefix = image.src.endsWith('translation-preview.svg') ? 'translation' : 'messagehelper';
+        assert.equal(image.alt, previewCatalogs[code][`${prefix}.description`]);
+      }
+      assert.equal(view.document.querySelector('#need-query').value, draft);
+      assert.equal(inferenceCalls, 0);
+      assert.equal(view.requests.length, 1);
+    }
+  } finally { view.close(); }
+});
+
+test('localized assets preserve mounted prefixes and never rewrite icons or external screenshots', async () => {
+  const data = clone(catalog);
+  data.extensions.find(tool => tool.slug === 'translation').screenshots[0].src = '/assets/translation-preview.svg';
+  const view = await page({data, storedLanguage:'es'});
+  try {
+    const image = view.document.querySelector('.extension-card a[href="#extension/translation"] img');
+    assert.equal(image.src, 'https://market.example/extension-market/assets/localized/es/translation-preview.svg');
+    const api = view.window.MarketI18n;
+    for (const source of ['assets/mac-helper.png', 'https://external.example/assets/translation-preview.svg', '//external.example/assets/translation-preview.svg', 'assets/third-party-preview.svg', 'assets/translation-preview.svg?other=1']) {
+      assert.equal(api.previewSource(source), source);
+    }
+    input(view, '#site-language', 'ar', 'change');
+    assert.equal(api.previewSource('assets/localized/es/translation-preview.svg'), 'https://market.example/extension-market/assets/localized/ar/translation-preview.svg');
+    assert.equal(view.document.querySelector('.get-identity img').getAttribute('src'), './assets/mac-helper.png');
+  } finally { view.close(); }
+});
+
+test('illustration translations remain text even when a catalog contains markup', async () => {
+  const view = await page();
+  try {
+    const malicious = '<img id="preview-injection" src=x onerror=alert(1)> & synthetic';
+    view.window.MARKET_PREVIEW_TRANSLATIONS.es['hero.copy'] = malicious;
+    input(view, '#site-language', 'es', 'change');
+    assert.equal(view.document.querySelector('[data-preview-key="hero.copy"]').textContent, malicious);
+    assert.equal(view.document.querySelector('#preview-injection'), null);
+  } finally { view.close(); }
+});
+
+test('decorative hero text cannot bypass translation coverage', () => {
+  const dom = new JSDOM(html);
+  try {
+    const {document, NodeFilter} = dom.window;
+    const walker = document.createTreeWalker(document.querySelector('.hero-stage'), NodeFilter.SHOW_TEXT);
+    const symbols = new Set(['A', '文', '×', '↘']);
+    let node;
+    while ((node = walker.nextNode())) {
+      const value = node.textContent.trim();
+      if (!value || !node.parentElement.closest('[aria-hidden="true"]') || symbols.has(value)) continue;
+      const key = node.parentElement.closest('[data-preview-key]')?.dataset.previewKey;
+      assert.ok(key && Object.hasOwn(previewCatalogs.en, key), `Unmapped illustration text: ${value}`);
+    }
+  } finally { dom.window.close(); }
 });

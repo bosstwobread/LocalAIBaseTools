@@ -21,7 +21,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.site = self.root / "ExtensionMarket-website"
         self.site.mkdir()
-        for name in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js"]:
+        for name in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js", "preview-locales.json"]:
             shutil.copy2(SOURCE / name, self.site / name)
         shutil.copytree(SOURCE / "assets", self.site / "assets")
         (self.root / "MacHelper/Assets").mkdir(parents=True)

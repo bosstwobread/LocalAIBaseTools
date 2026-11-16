@@ -72,6 +72,8 @@ Keys are exact original UI strings from the tool's display name, summary, settin
 
 The optional catalog is at most 64 KiB of UTF-8 JSON, has `schemaVersion: 1`, and allows at most 32 language tables with 256 entries each. Locale keys contain 2–3 letters followed by up to three hyphen-separated 2–8 character alphanumeric subtags. Label keys must be nonempty and at most 2,000 UTF-8 bytes; values must be nonempty and at most 8,000 bytes; neither may contain NUL. The file counts toward the existing 96 KiB runtime text budget. Invalid/missing declared catalogs fail source validation and keep the last working generation. Tools without a catalog remain valid and retain original text. Edits use the normal source watcher/reload flow. Host translations never substitute for tool-owned configuration strings.
 
+The catalog translates host-rendered labels, not pixels inside an image. Authors who supply text-bearing artwork for their own UI or marketplace listing must keep localized text or locale-specific asset variants with that source and select the appropriate variant in the owning UI. Include shipped variants in the complete file inventory; provide matching captions and accessible descriptions. Verify long and right-to-left translations. This does not add image controls to the settings schema or permission to rewrite user content; language switches remain presentation-only and do not call AI.
+
 ### JavaScript entry point
 
 Call `MacHelper.define` once. Supply named command functions, with optional `start` and `stop` lifecycle functions. Commands may return a Promise. Translation's editable behavior follows this pattern:

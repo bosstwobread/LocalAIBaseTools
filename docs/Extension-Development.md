@@ -12,6 +12,8 @@ Give your AI assistant the public [AI extension guide](../AI_EXTENSION_GUIDE.md)
 
 For a multilingual settings page on MacHelper 6.2+, include an optional manifest-declared `localizations` JSON resource with translations of your tool's original labels and description. The [source contract](Source-Extensions.md#extension-owned-interface-translations-machelper-62) defines its format and limits. UI translations belong in extension source and hot reload with it; changing the interface language must never rewrite prompt files, setting values, or selected text.
 
+Treat text inside your own illustrations, screenshots, and charts as interface copy too. Use text resources or locale-specific image variants in the UI that owns the artwork, and localize captions and accessible labels. Keep those assets with the tool, check long translations and right-to-left text, and include shipped files in its source inventory. This is an authoring requirement, not an additional image-rendering API in the host's settings schema. Foreign source text in a synthetic translation demo may stay foreign; real inputs and AI answers must stay unchanged.
+
 For an installed tool, **Edit Source** opens its working copy. For a new tool, create a source folder and use **Install Source…**. Import copies the folder, so later edits to the original authoring folder do not affect the installed copy. Save installed source changes for automatic validated reload. A fork intended to coexist with its original needs a different identifier.
 
 ## Source extension workflow

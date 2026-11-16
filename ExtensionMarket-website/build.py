@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 from discovery import read_descriptor, write_discovery_index
+from preview_assets import build_previews
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -218,6 +219,7 @@ def build(output, app, without_app=False, allow_legacy_discovery=False):
         for filename in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js"]:
             shutil.copy2(HERE / filename, stage / filename)
         shutil.copytree(HERE / "assets", stage / "assets")
+        build_previews(HERE, stage)
         shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")
         copy_public_documents(stage)
         discovery_index, _ = write_discovery_index(ROOT, stage, config, allow_legacy_discovery)

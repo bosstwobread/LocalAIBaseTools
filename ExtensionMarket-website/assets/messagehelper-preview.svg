@@ -1,15 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="720" viewBox="0 0 1160 720" role="img" aria-labelledby="title desc">
-<title id="title">MessageHelper Upwork interface preview</title><desc id="desc">Illustrative browser interface showing a translated client message and an English polishing preview with an Apply button. Example content.</desc>
-<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#e6ece0"/><stop offset="1" stop-color="#dce5d9"/></linearGradient><filter id="shadow" x="-20%" y="-20%" width="150%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="17" flood-color="#40543a" flood-opacity=".13"/></filter></defs>
-<rect width="1160" height="720" fill="url(#bg)"/><circle cx="111" cy="77" r="220" fill="#f5f7ef" opacity=".45"/>
-<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
-<g filter="url(#shadow)"><rect x="63" y="60" width="1035" height="583" rx="17" fill="#fffefa" stroke="#fff"/><path d="M63 106h1035" stroke="#e1e7da"/><circle cx="87" cy="84" r="5" fill="#c7d4c0"/><circle cx="105" cy="84" r="5" fill="#c7d4c0"/><circle cx="123" cy="84" r="5" fill="#c7d4c0"/><rect x="250" y="72" width="600" height="25" rx="7" fill="#f0f4e9"/><text x="510" y="89" font-size="11" fill="#8c9b7e">upwork.com</text></g>
-<text x="106" y="151" font-size="22" font-weight="600" fill="#394d37">Messages</text><path d="M106 173h949" stroke="#e3e9db"/>
-<circle cx="126" cy="214" r="19" fill="#e7dbc3"/><text x="119" y="220" font-size="16" fill="#8a795b">C</text><text x="163" y="207" font-size="13" font-weight="600" fill="#4e6144">Client</text><text x="163" y="235" font-size="18" fill="#53664a">Could you share an update tomorrow?</text>
-<rect x="846" y="208" width="171" height="31" rx="6" fill="#eef3e7" stroke="#d5e0c8"/><text x="872" y="229" font-size="12" fill="#52763e">Hide translation</text>
-<rect x="162" y="253" width="853" height="51" rx="7" fill="#f0f5e9" stroke="#dce7d1"/><rect x="162" y="253" width="3" height="51" rx="1.5" fill="#8eb974"/><text x="180" y="284" font-size="18" fill="#5a7848">你能在明天之前分享一份进度更新吗？</text>
-<rect x="106" y="330" width="949" height="266" rx="12" fill="#fcfdf8" stroke="#dbe3d3"/><text x="129" y="365" font-size="15" fill="#6d7e61">I finished update. Please check it.</text>
-<rect x="126" y="391" width="909" height="133" rx="8" fill="#f4f7ef" stroke="#d9e4ce"/><text x="147" y="421" font-size="12" letter-spacing=".5" fill="#80946e">Polished draft</text><text x="147" y="454" font-size="17" fill="#47613a">I’ve completed the update. Please take a look</text><text x="147" y="480" font-size="17" fill="#47613a">when you have a chance.</text><rect x="915" y="468" width="94" height="33" rx="6" fill="#386a28"/><text x="944" y="490" font-size="13" fill="#fff">Apply</text>
-<rect x="129" y="547" width="90" height="31" rx="6" fill="#eef3e6" stroke="#cfddc2"/><text x="155" y="568" font-size="12" fill="#4d723a">Polish</text><text x="954" y="567" font-size="12" fill="#9baa8e">Send</text><path d="m1005 550 18 12-18 12 4-12Z" fill="none" stroke="#a7b29b" stroke-width="2" stroke-linejoin="round"/>
-<text x="64" y="684" font-size="12" letter-spacing="2.5" fill="#74896a">REVIEW THE WORDS. KEEP YOUR VOICE.</text><text x="826" y="684" font-size="11" fill="#8b9c7f">INTERFACE PREVIEW · EXAMPLE CONTENT</text>
-</g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="720" viewBox="0 0 1160 720" role="img" aria-labelledby="title desc" lang="en">
+  <title id="title" data-preview-key="messagehelper.title">MessageHelper Upwork interface preview</title>
+  <desc id="desc" data-preview-key="messagehelper.description">Illustrated browser with a translated client message and an English draft editing preview. Example content.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#e6ece0"/><stop offset="1" stop-color="#dce5d9"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="17" flood-color="#40543a" flood-opacity=".13"/></filter>
+  </defs>
+  <rect width="1160" height="720" fill="url(#bg)"/>
+  <circle cx="111" cy="77" r="220" fill="#f5f7ef" opacity=".45"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+    <g filter="url(#shadow)">
+      <rect x="63" y="60" width="1035" height="583" rx="17" fill="#fffefa" stroke="#fff"/>
+      <path d="M63 106h1035" stroke="#e1e7da"/>
+      <circle cx="87" cy="84" r="5" fill="#c7d4c0"/><circle cx="105" cy="84" r="5" fill="#c7d4c0"/><circle cx="123" cy="84" r="5" fill="#c7d4c0"/>
+      <rect x="250" y="72" width="600" height="25" rx="7" fill="#f0f4e9"/>
+      <text x="510" y="89" font-size="11" fill="#8c9b7e" data-preview-preserve="brand">upwork.com</text>
+    </g>
+    <text x="106" y="151" font-size="22" font-weight="600" fill="#394d37" data-preview-key="messagehelper.messages" data-preview-width="925">Messages</text>
+    <path d="M106 173h949" stroke="#e3e9db"/>
+    <circle cx="126" cy="214" r="19" fill="#e7dbc3"/>
+    <text x="119" y="220" font-size="16" fill="#8a795b" data-preview-preserve="symbol">C</text>
+    <text x="163" y="207" font-size="13" font-weight="600" fill="#4e6144" data-preview-key="messagehelper.client" data-preview-width="650">Client</text>
+    <text x="163" y="235" font-size="18" fill="#53664a" data-preview-key="messagehelper.source" data-preview-width="650" data-preview-preserve="source">你能明天分享一下进度吗？</text>
+    <rect x="846" y="208" width="171" height="31" rx="6" fill="#eef3e7" stroke="#d5e0c8"/>
+    <text x="858" y="229" font-size="12" fill="#52763e" data-preview-key="messagehelper.hideTranslation" data-preview-width="147">Hide translation</text>
+    <rect x="162" y="253" width="853" height="51" rx="7" fill="#f0f5e9" stroke="#dce7d1"/>
+    <rect x="162" y="253" width="3" height="51" rx="1.5" fill="#8eb974"/>
+    <text x="180" y="284" font-size="18" fill="#5a7848" data-preview-key="messagehelper.translation" data-preview-width="815">Could you share an update tomorrow?</text>
+    <rect x="106" y="330" width="949" height="266" rx="12" fill="#fcfdf8" stroke="#dbe3d3"/>
+    <text x="129" y="365" font-size="15" fill="#6d7e61" data-preview-key="messagehelper.draft" data-preview-width="900" data-preview-preserve="english-draft">I finished update. Please check it.</text>
+    <rect x="126" y="391" width="909" height="133" rx="8" fill="#f4f7ef" stroke="#d9e4ce"/>
+    <text x="147" y="421" font-size="12" letter-spacing=".5" fill="#80946e" data-preview-key="messagehelper.polishedLabel" data-preview-width="740">Polished draft</text>
+    <text x="147" y="454" font-size="17" fill="#47613a" data-preview-key="messagehelper.polished" data-preview-width="742" data-preview-lines="2" data-preview-line-height="26" data-preview-preserve="english-draft"><tspan x="147" dy="0">I’ve completed the update. Please take a look</tspan><tspan x="147" dy="26">when you have a chance.</tspan></text>
+    <rect x="915" y="468" width="94" height="33" rx="6" fill="#386a28"/>
+    <text x="927" y="490" font-size="13" fill="#fff" data-preview-key="messagehelper.apply" data-preview-width="70">Apply</text>
+    <rect x="129" y="547" width="126" height="31" rx="6" fill="#eef3e6" stroke="#cfddc2"/>
+    <text x="142" y="568" font-size="12" fill="#4d723a" data-preview-key="messagehelper.polish" data-preview-width="100">Polish</text>
+    <text x="919" y="567" font-size="12" fill="#9baa8e" data-preview-key="messagehelper.send" data-preview-width="74">Send</text>
+    <path d="m1005 550 18 12-18 12 4-12Z" fill="none" stroke="#a7b29b" stroke-width="2" stroke-linejoin="round"/>
+    <text x="64" y="684" font-size="12" letter-spacing="2.5" fill="#74896a" data-preview-key="messagehelper.instruction" data-preview-width="700">REVIEW THE WORDS. KEEP YOUR VOICE.</text>
+    <text x="790" y="684" font-size="11" fill="#8b9c7f" data-preview-key="translation.previewLabel" data-preview-width="310">INTERFACE PREVIEW · EXAMPLE CONTENT</text>
+  </g>
+</svg>

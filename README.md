@@ -1,6 +1,6 @@
 # LocalAIBaseTools
 
-**MacHelper** is one macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. **Translation** is an editable JavaScript source extension: enabling it installs all its source files on your Mac, and saving changes while enabled reloads its worker without restarting MacHelper. **MessageHelper — Upwork** remains a Chrome/Edge extension using the same AI connection. **Find tools** searches public extension descriptions with keywords or your configured AI; the optional **MacHelper Connector** brings that AI search to the website. Current release: MacHelper **6.3.0** (build **630**), Translation **4.5.0**, MessageHelper — Upwork **1.4.0**, Connector **1.0.0**.
+**MacHelper** is one macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. **Translation** is an editable JavaScript source extension: enabling it installs all its source files on your Mac, and saving changes while enabled reloads its worker without restarting MacHelper. **MessageHelper — Upwork** remains a Chrome/Edge extension using the same AI connection. **Find tools** searches public extension descriptions with keywords or your configured AI; the optional **MacHelper Connector** brings that AI search to the website. Current release: MacHelper **6.3.1** (build **631**), Translation **4.5.0**, MessageHelper — Upwork **1.4.0**, Connector **1.0.0**.
 
 Before making changes, read the short [development checklist](DEVELOPMENT.md). Check it again before finishing so related functionality, documentation, and website content stay consistent.
 
@@ -76,6 +76,8 @@ Shared AI preferences are stored in the MacHelper support folder's `settings.jso
 ### Interface languages
 
 The marketplace and MacHelper support English, Simplified Chinese, Traditional Chinese, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi, Russian, and Italian. Choose a language in the website header or **MacHelper → General → Interface language**. The website initially follows browser preferences; MacHelper's **System language** follows macOS. Each remembers its own explicit choice. Arabic uses right-to-left layout. Language changes use bundled translations and make no AI requests.
+
+Website illustrations follow the selected language too: preview labels, buttons, captions, and synthetic translation results change together. A foreign-language source sentence or English polishing example may remain foreign to demonstrate the tool. The website owns this artwork copy in `ExtensionMarket-website/preview-locales.json`; it is separate from MacHelper and extension settings catalogs.
 
 MacHelper updates its interface without restarting workers. Finish unsaved prompt/AI settings edits and pending operations before switching. Interface language is separate from Translation's target language, AI provider, and model. Source prompts, user text, model IDs, and code stay unchanged. The technical AI guide and provider/system diagnostics may remain in their original language.
 

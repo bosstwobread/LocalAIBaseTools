@@ -26,7 +26,7 @@
   }
   const sourceURL = () => url(state.data?.macHelper?.sourceUrl) || 'https://github.com/bosstwobread/LocalAIBaseTools';
   const helperURL = () => url(state.data?.macHelper?.downloadUrl);
-  const image = (src, alt, attrs = {}) => h('img', { src: url(src) || new URL('assets/mac-helper.png', base).href, alt, loading: 'lazy', ...attrs });
+  const image = (src, alt, attrs = {}) => h('img', { src: url(i18n?.previewSource(src) || src) || new URL('assets/mac-helper.png', base).href, alt: i18n?.previewAlt(src, alt) || alt, loading: 'lazy', ...attrs });
   const textLink = (label, href, extra = {}) => h('a', { class: 'text-link', href, ...extra }, label, h('span', { 'aria-hidden': 'true' }, '↗'));
   function normalize(tool) {
     if (!tool || typeof tool.id !== 'string' || typeof tool.slug !== 'string' || typeof tool.name !== 'string' || !['mac-source', 'browser'].includes(tool.kind)) return null;

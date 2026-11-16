@@ -34,6 +34,11 @@ with Chrome/Edge Developer mode installation instructions.
 - `i18n.js`, `locales.js`: language detection, saved selection, safe text rendering,
   and authored shared interface translations. Extension descriptions and their
   translations live in each extension’s `discovery.json`.
+- `preview-locales.json`: authored text for all 13 languages inside the hero and
+  SVG interface illustrations, including synthetic translation results.
+- `preview_assets.py`: validates preview catalogs and SVG templates, then emits
+  escaped locale-specific SVGs under `assets/localized/<locale>/` and the
+  generated `preview-locales.js` data for the HTML hero during the site build.
 - `assets/`: app/tool artwork and clearly labelled illustrative previews.
 - `marketplace.config.json`: public URL and visual display metadata (categories, artwork, and screenshots).
 - `historical-packages/packages/`: immutable published source files and ZIPs.
@@ -81,9 +86,11 @@ Changing language updates navigation, explanations, search/filter labels, curren
 first-party tool descriptions, access notices, installation steps, errors, and
 an open detail dialog. Search matches both translated and original metadata;
 category/platform values, filter selections, package URLs, and tool names stay
-stable. Arabic uses right-to-left reading order. Preview artwork deliberately
-retains its example English/Chinese text, while captions and accessible labels
-follow the interface language. No AI call or translation service is used.
+stable. Arabic uses right-to-left reading order. Text inside the hero illustration
+and SVG previews follows the selected language too: labels, buttons, captions,
+accessible descriptions, and synthetic translation results change together.
+Foreign source sentences and English polishing samples remain appropriate to
+the demonstration. No AI call or translation service is used.
 
 The technical AI guide and its downloadable reference documents remain English
 and are labelled accordingly. Source code, prompts, model IDs, and user data are
@@ -92,8 +99,16 @@ interface copy to every shared catalog in `locales.js`, and first-party tool
 metadata translations to that tool's `discovery.json`. `i18n.js` supplies shared
 fallback and placeholder interpolation. Tool metadata falls back to its original
 source text when an extension does not provide the requested language.
+Preview copy belongs in `preview-locales.json`, outside MacHelper source.
+The build generates image variants from SVG text templates instead of editing
+generated files. HTML hero nodes use explicit `data-preview-key` values even
+inside decorative `aria-hidden` containers; dynamic cards and dialogs select
+locale-specific preview URLs. Keep product names, model IDs, code, actual user
+text, and AI answers unchanged. When adding artwork with visible text, supply
+all supported locales and verify that long translations and Arabic fit.
 The frontend checks exercise all 13 languages, language detection/persistence,
-RTL, accessible labels, dynamic dialogs, localized search, and unchanged URLs.
+RTL, accessible labels, dynamic dialogs, localized images, localized search,
+and unchanged installation/download URLs.
 
 ## Build and check
 

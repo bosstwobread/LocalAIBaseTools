@@ -351,7 +351,7 @@
     h1 { font-size:66px; }
     h2 { font-size:39px; }
     .eyebrow { font-size:8px; }
-    .hero-stage { height:360px; }
+    .hero-stage { height:420px; }
     .stage-topline { top:19px; left:20px; right:20px; font-size:5px; }
     .paper-window { top:65px; left:5%; width:77%; height:196px; }
     .paper-content { padding:17px; }
@@ -489,3 +489,11 @@
 @media (max-width:600px) { .description-search { padding:1rem; } .discovery-actions .button { width:100%; text-align:center; } }
 
 #open-search-in-machelper[aria-disabled="true"] { opacity:.5; cursor:default; text-decoration:none; }
+
+/* Authored illustration text follows UI language, independently of live input. */
+.hero-stage [data-preview-key] { unicode-bidi:plaintext; overflow-wrap:anywhere; }
+.preview-popover [data-preview-key] { white-space:pre-line; }
+.window-chrome span { min-width:0; }
+.hero-stage:lang(ar) .preview-popover>p { direction:rtl; text-align:right; }
+
+.hero-stage .paper-content p { direction:ltr; text-align:left; }
