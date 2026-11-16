@@ -66,6 +66,7 @@ public final class SelectionTranslationCapability {
         panels.onPerform = { [weak self] in self?.performSelection() }
         panels.onDismiss = { [weak self] in self?.dismiss() }
         monitor.shouldIgnoreOutsideClick = { [weak self] in self?.panels.contains($0) == true }
+        monitor.isInteractingWithOverlay = { [weak self] in self?.panels.isDraggingResultPanel == true }
         monitor.onRead = { [weak self] in self?.receive($0) }
         monitor.onDismiss = { [weak self] in self?.dismiss() }
         monitor.onFrontApplicationChange = { [weak self] in self?.clearSelection() }
@@ -197,6 +198,8 @@ public final class SelectionTranslationCapability {
     private func useManualSelection(_ text: String, at point: CGPoint) {
         clearSelection()
         manualSelection = true
+        // Demo/explicit clipboard commands are deliberate input actions too.
+        state.rearmAfterSelectionGesture()
         state.observe(TextSelection(text: text, sourcePID: ProcessInfo.processInfo.processIdentifier,
                                     rangeLocation: -1, rangeLength: text.utf16.count,
                                     bounds: CGRect(x: point.x, y: point.y, width: 1, height: 20)))

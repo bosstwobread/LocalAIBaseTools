@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import MacHelper
+import MacHelperCapabilities
 
 @main
 enum MacHelperApplication {
@@ -8,10 +9,21 @@ enum MacHelperApplication {
     static func main() {
         signal(SIGPIPE, SIG_IGN)
         let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--verify-extension-list") {
+            app.setActivationPolicy(.prohibited)
+            Task { @MainActor in exit(await ExtensionListVerification.run()) }
+            RunLoop.main.run()
+            return
+        }
         if CommandLine.arguments.contains("--verify-source-extensions") {
             app.setActivationPolicy(.prohibited)
             Task { @MainActor in exit(await SourceExtensionVerification.run()) }
+            RunLoop.main.run()
+            return
+        }
+        if CommandLine.arguments.contains("--verify-native-extensions") {
+            app.setActivationPolicy(.prohibited)
+            Task { @MainActor in exit(await NativeExtensionVerification.run()) }
             RunLoop.main.run()
             return
         }
@@ -20,6 +32,21 @@ enum MacHelperApplication {
             ExtensionVerification.run()
             return
         }
+        // An isolated synthetic fixture exercises the real nonactivating panel
+        // without loading tools, preferences, providers, or selected text.
+        if CommandLine.arguments.contains("--verify-panel-drag") ||
+            Bundle.main.bundleIdentifier == "com.localaibasetools.panel-drag-verification" {
+            app.setActivationPolicy(.regular)
+            let verification = PanelDragVerification()
+            verification.onDismiss = { app.terminate(nil) }
+            verification.start()
+            withExtendedLifetime(verification) { app.run() }
+            verification.stop()
+            return
+        }
+        // A regular app keeps its icon in the Dock even when Settings is closed.
+        // Verification processes above stay headless and never create Dock icons.
+        app.setActivationPolicy(.regular)
         let delegate = MacHelperAppDelegate()
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }
@@ -30,18 +57,17 @@ enum MacHelperApplication {
 final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private let login = LoginItemManager()
     private var window: NSWindow!
-    private var tabs: NSSegmentedControl!
+    private var navigationButtons: [Int: SettingsNavigationButton] = [:]
+    private var selectedSection = 1
     private var container: NSView!
     private var statusItem: NSStatusItem?
     private let ai = AISettingsViewController()
-    private var extensions: SourceExtensionsViewController!
-    private var nativeExtensions: ExtensionsViewController!
+    private var extensions: ExtensionsViewController!
     private var sourceManager: SourceExtensionManager!
     private var startupTask: Task<Void, Never>?
     private var general: GeneralSettingsViewController!
     private var currentController: NSViewController?
     private var rootController: NSViewController!
-    private var registry: ExtensionRegistry!
     private var pendingSettingsTab: Int?
     private var sourceManagerReady = false
     private var marketplaceRequests: [MarketplaceInstallRequest] = []
@@ -54,14 +80,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         createMenus()
-        registry = ExtensionRegistry(
-            bundledDirectory: Bundle.main.builtInPlugInsURL,
-            helperExecutableURL: Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("mac-helper-host")
-                ?? ExtensionRegistry.defaultHelperExecutableURL,
-            openAISettings: { [weak self] in self?.showSettings(tab: 0) },
-            hideSettings: { [weak self] in self?.window?.orderOut(nil) })
-        registry.refresh()
-        registry.startEnabled()
         let bin = Bundle.main.executableURL!.deletingLastPathComponent()
         sourceManager = SourceExtensionManager(workerExecutableURL: bin.appendingPathComponent("MacHelperScriptWorker"),
             helperExecutableURL: bin.appendingPathComponent("mac-helper-host"),
@@ -69,9 +87,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds/Translation"))
         sourceManager.onOpenAISettings = { [weak self] in self?.showSettings(tab: 0) }
         sourceManager.onHideSettings = { [weak self] in self?.window?.orderOut(nil) }
-        extensions = SourceExtensionsViewController(manager: sourceManager)
-        nativeExtensions = ExtensionsViewController(registry: registry)
-        extensions.onShowNativeExtensions = { [weak self] in self?.showNativeExtensions() }
+        extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
         createWindow()
@@ -84,7 +100,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         }
         startBrowserSupportBootstrap()
         // The first Apple open event carries the login launch reason. Do not
-        // open a window here: a login launch must remain in the menu bar.
+        // open a window here: a login launch must remain in the background.
         if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
         else if let pending = pendingSettingsTab { pendingSettingsTab = nil; showSettings(tab: pending) }
     }
@@ -95,14 +111,14 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
         guard !LoginItemManager.isLoginLaunch else { return false }
-        showSettings(tab: 1)
+        showSettings(tab: selectedSection)
         return true
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // Reopening Settings leaves every extension's selection/result intact.
         // Status-item windows are visible even when there is no settings window.
-        showSettings(tab: 1)
+        showSettings(tab: selectedSection)
         return true
     }
 
@@ -127,7 +143,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         marketplaceTask?.cancel()
         marketplaceRequests.removeAll()
         startupTask?.cancel()
-        registry?.stopAll()
         guard sourceManager != nil else { return .terminateNow }
         Task { [weak self] in await self?.sourceManager.stopAll(); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
@@ -141,7 +156,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "MacHelper")
-        appMenu.addItem(withTitle: "MacHelper Settings…", action: #selector(openExtensions), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: "MacHelper Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         appMenu.addItem(withTitle: "Marketplace…", action: #selector(openMarketplace), keyEquivalent: "").target = self
         let appBrowserSupport = appMenu.addItem(withTitle: "Install Browser Support…", action: #selector(installBrowserSupport), keyEquivalent: "")
         appBrowserSupport.target = self
@@ -178,38 +193,89 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func createWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 710),
-                          styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "MacHelper"
+        window.contentMinSize = NSSize(width: 940, height: 650)
+        if let visible = NSScreen.main?.visibleFrame {
+            window.setContentSize(NSSize(width: min(1060, max(940, visible.width - 64)),
+                                         height: min(760, max(650, visible.height - 64))))
+        }
         window.isReleasedWhenClosed = false
         rootController = NSViewController()
         rootController.view = NSView()
         window.contentViewController = rootController
+
+        let sidebar = NSVisualEffectView()
+        sidebar.material = .sidebar
+        sidebar.blendingMode = .behindWindow
+        sidebar.state = .followsWindowActiveState
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.setAccessibilityLabel("Settings navigation")
         let title = NSTextField(labelWithString: "MacHelper")
-        title.font = .systemFont(ofSize: 24, weight: .semibold)
-        let subtitle = NSTextField(labelWithString: "One AI connection. Your Mac tools.")
+        title.font = .systemFont(ofSize: 20, weight: .semibold)
+        let subtitle = NSTextField(labelWithString: "Settings")
+        subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
-        tabs = NSSegmentedControl(labels: ["AI Connection", "Extensions", "General"], trackingMode: .selectOne,
-                                  target: self, action: #selector(tabChanged))
-        tabs.selectedSegment = 1
-        tabs.setAccessibilityLabel("Settings section")
+        let header = NSStackView(views: [title, subtitle])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 4
+        header.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(header)
+
+        let navigation = NSStackView()
+        navigation.orientation = .vertical
+        navigation.alignment = .leading
+        navigation.spacing = 5
+        navigation.translatesAutoresizingMaskIntoConstraints = false
+        for (index, name, symbol) in [(2, "General", "gearshape"), (0, "AI Connection", "sparkles"), (1, "Extensions", "puzzlepiece.extension")] {
+            let button = SettingsNavigationButton(title: name, symbol: symbol, target: self, action: #selector(sectionChanged(_:)))
+            button.tag = index
+            navigationButtons[index] = button
+            navigation.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalTo: navigation.widthAnchor).isActive = true
+        }
+        sidebar.addSubview(navigation)
+
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let footer = NSTextField(labelWithString: "LocalAIBaseTools · \(version)")
+        footer.font = .systemFont(ofSize: 10)
+        footer.textColor = .tertiaryLabelColor
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(footer)
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
         container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         let root = window.contentView!
-        for view in [title, subtitle, tabs!, container!] {
-            view.translatesAutoresizingMaskIntoConstraints = false
+        for view in [sidebar, divider, container!] {
             root.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
-            title.topAnchor.constraint(equalTo: root.topAnchor, constant: 22),
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5),
-            tabs.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            tabs.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 20),
-            container.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
-            container.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -6),
-            container.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 10),
-            container.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12)
+            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: 208),
+            header.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 22),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -16),
+            header.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 24),
+            navigation.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 12),
+            navigation.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -12),
+            navigation.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 28),
+            footer.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 22),
+            footer.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -10),
+            footer.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -18),
+            divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: root.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            container.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            container.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            container.topAnchor.constraint(equalTo: root.topAnchor),
+            container.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
         showTab(1)
         window.center()
@@ -225,10 +291,17 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showTab(_ index: Int) {
-        tabs.selectedSegment = index
+        selectedSection = index
+        navigationButtons.forEach { $0.value.isSelected = $0.key == index }
+        let controller: NSViewController = index == 0 ? ai : index == 1 ? extensions : general
+        if currentController === controller {
+            if index == 1 { extensions.refreshDisplay() }
+            if index == 2 { general.refreshStatus() }
+            return
+        }
+        window.makeFirstResponder(nil)
         currentController?.view.removeFromSuperview()
         currentController?.removeFromParent()
-        let controller: NSViewController = index == 0 ? ai : index == 1 ? extensions : general
         currentController = controller
         rootController.addChild(controller)
         let view = controller.view
@@ -242,23 +315,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         ])
         if index == 1 { extensions.refreshDisplay() }
         if index == 2 { general.refreshStatus() }
-    }
-
-    private func showNativeExtensions() {
-        currentController?.view.removeFromSuperview()
-        currentController?.removeFromParent()
-        currentController = nativeExtensions
-        rootController.addChild(nativeExtensions)
-        let view = nativeExtensions.view
-        view.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-        ])
-        nativeExtensions.refreshDisplay()
     }
 
     private func processMarketplaceRequests() {
@@ -302,7 +358,8 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Install \(preview.manifest.displayName)?"
         let permissionNames = ["selection.read": "Read selected text across apps", "clipboard.read": "Read clipboard text when you request it",
-                               "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels"]
+                               "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
+                               "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
         let permissions = preview.manifest.permissions.map { "• " + (permissionNames[$0] ?? $0) }.joined(separator: "\n")
         let source = preview.request.catalogURL.host.map { $0 + preview.request.catalogURL.path } ?? preview.request.catalogURL.absoluteString
         alert.informativeText = "\(String(preview.manifest.summary.prefix(360)))\n\nVersion: \(preview.manifest.version)\nCatalog: \(String(source.prefix(360)))\n\nPermissions:\n\(permissions.isEmpty ? "None" : permissions)\n\nInstall source only from publishers you trust. The complete editable source will be downloaded and enabled after you approve."
@@ -354,8 +411,15 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func tabChanged() { showTab(tabs.selectedSegment) }
-    @objc private func openExtensions() { showSettings(tab: 1) }
+    @objc private func sectionChanged(_ sender: NSButton) {
+        if sender.tag == 1 { extensions.showOverview() }
+        showTab(sender.tag)
+    }
+    @objc private func openSettings() { showSettings(tab: selectedSection) }
+    @objc private func openExtensions() {
+        extensions.showOverview()
+        showSettings(tab: 1)
+    }
     @objc private func openAI() { showSettings(tab: 0) }
     @objc private func openGeneral() { showSettings(tab: 2) }
     @objc private func openMarketplace() {

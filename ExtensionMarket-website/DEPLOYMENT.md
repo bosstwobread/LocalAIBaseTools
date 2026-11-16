@@ -6,7 +6,7 @@ The old `https://recite.nelson007.com/extension-market` and trailing-slash landi
 
 Retain previously published versioned source files and package archives in the built public output with their original bytes and hashes. A compatibility proxy cannot satisfy a pinned old catalog entry if its files have been removed or overwritten. The latest catalog can advertise a newer tool while those historical download URLs remain available.
 
-This follows Serenity's existing SSH → server Docker build → Docker Hub push workflow. The new static service has its own image, container, release folders, and loopback health port. It does not use Serenity's environment, database, API credentials, or containers.
+This follows Serenity's existing SSH → server Docker build → Docker Hub push workflow. The static service has its own image, application container, release folders, and loopback health port. It shares the existing Docker network and Caddy proxy, while leaving Serenity's application containers, database, environment, and API credentials separate. This script updates that existing infrastructure; it does not provision a new server, DNS, Docker, Caddy, or SSH/registry credentials.
 
 ## Prepare and review
 
@@ -15,6 +15,10 @@ Build the website into `ExtensionMarket-website/dist/` first, including the publ
 ```sh
 python3 scripts/build-apps.py
 python3 ExtensionMarket-website/build.py
+python3 ExtensionMarket-website/verify.py
+node --test ExtensionMarket-website/test.cjs
+python3 -m unittest discover -s ExtensionMarket-website -p build_test.py -v
+python3 -m unittest discover -s test -p marketplace_deploy_test.py -v
 ```
 
 ```sh
@@ -23,13 +27,15 @@ python3 ExtensionMarket-website/deploy.py
 python3 ExtensionMarket-website/deploy.py --dry-run
 ```
 
-Dry-run is the default and makes no SSH, registry, container, or proxy changes. It reports the public URL, image tag, SSH alias, release location, and bounded build-context size. Review the complete built output before deploying: everything under `dist/` is public. Hidden files and symlinks are rejected.
+Dry-run is the default and makes no SSH, registry, container, or proxy changes. It reports the public URL, image tag, SSH alias, release location, and bounded build-context size. Review the complete built output before deploying: everything under `dist/` is public. Hidden files and symlinks are rejected. App resources and published guide/SDK bytes must match the current source; the verifier rejects stale bundled documentation. Private deployment notes, user preferences, and credentials must remain outside the public output.
+
+Committing or pushing this repository does not run a deployment. The version in `marketplace.config.json` is the build target, rather than proof of the currently hosted app version. Inspect the live `/data/extensions.json` metadata and the deployment result when checking which release is public. A website rollout also does not replace an app already installed on a user's Mac.
 
 The default SSH alias is `voca-server`; the default public origin is `https://local-ai-extension.nelson007.com`. Its DNS must point to the existing server before rollout. Caddy obtains and renews TLS through its existing persistent certificate storage. Existing key-based SSH must work with `BatchMode=yes`. Registry settings are read from the private, Git-ignored ReciteVocabulary `.env` outside this repository. Use `--credentials-file` or `--ssh-alias` to select another existing local configuration. The script reads only the registry account/credential and SSH alias fields, never transfers that configuration, and sends any registry password through login stdin. It does not place credentials in image layers, build arguments, command arguments, logs, or environment files.
 
 Each actual deployment first establishes one private SSH ControlMaster in a short, temporary directory with mode `0700`. It uses normal host-key/key configuration, batch authentication, a 60-second idle lifetime, and 15-second keepalives. Only this command-free connection setup may retry, at most three times, before creating a server lock or release. Every deployment stage and lock cleanup reuses that socket; a lost master fails closed instead of silently opening a new TCP connection. Remote commands are never automatically retried. The master closes after lock cleanup, and its temporary directory is removed even when a stage fails. Desktop/shared SSH control sockets are not used.
 
-Local Docker Desktop is already available. The production build runs on the existing Linux amd64 Docker server, so the Mac's arm64 architecture does not affect the production image. A local static-container check can use:
+The production image builds on the existing Linux amd64 Docker server; local Docker Desktop is not needed for this SSH deployment workflow. A local static-container check requires a working Docker installation and can use:
 
 ```sh
 docker build -t extension-market-website:local ExtensionMarket-website

@@ -134,6 +134,56 @@ final class NativeProtocolTests: XCTestCase {
         }
     }
 
+    func testExplicitSystemPromptPreservesLiteralTextAndIgnoresLegacyPromptFields() throws {
+        let system = "  \nExtension's own e\u{0301} prompt 中文🙂\n\tKeep this spacing.  \n"
+        let text = " \t{\"selectedWord\":\"ready\",\"surroundingSentence\":\"It is ready.\"}\n\n🙂  "
+        let bytes = try JSONSerialization.data(withJSONObject: ["id": "literal", "action": "polish", "text": text,
+            "systemPrompt": system, "targetLanguage": "ja", "tone": "friendly", "guidance": "Must not be appended."])
+        let request = try JSONDecoder().decode(HelperRequest.self, from: bytes)
+        XCTAssertEqual(Array(try XCTUnwrap(request.systemPrompt).utf8), Array(system.utf8))
+        XCTAssertEqual(Array(try request.prompt().utf8), Array(text.utf8))
+        XCTAssertFalse(try request.prompt().contains("Must not be appended."))
+
+        let legacy = HelperRequest(id: "legacy", action: .polish, text: text, targetLanguage: "ja", tone: "friendly")
+        XCTAssertNil(legacy.systemPrompt)
+        let wrapped = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(legacy.prompt().utf8)) as? [String: String])
+        XCTAssertEqual(wrapped["action"], "polish")
+        XCTAssertEqual(wrapped["targetLanguage"], "en")
+        XCTAssertEqual(wrapped["tone"], "friendly")
+        XCTAssertEqual(Array(try XCTUnwrap(wrapped["text"]).utf8), Array(text.utf8))
+    }
+
+    func testExplicitSystemPromptRejectsEmptyNullAndOversizedValuesBeforeInference() throws {
+        let maximum = String(repeating: "🙂", count: 12_000)
+        XCTAssertNoThrow(try HelperRequest(id: "max", action: .translate, text: "Text", systemPrompt: maximum).validate())
+        let oversizedGrapheme = "a" + String(repeating: "\u{0301}", count: 24_000)
+        for invalid in ["", " \n\t", "Prompt\0tail", String(repeating: "a", count: 12_001), oversizedGrapheme] {
+            for action in [HelperRequest.Action.translate, .polish, .ping, .listModels] {
+                XCTAssertThrowsError(try HelperRequest(id: "bad", action: action, text: "Text", systemPrompt: invalid).validate())
+            }
+        }
+        for value: Any in [1, true, ["prompt"]] {
+            let bytes = try JSONSerialization.data(withJSONObject: ["id": "bad", "action": "translate", "text": "Text", "systemPrompt": value])
+            XCTAssertThrowsError(try JSONDecoder().decode(HelperRequest.self, from: bytes))
+        }
+    }
+
+    func testExplicitPromptAllowsStructuredDataWithoutReducingTheOriginalSelectionLimit() throws {
+        for source in [String(repeating: "a", count: 24_000), String(repeating: "\u{0001}", count: 24_000)] {
+            let bytes = try JSONSerialization.data(withJSONObject: ["targetLanguage": "zh-CN", "text": source], options: [.sortedKeys])
+            let dataText = String(decoding: bytes, as: UTF8.self)
+            XCTAssertGreaterThan(dataText.count, HelperRequest.maximumTextCharacters)
+            XCTAssertNoThrow(try HelperRequest(id: "custom", action: .translate, text: dataText, systemPrompt: "Own prompt").validate())
+            XCTAssertEqual(Array(try HelperRequest(id: "custom", action: .translate, text: dataText, systemPrompt: "Own prompt").prompt().utf8), Array(bytes))
+            XCTAssertThrowsError(try HelperRequest(id: "legacy", action: .translate, text: dataText).validate())
+        }
+        XCTAssertNoThrow(try HelperRequest(id: "max", action: .translate, text: String(repeating: "a", count: 192_000), systemPrompt: "Own prompt").validate())
+        for oversized in [String(repeating: "a", count: 192_001), String(repeating: "🙂", count: 48_001)] {
+            XCTAssertThrowsError(try HelperRequest(id: "over", action: .translate, text: oversized, systemPrompt: "Own prompt").validate())
+        }
+        XCTAssertThrowsError(try HelperRequest(id: "null", action: .translate, text: "Data\0tail", systemPrompt: "Own prompt").validate())
+    }
+
     func testBrowserOriginIsRestrictedToInstalledExtension() {
         let id = "fmhfobfddchbeibojepeocgfemkpcklo"
         XCTAssertNoThrow(try NativeHostOrigin.validate(arguments: ["host"], allowedExtensionIDs: [id]))

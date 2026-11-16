@@ -27,9 +27,10 @@ public struct CapabilityAIRequest: Encodable, Sendable {
     /// Empty means use the provider/model chosen in the independent MacHelper app.
     public let model: String
     public let guidance: String?
+    public let systemPrompt: String?
 
     public init(id: String = UUID().uuidString, action: String, text: String,
-                targetLanguage: String? = nil, tone: String? = nil, model: String = "", guidance: String? = nil) throws {
+                targetLanguage: String? = nil, tone: String? = nil, model: String = "", guidance: String? = nil, systemPrompt: String? = nil) throws {
         guard !id.isEmpty, id.utf8.count <= 128,
               !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw CapabilityError.invalid("A valid request ID is required.")
@@ -40,8 +41,14 @@ public struct CapabilityAIRequest: Encodable, Sendable {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CapabilityError.invalid("Select some text first.")
         }
-        guard text.count <= 24_000, text.utf8.count <= 96_000 else {
-            throw CapabilityError.invalid("Select at most 24,000 characters at a time.")
+        if systemPrompt != nil {
+            guard text.utf8.count <= 192_000 else {
+                throw CapabilityError.invalid("Extension input data must contain at most 192,000 UTF-8 bytes.")
+            }
+        } else {
+            guard text.count <= 24_000, text.utf8.count <= 96_000 else {
+                throw CapabilityError.invalid("Select at most 24,000 characters at a time.")
+            }
         }
         guard !text.unicodeScalars.contains(where: { $0.value == 0 }) else {
             throw CapabilityError.invalid("This selection contains an unsupported null character.")
@@ -58,6 +65,13 @@ public struct CapabilityAIRequest: Encodable, Sendable {
                 throw CapabilityError.invalid("Tool guidance must contain at most 12,000 characters and no null characters.")
             }
         }
+        if let systemPrompt {
+            guard !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  systemPrompt.count <= 12_000, systemPrompt.utf8.count <= 48_000,
+                  !systemPrompt.contains("\0") else {
+                throw CapabilityError.invalid("The system prompt must be nonempty, contain at most 12,000 characters/48,000 UTF-8 bytes, and contain no null characters.")
+            }
+        }
         self.id = id
         self.action = action
         self.text = text
@@ -65,6 +79,7 @@ public struct CapabilityAIRequest: Encodable, Sendable {
         self.tone = tone
         self.model = model
         self.guidance = guidance
+        self.systemPrompt = systemPrompt
     }
 }
 

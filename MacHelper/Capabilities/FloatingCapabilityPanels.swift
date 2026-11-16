@@ -64,10 +64,82 @@ private final class CapabilityPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// A small dedicated mouse-capture area leaves the close button, result text
+/// selection, scroll view and footer controls with their normal AppKit behavior.
+private final class CapabilityPanelDragHandle: NSView {
+    var onBegin: ((CGPoint) -> Bool)?
+    var onMove: ((CGPoint) -> Void)?
+    var onEnd: (() -> Void)?
+    private var tracking = false
+    private var moved = false
+    private(set) var downEvents = 0
+    private(set) var dragEvents = 0
+    private(set) var upEvents = 0
+    private(set) var acceptedBegins = 0
+    private(set) var lastEventPoint: CGPoint?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var needsPanelToBecomeKey: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+
+    override func mouseDown(with event: NSEvent) {
+        downEvents += 1
+        let point = screenPoint(event)
+        lastEventPoint = point
+        guard !tracking, onBegin?(point) == true else { return }
+        acceptedBegins += 1
+        tracking = true; moved = false
+        NSCursor.closedHand.push()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        dragEvents += 1
+        let point = screenPoint(event)
+        lastEventPoint = point
+        guard tracking else { return }
+        moved = true
+        onMove?(point)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        upEvents += 1
+        let point = screenPoint(event)
+        lastEventPoint = point
+        if tracking, moved { onMove?(point) }
+        cancelDrag()
+    }
+
+    private func screenPoint(_ event: NSEvent) -> CGPoint {
+        CapabilityDragPointer.screenPoint(for: event, window: window,
+            primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
+    }
+
+    func cancelDrag() {
+        guard tracking else { return }
+        tracking = false; moved = false
+        NSCursor.pop()
+        onEnd?()
+    }
+}
+
+/// Use the position attached to this event. A live cursor poll can already be
+/// at a later queued event's endpoint, losing motion in fast/injected drags.
+enum CapabilityDragPointer {
+    static func screenPoint(for event: NSEvent, window: NSWindow?, primaryScreenTop: CGFloat) -> CGPoint {
+        if let point = event.cgEvent?.location {
+            return CGPoint(x: point.x, y: primaryScreenTop - point.y)
+        }
+        return window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+    }
+}
+
 @MainActor
 final class FloatingCapabilityPanels {
     var onPerform: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onResultMoved: (() -> Void)?
     private let iconPanel: NSPanel
     private let resultPanel: NSPanel
     private let title = NSTextField(labelWithString: "")
@@ -76,7 +148,9 @@ final class FloatingCapabilityPanels {
     private let footer = NSTextField(labelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let dragHandle = CapabilityPanelDragHandle()
     private var presentation = CapabilityPresentationState()
+    private var placement = CapabilityPanelPlacement()
 
     private let toolTitle: String
     private let systemSymbolName: String
@@ -91,6 +165,19 @@ final class FloatingCapabilityPanels {
     }
 
     var isVisible: Bool { iconPanel.isVisible || resultPanel.isVisible }
+    var isDraggingResultPanel: Bool { placement.isDragging }
+    /// Read-only diagnostic geometry for the explicit synthetic fixture.
+    var resultFrame: CGRect { resultPanel.frame }
+    var resultHeaderFrame: CGRect {
+        resultPanel.convertToScreen(dragHandle.convert(dragHandle.bounds, to: nil))
+    }
+    var dragDiagnostic: String {
+        let point = dragHandle.lastEventPoint.map { String(format: "%.1f,%.1f", Double($0.x), Double($0.y)) } ?? "none"
+        let local = dragHandle.convert(NSPoint(x: dragHandle.bounds.midX, y: dragHandle.bounds.midY), to: nil)
+        let hit = resultPanel.contentView?.hitTest(local).map { String(describing: type(of: $0)) } ?? "none"
+        return "header events down/drag/up/begin: \(dragHandle.downEvents)/\(dragHandle.dragEvents)/\(dragHandle.upEvents)/\(dragHandle.acceptedBegins)"
+            + " · last event AppKit: \(point) · center hit: \(hit)"
+    }
 
     func contains(_ point: CGPoint) -> Bool {
         (iconPanel.isVisible && iconPanel.frame.contains(point)) ||
@@ -98,6 +185,8 @@ final class FloatingCapabilityPanels {
     }
 
     func showIcon(near anchor: CGRect) {
+        dragHandle.cancelDrag()
+        placement.reset()
         resultPanel.orderOut(nil)
         place(iconPanel, size: CGSize(width: 34, height: 34), near: anchor)
         iconPanel.orderFrontRegardless()
@@ -154,6 +243,8 @@ final class FloatingCapabilityPanels {
     }
 
     func hide() {
+        dragHandle.cancelDrag()
+        placement.reset()
         iconPanel.orderOut(nil)
         resultPanel.orderOut(nil)
         presentation.reset()
@@ -206,12 +297,44 @@ final class FloatingCapabilityPanels {
         close.isBordered = false
         close.contentTintColor = .secondaryLabelColor
         close.toolTip = "Dismiss (Esc)"
-        let header = NSStackView(views: [title, close])
+        let grip = NSImageView()
+        grip.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: nil)
+        grip.contentTintColor = .tertiaryLabelColor
+        let dragContents = NSStackView(views: [grip, title])
+        dragContents.alignment = .centerY
+        dragContents.spacing = 7
+        dragContents.distribution = .fill
+        dragContents.translatesAutoresizingMaskIntoConstraints = false
+        dragHandle.addSubview(dragContents)
+        dragHandle.toolTip = "Drag to move this panel"
+        dragHandle.setAccessibilityLabel("Move result panel")
+        NSLayoutConstraint.activate([
+            grip.widthAnchor.constraint(equalToConstant: 12),
+            dragContents.leadingAnchor.constraint(equalTo: dragHandle.leadingAnchor),
+            dragContents.trailingAnchor.constraint(equalTo: dragHandle.trailingAnchor),
+            dragContents.topAnchor.constraint(equalTo: dragHandle.topAnchor),
+            dragContents.bottomAnchor.constraint(equalTo: dragHandle.bottomAnchor)
+        ])
+        dragHandle.onBegin = { [weak self] pointer in
+            guard let self, self.resultPanel.isVisible else { return false }
+            return self.placement.beginDrag(frame: self.resultPanel.frame, pointer: pointer)
+        }
+        dragHandle.onMove = { [weak self] pointer in
+            guard let self,
+                  let frame = self.placement.drag(to: pointer, visibleFrames: NSScreen.screens.map(\.visibleFrame)) else { return }
+            let changed = frame != self.resultPanel.frame
+            self.setResultFrame(frame)
+            if changed { self.onResultMoved?() }
+        }
+        dragHandle.onEnd = { [weak self] in self?.placement.endDrag() }
+        let header = NSStackView(views: [dragHandle, close])
         header.orientation = .horizontal
         header.spacing = 8
         header.alignment = .centerY
         header.distribution = .fill
         close.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        dragHandle.heightAnchor.constraint(equalTo: header.heightAnchor).isActive = true
+        dragHandle.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         output.isEditable = false
         output.isSelectable = true
@@ -281,11 +404,19 @@ final class FloatingCapabilityPanels {
 
     private func presentResult(near anchor: CGRect, resetScroll: Bool = false) {
         iconPanel.orderOut(nil)
+        if let frame = placement.frame(size: CGSize(width: 380, height: 268), near: anchor,
+                                       visibleFrames: NSScreen.screens.map(\.visibleFrame)) {
+            setResultFrame(frame)
+        }
         if !resultPanel.isVisible {
-            place(resultPanel, size: CGSize(width: 380, height: 268), near: anchor)
             resultPanel.orderFrontRegardless()
         }
         if resetScroll { output.scrollToBeginningOfDocument(nil) }
+    }
+
+    private func setResultFrame(_ frame: CGRect) {
+        if resultPanel.frame != frame { resultPanel.setFrame(frame, display: true) }
+        output.frame.size.width = max(1, frame.width - 26)
     }
 
     /// Append growing text without rebuilding the view or resetting a reader's

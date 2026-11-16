@@ -66,6 +66,7 @@ public struct HelperRequest: Decodable, Sendable {
     public static let languages = ["zh-CN", "zh-TW", "en", "ja", "ko", "fr", "de", "es", "pt", "it"]
     public static let tones = ["professional", "friendly", "concise"]
     public static let maximumTextCharacters = 24_000
+    public static let maximumExplicitPromptTextBytes = 192_000
     public let id: String
     public let action: Action
     public let text: String?
@@ -76,8 +77,9 @@ public struct HelperRequest: Decodable, Sendable {
     public let baseURL: String?
     public let guidance: String?
     public let stream: Bool?
+    public let systemPrompt: String?
 
-    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil, stream: Bool? = nil) {
+    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil, stream: Bool? = nil, systemPrompt: String? = nil) {
         self.id = id; self.action = action; self.text = text
         self.targetLanguage = targetLanguage; self.tone = tone
         self.model = model
@@ -85,6 +87,7 @@ public struct HelperRequest: Decodable, Sendable {
         self.baseURL = baseURL
         self.guidance = guidance
         self.stream = stream
+        self.systemPrompt = systemPrompt
     }
 
     public func validate() throws {
@@ -109,15 +112,29 @@ public struct HelperRequest: Decodable, Sendable {
         if let guidance, guidance.count > 12_000 || guidance.utf8.count > 48_000 || guidance.contains("\0") {
             throw MacHelperError.invalid("Translation guidance must contain at most 12,000 characters and no null characters.")
         }
+        if let systemPrompt { try Self.validateSystemPrompt(systemPrompt) }
         guard action != .ping, action != .listModels else { return }
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MacHelperError.invalid("The message is empty.")
         }
-        guard text.count <= Self.maximumTextCharacters, text.utf8.count <= 96_000 else {
-            throw MacHelperError.invalid("Messages must contain at most 24,000 characters.")
+        if systemPrompt != nil {
+            guard text.utf8.count <= Self.maximumExplicitPromptTextBytes else {
+                throw MacHelperError.invalid("Extension input data must contain at most 192,000 UTF-8 bytes.")
+            }
+        } else {
+            guard text.count <= Self.maximumTextCharacters, text.utf8.count <= 96_000 else {
+                throw MacHelperError.invalid("Messages must contain at most 24,000 characters.")
+            }
         }
         guard !text.unicodeScalars.contains(where: { $0.value == 0 }) else {
             throw MacHelperError.invalid("The message contains an unsupported null character.")
+        }
+    }
+
+    static func validateSystemPrompt(_ value: String) throws {
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              value.count <= 12_000, value.utf8.count <= 48_000, !value.contains("\0") else {
+            throw MacHelperError.invalid("The system prompt must be nonempty, contain at most 12,000 characters/48,000 UTF-8 bytes, and contain no null characters.")
         }
     }
 
@@ -145,6 +162,9 @@ public struct HelperRequest: Decodable, Sendable {
     /// A JSON field prevents quoted message content from becoming request instructions.
     public func prompt() throws -> String {
         try validate()
+        // Explicit extension prompts own both messages. Preserve source bytes
+        // represented by the strings; do not wrap or append legacy defaults.
+        if systemPrompt != nil { return text ?? "" }
         var fields = [
             "action": action.rawValue,
             "targetLanguage": action == .polish ? "en" : targetLanguage ?? "zh-CN",
@@ -181,10 +201,10 @@ public struct HelperResponse: Encodable, Sendable {
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "4.3.1"; error = nil; models = nil; defaultModel = nil
+        version = "6.1.0"; error = nil; models = nil; defaultModel = nil
     }
     public init(id: String, catalog: LocalGPTModelCatalog) {
-        self.id = id; ok = true; text = nil; model = nil; version = "4.3.1"; error = nil
+        self.id = id; ok = true; text = nil; model = nil; version = "6.1.0"; error = nil
         models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {

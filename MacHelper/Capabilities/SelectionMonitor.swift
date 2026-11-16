@@ -114,17 +114,31 @@ struct AccessibilitySelectionReader {
             if let text = attribute(kAXSelectedTextAttribute, of: element) as? String {
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .empty }
                 guard text.count <= 24_000, text.utf8.count <= 96_000 else { return .unavailable }
-                var range = CFRange(location: -1, length: 0)
                 let rangeValue = attribute(kAXSelectedTextRangeAttribute, of: element)
-                if let rangeValue, CFGetTypeID(rangeValue) == AXValueGetTypeID() {
-                    _ = AXValueGetValue(rangeValue as! AXValue, .cfRange, &range)
+                var numericRange: NSRange?
+                if let rangeValue {
+                    var range = CFRange(location: -1, length: 0)
+                    guard CFGetTypeID(rangeValue) == AXValueGetTypeID(),
+                          AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return .unavailable }
+                    numericRange = NSRange(location: range.location, length: range.length)
                 }
+                // AXSelectedText can be cached after a browser clears its
+                // selection. A caret (zero-length range) is not selected text.
+                // Read-only web text may instead expose opaque text markers.
+                let marker = numericRange == nil ? markerSelection(text: text, from: element) : nil
+                guard SelectionEvidence.isSelected(text: text, numericRange: numericRange,
+                                                    markerLength: marker?.length, markerText: marker?.text) else { return .empty }
+                if let numericRange, selectedRange(of: element) != numericRange { return .unavailable }
+                guard (attribute(kAXSelectedTextAttribute, of: element) as? String)?.utf16.elementsEqual(text.utf16) == true,
+                      let currentFocus = attribute(kAXFocusedUIElementAttribute, of: app),
+                      CFEqual(focused, currentFocus) else { return .unavailable }
                 var bounds = CGRect(x: fallbackPoint.x, y: fallbackPoint.y, width: 1, height: 1)
                 if let rangeValue, let axBounds = boundsForRange(rangeValue, in: element) {
                     bounds = FloatingGeometry.appKitRect(fromAccessibility: axBounds, mainScreenTop: mainScreenTop)
                 }
                 return .selection(TextSelection(text: text, sourcePID: sourcePID,
-                                                rangeLocation: range.location, rangeLength: range.length,
+                                                rangeLocation: numericRange?.location ?? -1,
+                                                rangeLength: numericRange?.length ?? text.utf16.count,
                                                 bounds: bounds))
             }
             guard let parent = attribute(kAXParentAttribute, of: element),
@@ -132,6 +146,41 @@ struct AccessibilitySelectionReader {
             element = parent as! AXUIElement
         }
         return .unavailable
+    }
+
+    /// Verify the selected range only, never an enclosing document. Chromium
+    /// may expose markers on a focused static node's short ancestor chain.
+    private func markerSelection(text: String, from origin: AXUIElement) -> (length: Int, text: String)? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.8
+        var element = origin
+        var visited: [AXUIElement] = []
+        for _ in 0..<4 {
+            guard ProcessInfo.processInfo.systemUptime < deadline,
+                  !visited.contains(where: { CFEqual($0, element) }) else { return nil }
+            visited.append(element)
+            AXUIElementSetMessagingTimeout(element, 0.12)
+            guard !isProtected(element) else { return nil }
+            if let value = attribute("AXSelectedTextMarkerRange", of: element),
+               CFGetTypeID(value) == AXTextMarkerRangeGetTypeID() {
+                let selected = value as! AXTextMarkerRange
+                let start = AXTextMarkerRangeCopyStartMarker(selected)
+                let end = AXTextMarkerRangeCopyEndMarker(selected)
+                guard !CFEqual(start, end),
+                      let orderedValue = parameter("AXTextMarkerRangeForUnorderedTextMarkers", value: [start, end] as CFArray, in: element),
+                      CFGetTypeID(orderedValue) == AXTextMarkerRangeGetTypeID(),
+                      let length = parameter("AXLengthForTextMarkerRange", value: orderedValue, in: element) as? Int,
+                      length > 0, length == text.utf16.count,
+                      ProcessInfo.processInfo.systemUptime < deadline,
+                      let actual = parameter("AXStringForTextMarkerRange", value: orderedValue, in: element) as? String,
+                      let current = attribute("AXSelectedTextMarkerRange", of: element), CFEqual(value, current),
+                      ProcessInfo.processInfo.systemUptime < deadline else { return nil }
+                return (length, actual)
+            }
+            guard let parent = attribute(kAXParentAttribute, of: element),
+                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+            element = parent as! AXUIElement
+        }
+        return nil
     }
 
     private func attribute(_ name: String, of element: AXUIElement) -> CFTypeRef? {
@@ -234,6 +283,7 @@ final class SelectionMonitor {
     var onPermissionChange: ((Bool) -> Void)?
     var onSelectionGesture: ((Bool) -> Void)?
     var shouldIgnoreOutsideClick: ((CGPoint) -> Bool)?
+    var isInteractingWithOverlay: (() -> Bool)?
     private var timer: Timer?
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -313,10 +363,17 @@ final class SelectionMonitor {
         }
     }
 
-    private func handle(_ event: NSEvent, local: Bool) {
+    // Internal so synthetic event-policy tests can exercise dismissal/rearm
+    // without installing monitors or posting events into any application.
+    func handle(_ event: NSEvent, local: Bool) {
+        // AppKit captures a header drag even after the cursor leaves its panel.
+        // Ignore that entire pointer sequence; Esc and app changes still dismiss.
+        if isInteractingWithOverlay?() == true,
+           [.leftMouseDown, .rightMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp].contains(event.type) { return }
         switch event.type {
         case .leftMouseDown, .rightMouseDown:
-            let point = NSEvent.mouseLocation
+            let point = CapabilityDragPointer.screenPoint(for: event, window: event.window,
+                primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
             if shouldIgnoreOutsideClick?(point) == true { return }
             context &+= 1
             onDismiss?()
@@ -326,8 +383,11 @@ final class SelectionMonitor {
             let selectedByDragging = dragging
             dragging = false
             if local { return }
-            selectionPoint = NSEvent.mouseLocation
-            onSelectionGesture?(selectedByDragging || event.clickCount >= 2)
+            selectionPoint = CapabilityDragPointer.screenPoint(for: event, window: event.window,
+                primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
+            let selecting = event.type == .leftMouseUp &&
+                (selectedByDragging || event.clickCount >= 2 || event.modifierFlags.contains(.shift))
+            onSelectionGesture?(selecting)
             scheduleRead()
         case .keyDown:
             if event.keyCode == 53 { context &+= 1; onDismiss?() }
@@ -368,7 +428,7 @@ final class SelectionMonitor {
     }
 
     private func readSelection() {
-        guard trusted, !reading, !dragging,
+        guard trusted, !reading, !dragging, isInteractingWithOverlay?() != true,
               let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
               pid != ownPID else { return }
         reading = true
@@ -381,6 +441,7 @@ final class SelectionMonitor {
                 guard let self else { return }
                 self.reading = false
                 guard self.context == capturedContext,
+                      self.isInteractingWithOverlay?() != true,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
                 self.onRead?(result)
             }

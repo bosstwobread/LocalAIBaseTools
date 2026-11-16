@@ -1,0 +1,4 @@
+{
+  "schemaVersion": 1,
+  "fields": [{"key": "prefix", "label": "Greeting", "type": "text", "default": "Hello"}]
+}

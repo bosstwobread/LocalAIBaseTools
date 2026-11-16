@@ -175,6 +175,19 @@
   .developer-section .eyebrow { margin-bottom:17px; }
   .developer-section h2 { font-size:43px; }
   .developer-section p:not(.eyebrow) { font-size:13px; color:var(--muted); line-height:1.9; margin:23px 0 25px; max-width:420px; }
+  .authoring-steps { padding-left:19px; margin:0 0 24px; font-size:12px; color:var(--muted); line-height:1.9; }
+  .authoring-steps li+li { margin-top:12px; }
+  .authoring-steps strong { color:var(--ink); }
+  .developer-actions { display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+  .developer-actions .text-link { font-size:11px; }
+  .developer-section p.authoring-note { font-size:10px; line-height:1.8; margin-top:19px; }
+  .guide-page { padding-top:45px; padding-bottom:70px; max-width:1000px; }
+  .guide-page h1 { margin:20px 0; font-size:42px; letter-spacing:-.04em; }
+  .guide-intro { color:var(--muted); line-height:1.8; max-width:730px; }
+  .guide-actions { display:flex; gap:20px; flex-wrap:wrap; align-items:center; margin:25px 0; }
+  .guide-document { background:#fafbf5; border:1px solid var(--line); border-radius:12px; padding:28px; margin-top:28px; }
+  .guide-document pre { margin:0; font:13px/1.85 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; overflow-wrap:anywhere; tab-size:2; }
+  .guide-references { display:flex; flex-wrap:wrap; gap:12px 25px; font-size:12px; }
   .source-preview { border:1px solid #dce1d5; border-radius:13px; background:#fafbf5; padding:23px 22px 0; transform:rotate(-1deg); }
   .source-preview-heading { display:flex; align-items:center; gap:9px; font-size:13px; padding-bottom:18px; border-bottom:1px solid #e5e9de; }
   .folder-symbol { color:var(--blue); font-size:22px; }

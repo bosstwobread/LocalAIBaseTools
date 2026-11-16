@@ -9,6 +9,7 @@ struct SourceToolInfo {
     let displayName: String
     let summary: String
     let version: String
+    let runtime: String
     let isEnabled: Bool
     let isRunning: Bool
     let sourceURL: URL?
@@ -24,6 +25,7 @@ final class SourceExtensionManager {
     var onChange: (() -> Void)?
     var onOpenAISettings: (() -> Void)?
     var onHideSettings: (() -> Void)?
+    var onApproveNativeExecution: ((SourceExtensionManifest) -> Bool)?
     var accessibilityGranted: Bool { AXIsProcessTrusted() }
     private let store: SourcePackageStore
     private let stateDirectory: URL
@@ -31,11 +33,14 @@ final class SourceExtensionManager {
     private let bundledSeedDirectory: URL?
     private let workerURL: URL
     private let helperURL: URL
+    private let nativeSDKURL: URL
     private let headless: Bool
     private let testTransform: (([String: Any]) async throws -> [String: Any])?
     private let testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])?
     private var definitions: [String: Definition] = [:]
     private var snapshots: [String: SourcePackageSnapshot] = [:]
+    private var preparedSettings: [String: PreparedSettings] = [:]
+    private var configurationErrors: [String: String] = [:]
     private var active: [String: Running] = [:]
     private var pending: [String: ScriptWorkerClient] = [:]
     private var watchers: [String: SourceFileWatcher] = [:]
@@ -55,6 +60,11 @@ final class SourceExtensionManager {
         var catalogs: [String] = []
     }
     private struct Definition { let entry: SourceCatalogEntry; let base: URL }
+    private struct PreparedSettings {
+        let snapshot: SourcePackageSnapshot
+        let schema: ScriptSettingsSchema?
+        var values: [String: Any]
+    }
     private final class Gate { var invoking = false; var calls = 0; var model: String? }
     private final class Running {
         var snapshot: SourcePackageSnapshot
@@ -72,13 +82,15 @@ final class SourceExtensionManager {
     }
 
     init(workerExecutableURL: URL, helperExecutableURL: URL, bundledCatalogURL: URL,
-         bundledSeedDirectory: URL? = nil, stateDirectory: URL? = nil,
+         bundledSeedDirectory: URL? = nil, stateDirectory: URL? = nil, nativeSDKURL: URL? = nil,
          sourceDirectory: URL = SourcePackageStore.defaultUserDirectory, headless: Bool = false,
          testTransform: (([String: Any]) async throws -> [String: Any])? = nil,
          testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])? = nil) {
         workerURL = workerExecutableURL; helperURL = helperExecutableURL
         self.bundledCatalogURL = bundledCatalogURL; self.bundledSeedDirectory = bundledSeedDirectory
         self.stateDirectory = stateDirectory ?? HelperSettingsStore.defaultFileURL.deletingLastPathComponent()
+        self.nativeSDKURL = nativeSDKURL ?? Bundle.main.resourceURL?.appendingPathComponent("NativeExtensionSDK/MacHelperNativeSDK.swift")
+            ?? URL(fileURLWithPath: "/unavailable/MacHelperNativeSDK.swift")
         self.headless = headless; self.testTransform = testTransform; self.testStreamingTransform = testStreamingTransform
         store = SourcePackageStore(directory: sourceDirectory)
     }
@@ -91,10 +103,11 @@ final class SourceExtensionManager {
             return SourceToolInfo(id: id, displayName: snapshot?.manifest.displayName ?? definition?.displayName ?? id,
                                   summary: snapshot?.manifest.summary ?? definition?.summary ?? "Editable source extension",
                                   version: snapshot?.manifest.version ?? definition?.version ?? "",
+                                  runtime: snapshot?.manifest.runtime ?? "",
                                   isEnabled: state.enabled[id] == true, isRunning: active[id]?.worker.generation != nil,
                                   sourceURL: exists ? try? store.installedURL(for: id) : nil,
                                   isLocallyModified: snapshot?.isLocallyModified ?? false, reloadCount: counts[id] ?? 0,
-                                  error: errors[id], status: statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source."))
+                                  error: errors[id] ?? configurationErrors[id], status: statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source."))
         }
     }
 
@@ -162,22 +175,109 @@ final class SourceExtensionManager {
         guard let url = try? store.installedURL(for: id), FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
-    func settingsSchema(for id: String) -> ScriptSettingsSchema? { active[id]?.schema }
-    func settings(for id: String) -> [String: Any] { active[id]?.settings ?? [:] }
-    func openAISettings() { onOpenAISettings?() }
-    func runDemo(for id: String) { active[id]?.capability.runDemo(text: "Hello! This is an editable Translation test. The amount is $125.50.") }
-    func translateClipboard(for id: String) {
-        guard active[id]?.snapshot.manifest.permissions.contains("clipboard.read") == true else { return }
-        active[id]?.capability.translateClipboard()
+    /// Reading a settings form never starts code, grants permissions, downloads
+    /// source, or enables a tool. Running tools keep the schema belonging to
+    /// their validated generation until the ordinary reloader replaces it.
+    func prepareSettings(for id: String) async throws {
+        guard !shuttingDown else { throw CancellationError() }
+        try SourcePackageRules.validateIdentifier(id)
+        do {
+            let (snapshot, configuration) = try readSettingsSource(for: id)
+            if active[id] == nil {
+                snapshots[id] = snapshot
+                preparedSettings[id] = configuration
+            }
+            configurationErrors.removeValue(forKey: id)
+            notify()
+        } catch {
+            // A broken local edit must remain on disk. A previously validated
+            // form may still be displayed, but saving always rereads the local
+            // schema and refuses invalid source instead of silently using it.
+            if active[id] == nil, preparedSettings[id] == nil,
+               let cached = try? SourcePackageInspector.snapshot(at: cacheURL(id)),
+               cached.manifest.identifier == id,
+               Set(cached.manifest.permissions).isSubset(of: Set(state.permissions[id] ?? [])),
+               let configuration = try? settingsConfiguration(cached, id: id) {
+                preparedSettings[id] = configuration
+            }
+            configurationErrors[id] = "Settings could not be read from the local source. " + error.localizedDescription
+            notify()
+            throw error
+        }
     }
 
+    func settingsSchema(for id: String) -> ScriptSettingsSchema? {
+        if let runtime = active[id] { return runtime.schema }
+        return preparedSettings[id]?.schema
+    }
+    func settings(for id: String) -> [String: Any] { active[id]?.settings ?? preparedSettings[id]?.values ?? [:] }
+    func promptValue(_ key: String, for id: String) throws -> String {
+        guard let snapshot = active[id]?.snapshot ?? preparedSettings[id]?.snapshot,
+              let schema = settingsSchema(for: id) else {
+            throw SourcePackageError.invalid("Load this extension's validated source before editing a prompt.")
+        }
+        let path = try schema.promptPath(for: key)
+        guard let value = snapshot.resources[path] else { throw SourcePackageError.invalid("The declared prompt resource is unavailable.") }
+        try ScriptPromptResource.validate(value)
+        return value
+    }
+    func permissions(for id: String) -> [String] {
+        active[id]?.snapshot.manifest.permissions ?? snapshots[id]?.manifest.permissions ?? []
+    }
+    /// Permission discovery reads validated source only; it never builds or runs
+    /// disabled native code. Catalog installations use their manifest review.
+    func requiresNativeApproval(for id: String) -> Bool {
+        guard let snapshot = try? store.snapshot(for: id), snapshot.manifest.runtime == "native" else { return false }
+        return !(state.permissions[id] ?? []).contains("native.execute")
+    }
+    func openAISettings() { onOpenAISettings?() }
+
     func updateSetting(_ key: String, value: Any, for id: String) async throws {
-        guard let runtime = active[id], let schema = runtime.schema else { return }
-        try schema.validate(value, for: key)
-        var values = runtime.settings; values[key] = value
-        try saveSettings(values, id: id)
-        runtime.settings = values
-        try await reload(id)
+        guard !shuttingDown else { throw CancellationError() }
+        if let runtime = active[id] {
+            guard let schema = runtime.schema else { throw SourcePackageError.invalid("This tool has no additional settings.") }
+            try schema.validate(value, for: key)
+            var values = runtime.settings; values[key] = value
+            try saveSettings(values, id: id)
+            runtime.settings = values
+            try await reload(id)
+        } else {
+            // Do not reuse a stale form after a disabled tool's source changed.
+            // This synchronous read/validate/write cannot interleave with an
+            // enable, and deliberately does not touch enabled/permission state.
+            let (snapshot, configuration) = try readSettingsSource(for: id)
+            guard let schema = configuration.schema else { throw SourcePackageError.invalid("This tool has no additional settings.") }
+            try schema.validate(value, for: key)
+            var values = configuration.values; values[key] = value
+            try saveSettings(values, id: id)
+            snapshots[id] = snapshot
+            preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
+            configurationErrors.removeValue(forKey: id)
+            notify()
+        }
+    }
+
+    func updatePrompt(_ key: String, value: String, expectedValue: String, for id: String) async throws {
+        guard !shuttingDown else { throw CancellationError() }
+        let (snapshot, configuration) = try readSettingsSource(for: id)
+        guard let displayed = active[id]?.snapshot ?? preparedSettings[id]?.snapshot,
+              displayed.fingerprint == snapshot.fingerprint else {
+            throw SourcePackageError.invalid("The extension source changed since this editor was loaded. Revert to the current source before saving again.")
+        }
+        let updated = try ScriptPromptResource.replace(in: snapshot, key: key, value: value, expectedValue: expectedValue)
+        if active[id] != nil {
+            // Avoid a competing watcher reload superseding the explicit save's
+            // generation. The normal activator restores watching on success.
+            reloadTasks.removeValue(forKey: id)?.cancel()
+            watchers.removeValue(forKey: id)?.stop()
+            defer { if state.enabled[id] == true { watch(id) } }
+            try await reload(id)
+        } else {
+            snapshots[id] = updated
+            preparedSettings[id] = PreparedSettings(snapshot: updated, schema: configuration.schema, values: configuration.values)
+            configurationErrors.removeValue(forKey: id)
+            notify()
+        }
     }
 
     func importSource(from url: URL) async throws {
@@ -308,15 +408,27 @@ final class SourceExtensionManager {
             guard approving || approved.map({ Set(snapshot.manifest.permissions).isSubset(of: Set($0)) }) == true else {
                 throw SourcePackageError.invalid("This edit requests new permissions. Disable and re-enable the extension to approve them.")
             }
+            if snapshot.manifest.runtime == "native", !(approved ?? []).contains("native.execute"), !headless {
+                guard approving, onApproveNativeExecution?(snapshot.manifest) == true else {
+                    statuses[id] = active[id] == nil
+                        ? "Native execution was not approved. The extension remains disabled."
+                        : "Running the last working version; native execution was not approved."
+                    notify()
+                    throw CancellationError()
+                }
+                guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+            }
             let schema = try parseSchema(snapshot)
             let values = try loadSettings(id, schema: schema)
-            let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values)
+            let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values, epoch: epoch)
             guard epochs[id] == epoch, !shuttingDown, !Task.isCancelled else { await worker.stop(); throw CancellationError() }
             let old = active[id]
             let capability = old?.capability ?? SelectionTranslationCapability(title: snapshot.manifest.displayName)
             capability.stop()
             let runtime = Running(snapshot: snapshot, worker: worker, gate: gate, capability: capability, schema: schema, settings: values)
             active[id] = runtime
+            preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
+            configurationErrors.removeValue(forKey: id)
             if pending[id] === worker { pending.removeValue(forKey: id) }
             state.enabled[id] = true
             if approving { state.permissions[id] = snapshot.manifest.permissions }
@@ -356,9 +468,18 @@ final class SourceExtensionManager {
         }
     }
 
-    private func makeWorker(snapshot: SourcePackageSnapshot, settings: [String: Any]) async throws -> (ScriptWorkerClient, Gate) {
-        let worker = ScriptWorkerClient(executableURL: workerURL), gate = Gate()
+    private func makeWorker(snapshot: SourcePackageSnapshot, settings: [String: Any], epoch: UUID?) async throws -> (ScriptWorkerClient, Gate) {
         let id = snapshot.manifest.identifier
+        let executable: URL
+        if snapshot.manifest.runtime == "native" {
+            statuses[id] = "Building native extension…"; notify()
+            let builder = NativeSourceBuilder(sdkURL: nativeSDKURL,
+                cacheDirectory: stateDirectory.appendingPathComponent("NativeBuildCache", isDirectory: true))
+            executable = try await builder.build(snapshot: snapshot)
+        } else { executable = workerURL }
+        try Task.checkCancellation()
+        guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+        let worker = ScriptWorkerClient(executableURL: executable), gate = Gate()
         pending[id] = worker
         do {
             let commands = try await worker.load(entrySource: snapshot.entrySource, resources: snapshot.resources,
@@ -373,6 +494,8 @@ final class SourceExtensionManager {
             guard snapshot.manifest.commands.allSatisfy({ commands.contains($0.identifier) }) else {
                 throw SourcePackageError.invalid("The source does not implement every command declared by its manifest.")
             }
+            try Task.checkCancellation()
+            guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
             return (worker, gate)
         } catch {
             if pending[id] === worker { pending.removeValue(forKey: id) }
@@ -402,11 +525,12 @@ final class SourceExtensionManager {
         }
         let action = payload["action"] as? String ?? "translate"
         guard ["translate", "polish"].contains(action), let text = payload["text"] as? String else {
-            throw SourcePackageError.invalid("The script requested an unsupported AI transformation.")
+            throw SourcePackageError.invalid("The extension requested an unsupported AI transformation.")
         }
         let request = try CapabilityAIRequest(action: action, text: text,
             targetLanguage: payload["targetLanguage"] as? String, tone: payload["tone"] as? String,
-            model: payload["model"] as? String ?? "", guidance: payload["guidance"] as? String)
+            model: payload["model"] as? String ?? "", guidance: payload["guidance"] as? String,
+            systemPrompt: payload["systemPrompt"] as? String)
         let client = NativeHelperTransformClient(executableURL: helperURL)
         let response: CapabilityAIResponse
         if let onProgress {
@@ -437,7 +561,7 @@ final class SourceExtensionManager {
     private func replaceWorker(_ runtime: Running) async throws {
         let id = runtime.snapshot.manifest.identifier
         let epoch = epochs[id]
-        let (worker, gate) = try await makeWorker(snapshot: runtime.snapshot, settings: runtime.settings)
+        let (worker, gate) = try await makeWorker(snapshot: runtime.snapshot, settings: runtime.settings, epoch: epoch)
         guard active[id] === runtime, state.enabled[id] == true, !shuttingDown, epochs[id] == epoch else {
             if pending[id] === worker { pending.removeValue(forKey: id) }
             await worker.stop()
@@ -453,6 +577,7 @@ final class SourceExtensionManager {
         watchers.removeValue(forKey: id)?.stop()
         let candidate = pending.removeValue(forKey: id)
         let runtime = active.removeValue(forKey: id)
+        if let runtime { preparedSettings[id] = PreparedSettings(snapshot: runtime.snapshot, schema: runtime.schema, values: runtime.settings) }
         runtime?.capability.stop()
         if let candidate { await candidate.stop() }
         if let runtime { await runtime.worker.stop() }
@@ -471,7 +596,17 @@ final class SourceExtensionManager {
     private func parseSchema(_ snapshot: SourcePackageSnapshot) throws -> ScriptSettingsSchema? {
         guard let path = snapshot.manifest.settingsSchema else { return nil }
         guard let text = snapshot.resources[path] else { throw SourcePackageError.invalid("The settings schema is missing.") }
-        return try ScriptSettingsSchema(data: Data(text.utf8))
+        let schema = try ScriptSettingsSchema(data: Data(text.utf8))
+        try schema.validatePromptResources(in: snapshot)
+        return schema
+    }
+    private func readSettingsSource(for id: String) throws -> (SourcePackageSnapshot, PreparedSettings) {
+        let snapshot = try store.snapshot(for: id)
+        return (snapshot, try settingsConfiguration(snapshot, id: id))
+    }
+    private func settingsConfiguration(_ snapshot: SourcePackageSnapshot, id: String) throws -> PreparedSettings {
+        let schema = try parseSchema(snapshot)
+        return PreparedSettings(snapshot: snapshot, schema: schema, values: try loadSettings(id, schema: schema))
     }
     private func loadSettings(_ id: String, schema: ScriptSettingsSchema?) throws -> [String: Any] {
         guard let schema else { return [:] }
@@ -512,7 +647,7 @@ final class SourceExtensionManager {
         guard snapshot.manifest.identifier == id,
               Set(snapshot.manifest.permissions).isSubset(of: Set(state.permissions[id] ?? [])) else { return }
         let schema = try parseSchema(snapshot), values = try loadSettings(id, schema: schema)
-        let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values)
+        let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values, epoch: epoch)
         guard !shuttingDown, state.enabled[id] == true, epochs[id] == epoch else {
             if pending[id] === worker { pending.removeValue(forKey: id) }
             await worker.stop()
@@ -520,6 +655,7 @@ final class SourceExtensionManager {
         }
         let capability = SelectionTranslationCapability(title: snapshot.manifest.displayName)
         active[id] = Running(snapshot: snapshot, worker: worker, gate: gate, capability: capability, schema: schema, settings: values)
+        preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
         if pending[id] === worker { pending.removeValue(forKey: id) }
         capability.onPerform = { [weak self] text in guard let self else { throw CancellationError() }; return try await self.performCommand(for: id, text: text) }
         capability.onPerformStreaming = { [weak self] text, onProgress in

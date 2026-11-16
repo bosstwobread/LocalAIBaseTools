@@ -1,9 +1,9 @@
-# MacHelper Extension SDK
+# Legacy MacHelper bundle SDK
 
-The version-one native extension contract is a small Objective-C header imported by Swift or Objective-C. It uses Foundation and AppKit types, so extensions do not link MacHelper's implementation or depend on its private Swift ABI. The SDK adds no implementation classes or shared dynamic library to distribute.
+This schema-1 Objective-C/AppKit interface is retained for isolated CLI verification and migration reference. MacHelper 6 does not load or auto-start these bundles in its normal app flow, and the separate Native Plug-ins settings interface has been removed.
 
-An independently built `.machextension` bundle supplies an `NSPrincipalClass` implementing `MacHelperExtension`. MacHelper calls the factory, starts the instance with a typed `MacHelperExtensionContext`, and embeds the extension's settings view controller in its Extensions window. Lifecycle and settings methods run on the main thread. The context exposes the installed helper path, a private per-extension settings directory, the host version, and callbacks to show AI settings or hide the settings window.
+New native tools use the unified schema-2 source format with `runtime: "native"`, one Swift entry, `native.execute`, and the standalone [native worker SDK](../NativeExtensionSDK/README.md). See [Native source extensions](../../docs/Native-Extensions.md) for current authoring and runtime migration.
 
-External extensions are discovered without loading their code. The user enables an extension before MacHelper loads it. External executable/manifest changes require enabling the new version again. Native extensions run trusted code inside the app; this interface is not a sandbox.
+The old declaration-only [MacHelperExtensionSDK.h](Sources/MacHelperExtensionSDK/include/MacHelperExtensionSDK.h) describes a trusted in-process `.machextension` bundle whose principal class implements `MacHelperExtension`. Its context exposes a helper path, settings directory, host version, and UI callbacks. Its `makeSettingsViewController` returns an `NSViewController` for in-process embedding. Those objects cannot be passed directly to the new separate worker; migrate settings into `settings.schema.json` and move command logic into `MacHelperNative.run`.
 
-See [the development guide](../../docs/Extension-Development.md) for the manifest, packaging, example, and independent integration check. The full API is in [MacHelperExtensionSDK.h](Sources/MacHelperExtensionSDK/include/MacHelperExtensionSDK.h).
+The old [External Greeting fixture](../../examples/ExternalGreeting/README.md) and `scripts/test-extension-plugin.py` still exercise the historical factory/start/stop/settings contract with isolated state. They are not the installation path for current extensions and do not make an old loaded bundle hot reload.

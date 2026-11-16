@@ -142,6 +142,49 @@ test('root and mounted-prefix assets, fetches and downloads resolve at their own
   }
 });
 
+test('create and customize entry offers a local readable guide and a Markdown AI download', async () => {
+  for (const suffix of ['/', '/extension-market/']) {
+    const view = await page({ base: `https://market.example${suffix}` });
+    try {
+      const navigation = view.document.querySelector('.main-nav a[href="#developers"]');
+      assert.match(navigation.textContent, /Create & customize/);
+      const section = view.document.querySelector('#developers');
+      assert.match(section.textContent, /Edit Source/);
+      assert.match(section.textContent, /Install Source/);
+      assert.match(section.textContent, /enabled tool reloads automatically/);
+      const read = section.querySelector('a[href="./developer-guide.html"]');
+      const download = section.querySelector('a[download="AI_EXTENSION_GUIDE.md"]');
+      assert.equal(read.href, `https://market.example${suffix}developer-guide.html`);
+      assert.equal(download.href, `https://market.example${suffix}AI_EXTENSION_GUIDE.md`);
+      view.window.location.hash = '#extension/translation';
+      await until(() => view.document.querySelector('#tool-dialog').open);
+      assert.match(view.document.querySelector('#overview-panel').textContent, /Make it yours/);
+      assert.equal(view.document.querySelector('#overview-panel a[download="AI_EXTENSION_GUIDE.md"]').href, download.href);
+      const guide = view.document.querySelector('#overview-panel a[href$="developer-guide.html"]');
+      assert.equal(guide.href, read.href);
+      view.document.querySelector('.dialog-close').click();
+      view.window.location.hash = '#extension/messagehelper-upwork';
+      await until(() => view.document.querySelector('#tool-dialog').open);
+      assert.equal(view.document.querySelector('#overview-panel a[download="AI_EXTENSION_GUIDE.md"]'), null, 'Browser tools must not claim the source-worker editing flow');
+    } finally { view.close(); }
+  }
+});
+
+test('published AI guide preserves original text and exposes only allowlisted public documents', () => {
+  const root = path.resolve(__dirname, '..');
+  const guide = fs.readFileSync(path.join(root, 'AI_EXTENSION_GUIDE.md'), 'utf8');
+  assert.equal(fs.readFileSync(path.join(__dirname, 'dist/AI_EXTENSION_GUIDE.md'), 'utf8'), guide);
+  const rendered = new JSDOM(fs.readFileSync(path.join(__dirname, 'dist/developer-guide.html'), 'utf8'));
+  try {
+    assert.equal(rendered.window.document.querySelector('.guide-document pre').textContent, guide);
+    assert.equal(rendered.window.document.querySelectorAll('script').length, 0);
+    assert.equal(rendered.window.document.querySelector('a[download="AI_EXTENSION_GUIDE.md"]').getAttribute('href'), './AI_EXTENSION_GUIDE.md');
+  } finally { rendered.window.close(); }
+  assert.deepEqual(fs.readdirSync(path.join(__dirname, 'dist/docs')).sort(), ['Extension-Development.md', 'MacHelper-Protocol.md', 'Native-Extensions.md', 'Source-Extensions.md']);
+  assert.equal(fs.existsSync(path.join(__dirname, 'dist/AI_DEPLOYMENT.md')), false);
+  assert.equal(fs.readFileSync(path.join(__dirname, 'dist/NativeExtensionSDK/MacHelperNativeSDK.swift'), 'utf8'), fs.readFileSync(path.join(root, 'MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift'), 'utf8'));
+});
+
 test('metadata is rendered as text and unsafe links never become executable DOM', async () => {
   const unsafe = clone(catalog);
   const tool = unsafe.extensions.find(item => item.kind === 'mac-source');
@@ -162,5 +205,37 @@ test('metadata is rendered as text and unsafe links never become executable DOM'
     assert.ok([...view.document.querySelectorAll('a')].every(node => !node.href.startsWith('javascript:')));
     assert.ok([...view.document.querySelectorAll('img')].every(node => !node.src.startsWith('javascript:')));
     assert.equal(view.window.pwned, undefined);
+  } finally { view.close(); }
+});
+
+
+test('native source tools share installation and customization with runtime-specific requirements', async () => {
+  const data = clone(catalog);
+  const tool = data.extensions.find(item => item.kind === 'mac-source');
+  tool.runtime = 'native';
+  tool.permissions = ['native.execute', 'selection.read', 'ui.panel'];
+  const view = await page({ data });
+  try {
+    assert.match(view.document.querySelector('.extension-grid').textContent, /NATIVE MACOS TOOL/);
+    view.window.location.hash = `#extension/${tool.slug}`;
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /Editable native Swift source/);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /trusted native Swift code/);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /Edit Source/);
+    view.document.querySelector('#install-tab').click();
+    assert.ok(view.document.querySelector('#install-panel a[href^="machelper://install"]'));
+    assert.match(view.document.querySelector('#install-panel').textContent, /Xcode Command Line Tools/);
+    assert.match(view.document.querySelector('#install-panel').textContent, /without restarting MacHelper/);
+  } finally { view.close(); }
+});
+
+
+test('unknown declared source runtimes fail catalog validation', async () => {
+  const data = clone(catalog);
+  data.extensions.find(item => item.kind === 'mac-source').runtime = 'shell';
+  const view = await page({ data });
+  try {
+    assert.equal(view.document.querySelector('#catalog-error').hidden, false);
+    assert.equal(view.document.querySelector('#extension-grid').hidden, true);
   } finally { view.close(); }
 });

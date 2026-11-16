@@ -212,6 +212,41 @@ final class AIProviderClientTests: XCTestCase {
         }
     }
 
+    func testExplicitSystemPromptAndUserTextReachBothLocalProvidersUnchanged() async throws {
+        let system = " \nOnly this extension's e\u{0301} prompt 中文🙂.\n\t  "
+        let text = "  First line\n\n{\"word\":\"ready\"}\t🙂  \n"
+        for provider in [AIProvider.ollama, .lmStudio] {
+            ProviderURLProtocol.configure { request in
+                .init(json: request.httpMethod == "GET" ? self.catalog(["selected-model"], provider: provider)
+                      : self.completed("Result", model: "selected-model", provider: provider))
+            }
+            let request = HelperRequest(id: "literal", action: .polish, text: text, targetLanguage: "ja",
+                tone: "friendly", guidance: "Legacy guidance must not be appended.", systemPrompt: system)
+            _ = try await client().answer(request: request, workingDirectory: directory,
+                                          settings: HelperSettings(provider: provider, model: "selected-model"))
+            let generated = try XCTUnwrap(ProviderURLProtocol.requests.last)
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(generated.httpBody)) as? [String: Any])
+            let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
+            XCTAssertEqual(messages.count, 2)
+            XCTAssertEqual(messages.map { $0["role"] }, ["system", "user"])
+            XCTAssertEqual(Array(try XCTUnwrap(messages[0]["content"]).utf8), Array(system.utf8))
+            XCTAssertEqual(Array(try XCTUnwrap(messages[1]["content"]).utf8), Array(text.utf8))
+            XCTAssertNil(body["tools"])
+            XCTAssertNil(body["functions"])
+            XCTAssertEqual(body["stream"] as? Bool, false)
+        }
+    }
+
+    func testInvalidExplicitPromptFailsBeforeAnyProviderRequest() async {
+        ProviderURLProtocol.configure { _ in XCTFail("Invalid prompts must not reach a provider"); return .init() }
+        do {
+            _ = try await client().answer(request: HelperRequest(id: "bad", action: .translate, text: "Text", systemPrompt: " \n"),
+                                          workingDirectory: directory, settings: HelperSettings(provider: .ollama, model: "selected-model"))
+            XCTFail("Expected invalid prompt rejection")
+        } catch { XCTAssertTrue(error is MacHelperError) }
+        XCTAssertTrue(ProviderURLProtocol.requests.isEmpty)
+    }
+
     func testMissingOrRemovedModelDoesNotSendTextOrFallback() async {
         for model in ["", "removed-model"] {
             ProviderURLProtocol.configure { _ in .init(json: ["models": [["model": "installed-model"]]]) }

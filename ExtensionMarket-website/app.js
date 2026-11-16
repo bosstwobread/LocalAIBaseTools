@@ -28,7 +28,8 @@
   const textLink = (label, href, extra = {}) => h('a', { class: 'text-link', href, ...extra }, label, h('span', { 'aria-hidden': 'true' }, '↗'));
   function normalize(tool) {
     if (!tool || typeof tool.id !== 'string' || typeof tool.slug !== 'string' || typeof tool.name !== 'string' || !['mac-source', 'browser'].includes(tool.kind)) return null;
-    return { ...tool, summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
+    if (tool.kind === 'mac-source' && tool.runtime !== undefined && !['javascript', 'native'].includes(tool.runtime)) return null;
+    return { ...tool, runtime: tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'native' : 'javascript') : 'browser', summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
   }
   async function loadCatalog() {
     if (state.loading) return;
@@ -94,7 +95,7 @@
     install.addEventListener('click', () => navigate(tool.slug, 'install'));
     return h('article', { class: 'extension-card' }, visual,
       h('div', { class: 'card-content' },
-        h('div', { class: 'card-kicker' }, h('span', {}, tool.kind === 'mac-source' ? 'MACOS SOURCE TOOL' : 'BROWSER COMPANION'), h('span', { class: 'card-version' }, `v${tool.version || '—'}`)),
+        h('div', { class: 'card-kicker' }, h('span', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'NATIVE MACOS TOOL' : 'MACOS SOURCE TOOL') : 'BROWSER COMPANION'), h('span', { class: 'card-version' }, `v${tool.version || '—'}`)),
         h('div', { class: 'card-heading' }, image(tool.icon, '', { class: 'card-icon', width: '42', height: '42' }), h('div', {}, h('h3', {}, h('a', { href: details }, tool.name)), h('p', {}, tool.category))),
         h('p', { class: 'card-summary' }, tool.summary),
         h('ul', { class: 'card-features' }, tool.features.slice(0, 2).map(feature => h('li', {}, feature))),
@@ -190,7 +191,7 @@
     if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, 'What it does'), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, feature))));
     for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, shot.alt || `${tool.name} interface preview`, { width: '1160', height: '720' }), h('figcaption', {}, shot.caption || 'Interface preview · Example content')));
     if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, 'Access this tool uses'), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
-    const facts = h('dl', {}, h('dt', {}, 'Platforms'), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, 'Package'), h('dd', {}, tool.kind === 'mac-source' ? 'Editable source extension' : 'Browser extension ZIP'), h('dt', {}, 'Version'), h('dd', {}, tool.version || '—'));
+    const facts = h('dl', {}, h('dt', {}, 'Platforms'), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, 'Package'), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'Editable native Swift source' : 'Editable JavaScript source') : 'Browser extension ZIP'), h('dt', {}, 'Version'), h('dd', {}, tool.version || '—'));
     if (tool.updatedAt) {
       const date = new Date(`${String(tool.updatedAt).slice(0, 10)}T00:00:00`);
       if (!Number.isNaN(date.valueOf())) facts.append(h('dt', {}, 'Updated'), h('dd', {}, new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(date)));
@@ -198,17 +199,23 @@
     const share = h('button', { type: 'button', class: 'link-button' }, 'Copy details link ↗');
     share.addEventListener('click', () => copy(new URL(`#extension/${encodeURIComponent(tool.slug)}`, base).href, share));
     const side = h('aside', { class: 'detail-facts' }, facts, textLink('View complete source', url(tool.sourceUrl) || sourceURL(), external), share);
+    if (tool.kind === 'mac-source') {
+      main.append(h('h3', { class: 'detail-subheading' }, 'Make it yours'),
+        h('p', { class: 'detail-description' }, 'In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.'),
+        textLink('Create or customize with your AI assistant', new URL('developer-guide.html', base).href));
+      side.append(textLink('Download the AI extension guide', new URL('AI_EXTENSION_GUIDE.md', base).href, { download: 'AI_EXTENSION_GUIDE.md' }));
+    }
     return h('div', { class: 'detail-grid' }, main, side);
   }
   function permissionLabel(value) {
-    return ({ 'selection.read': 'Read text you select through macOS Accessibility.', 'clipboard.read': 'Read clipboard text only when you choose the clipboard action.', 'ai.transform': 'Send text to your shared AI connection for an explicit action.', 'ui.panel': 'Display a nearby floating result panel.', nativeMessaging: 'Connect the browser extension to MacHelper on your Mac.', storage: 'Save extension preferences in browser storage.' })[value] || value;
+    return ({ 'selection.read': 'Read text you select through macOS Accessibility.', 'clipboard.read': 'Read clipboard text only when you choose the clipboard action.', 'ai.transform': 'Send text to your shared AI connection for an explicit action.', 'ui.panel': 'Display a nearby floating result panel.', 'native.execute': 'Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox.', nativeMessaging: 'Connect the browser extension to MacHelper on your Mac.', storage: 'Save extension preferences in browser storage.' })[value] || value;
   }
   function installContent(tool) {
-    const native = tool.kind === 'mac-source';
+    const sourceTool = tool.kind === 'mac-source';
     const container = h('div');
     const callout = h('div', { class: 'install-callout' });
     const packageURL = url(tool.packageUrl);
-    if (native) {
+    if (sourceTool) {
       const catalog = url(tool.catalogUrl || 'catalog.json');
       const scheme = new URL('machelper://install');
       scheme.searchParams.set('catalog', catalog);
@@ -224,6 +231,7 @@
       catalogCopy.addEventListener('click', () => copy(catalog, catalogCopy));
       fallbacks.append(catalogCopy);
       container.append(callout, fallbacks);
+      if (tool.runtime === 'native') container.append(h('p', { class: 'install-help' }, 'Native Swift source requires MacHelper 6 and Xcode Command Line Tools. Review native.execute before enabling. Saved code is compiled locally and its worker is replaced without restarting MacHelper.'));
     } else {
       callout.append(h('h3', {}, 'Add the browser companion'), h('p', {}, 'For Chrome or Edge on your Mac. Install and open MacHelper first so the extension can use your shared AI connection.'));
       if (packageURL) callout.append(h('a', { class: 'button button-blue', href: packageURL, download: '' }, 'Download extension ZIP', h('span', { 'aria-hidden': 'true' }, '↓')));

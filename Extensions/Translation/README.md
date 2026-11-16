@@ -1,28 +1,39 @@
 # Translation — editable source extension
 
-This folder contains the complete source of the Translation tool. It is JavaScript plus a prompt, a settings schema, and a manifest; no compiler or separate app is needed to edit its behavior.
+Translation 4.3 requires MacHelper 4.5 or later. This folder is its complete JavaScript source, manifest, settings schema, prompts, and license. It needs no separate app or compiler.
 
-Enable Translation in MacHelper → Extensions. MacHelper installs the complete package into its per-user Extensions folder. **Edit Source** opens that working folder in VS Code when available. Save a change to `main.js`, `prompts/translate.txt`, or `settings.schema.json` and only Translation reloads. The MacHelper app and other tools stay running.
+Enable Translation in **MacHelper → Extensions**, then choose it from the installed list. Select text in a supported Mac app and click the floating icon. Results stream into a nearby panel; drag its header to move it without interrupting the response. Copy is available after completion. Esc, selection changes, and app switching dismiss/cancel the result.
 
-- `main.js`: selected-text handling, AI request, and result formatting.
-- `prompts/translate.txt`: translation guidance.
-- `prompts/word-in-context.txt`: selected-word meaning and supplied-sentence translation guidance.
-- `settings.schema.json`: editable central settings form and defaults.
+## Edit the actual prompts
+
+The **Translation prompt** and **Word lookup prompt** text boxes show `prompts/translate.txt` and `prompts/word-in-context.txt` directly. Save an edit to update that source file and reload the tool. Unsaved edits can be reverted. Prompts are not copied into the preferences file. Saving refuses conflicting external edits rather than overwriting them.
+
+Each AI call sends the chosen prompt file verbatim in `systemPrompt`. MacHelper adds no translation instructions, style suffix, or action/tone wrapper to this explicit-prompt path. Selected content and settings are separate user-message data:
+
+- Normal selections: a JSON object containing `text` and `targetLanguage`.
+- One selected word: a JSON object containing `selectedWord`, `surroundingSentence`, `targetLanguage`, and localized `labels` (`meaning`, `sentence`, `word`, and `unavailable`).
+
+The default prompts explain these data fields, treat selected content as untrusted, and request translation or word meaning. Change the prompt to change those instructions. Shared provider tools remain disabled independently of the prompt. The returned text and streamed text are displayed without extra prefixes or notes added by the tool.
+
+There is no Writing style preset. Any desired tone or output format belongs in the prompt. Changing the target-language selector changes input data, not the prompt text.
+
+## Selected words
+
+One lexical word uses the supplied sentence to explain its contextual meaning, then translate the full sentence. The default word prompt requests the localized section headings from `labels`. Contractions and hyphenated words are supported. Unspaced-script selections use word segmentation when available so a whole phrase does not become a word lookup.
+
+If context is unavailable, invalid, oversized, or unrelated to the word, `surroundingSentence` is `null`. The default prompt requests general meanings and the localized context-unavailable note without inventing a sentence. Word lookup is limited to 128 UTF-16 units; context is limited to 2,000 UTF-16 units and 8,000 UTF-8 bytes. Longer selections use ordinary translation.
+
+## Source files and reload
+
+- `main.js`: word detection, input-data construction, AI call, and streaming.
+- `prompts/translate.txt`: complete ordinary-translation instructions.
+- `prompts/word-in-context.txt`: complete word-lookup instructions.
+- `settings.schema.json`: target-language choices and source-backed prompt editors.
 - `extension.json`: identity, commands, runtime, and declared capabilities.
-- `LICENSE`: MIT license for this source package.
+- `LICENSE`: MIT license.
 
-`MacHelper.define` registers the tool. `MacHelper.readText` reads frozen package resources. `MacHelper.ai.transform` calls the shared AI helper only during an explicit tool action. The native MacHelper platform handles Accessibility, floating icons/results, cancellation, and clipboard actions.
+**Edit Source** opens the installed working folder in VS Code when available. Saving JavaScript, prompts, or schemas starts a validated new worker generation. Invalid edits retain the last working generation, and settings remain separate from source. Explicit prompt saves also work while the tool is disabled without starting JavaScript or requesting AI.
 
-With MacHelper 4.1 or later, Translation shows text as the provider generates it. The second callback passed to `MacHelper.ai.transform` receives cumulative partial text and forwards it through `input.reportProgress`. Customize both that callback and the returned final result if adding a prefix or changing formatting. Copy becomes available after completion. Cancelling, changing selection, or reloading prevents old chunks from appearing; a failed stream is clearly marked incomplete.
+`MacHelper.define` registers commands, `MacHelper.readText` reads frozen resources from the current generation, and `MacHelper.ai.transform` requests shared AI only during an explicit action. Its progress callback passes cumulative output to `input.reportProgress`. Cancellation, source reload, or a changed selection prevents stale output from replacing a newer result.
 
-With MacHelper 4.3 or later, selecting one lexical word can also provide the optional `input.sentence`. Translation makes one streamed AI request containing a JSON data object with `selectedWord` and `surroundingSentence`. The result explains the word's meaning in that supplied context first, with the full sentence translation below it. Section labels and output use your configured target language. Contractions and hyphenated words are supported; CJK and other unspaced-script selections use word segmentation when available so an entire phrase does not become a word lookup. Word lookup is limited to 128 UTF-16 units; longer selections use the normal translation path.
-
-If the app cannot expose a surrounding sentence, or the supplied context is invalid, too large, or does not contain the selected word, `surroundingSentence` is `null`. The tool returns a general word meaning and appends an honest note in the configured language. It never invents a sentence for this fallback. Context is bounded to 2,000 UTF-16 units and 8,000 UTF-8 bytes. The word, sentence, and any instructions inside them remain untrusted data; the existing answer-only, tool-disabled AI connection is unchanged. Selecting multiple words keeps the original translation behavior.
-
-This behavior is editable in `main.js`, including word detection, localized labels, and the context-unavailable notes. Edit `prompts/word-in-context.txt` to change how contextual meanings and sentence translations are explained. The native platform supplies optional context; translation policy lives in this source tool.
-
-A reload starts a fresh worker after the new script validates. Syntax errors keep the previous working version active and appear in Settings. Settings live separately from source, and downloading a newer package does not overwrite local edits. New permissions require explicit re-enabling.
-
-For a quick test, change the returned result to `{text: "译文：" + response.text, title: "My Translation"}` and save. Restore the original line to return to the normal result. Press Esc or click elsewhere to dismiss a translation.
-
-The marketplace-ready catalog format lists every package file and its SHA-256. A remote catalog can be served by a future website; MacHelper lists its metadata first and downloads source when the user enables a tool. See `docs/Source-Extensions.md` in the main repository for the protocol.
+The marketplace catalog includes every source file with its SHA-256. Existing editable installations are not overwritten by repeat marketplace installs. Older published source versions remain available at their immutable URLs. See `docs/Source-Extensions.md` in the main repository for the format and protocol.

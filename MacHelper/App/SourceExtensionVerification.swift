@@ -150,10 +150,15 @@ enum SourceExtensionVerification {
             note("enable downloads every verified source file and starts a separate worker")
 
             let sample = "A public synthetic test message. Keep $125.50 and https://example.com."
+            let quotedSample = String(decoding: try JSONSerialization.data(withJSONObject: sample, options: [.fragmentsAllowed, .withoutEscapingSlashes]), as: UTF8.self)
+            var samplePayload = "{\"text\":" + quotedSample + ",\"targetLanguage\":\"zh-CN\"}"
             let initial = try await manager.performCommand(for: id, text: sample)
-            try check(initial.text == "AI:" + sample && initial.model == "fixture-model", "Translation did not round-trip through the AI capability bridge.")
-            try check(probe.latest["text"] as? String == sample && probe.latest["targetLanguage"] as? String == "zh-CN",
+            try check(initial.text == "AI:" + samplePayload && initial.model == "fixture-model", "Translation did not round-trip through the AI capability bridge.")
+            try check(probe.latest["text"] as? String == samplePayload && probe.latest["targetLanguage"] as? String == "zh-CN",
                       "The actual Translation source did not receive its text or default settings.")
+            try check(Data((probe.latest["systemPrompt"] as? String ?? "").utf8) == Data((snapshot.resources["prompts/translate.txt"] ?? "").utf8) &&
+                      probe.latest["guidance"] == nil,
+                      "Normal translation did not send the exact extension-owned prompt independently of user data.")
             note("actual Translation JavaScript invokes the explicit AI bridge and returns model metadata")
 
             let selectedWord = "ready"
@@ -189,12 +194,11 @@ enum SourceExtensionVerification {
                       "The real manager/worker bridge lost the selected word or optional surrounding sentence.")
             try check(probe.latest["action"] as? String == "translate" && probe.latest["targetLanguage"] as? String == "zh-CN",
                       "Word lookup changed the supported AI action or lost the shared target-language setting.")
-            let wordGuidance = probe.latest["guidance"] as? String ?? ""
-            let dedicatedPrompts = snapshot.resources.filter { $0.key.hasPrefix("prompts/") && $0.key != "prompts/translate.txt" }
-            try check(dedicatedPrompts.values.contains { prompt in
-                let value = String(prompt.split(separator: "\n").first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                return !value.isEmpty && wordGuidance.contains(value)
-            }, "Word translation did not use its dedicated editable prompt resource.")
+            let wordPrompt = snapshot.resources["prompts/word-in-context.txt"] ?? ""
+            try check(Data((probe.latest["systemPrompt"] as? String ?? "").utf8) == Data(wordPrompt.utf8) &&
+                      probe.latest["guidance"] == nil && wordPayload?["targetLanguage"] as? String == "zh-CN" &&
+                      (wordPayload?["labels"] as? [String: String])?["sentence"] != nil,
+                      "Word translation did not send its dedicated source prompt verbatim with separate language/label data.")
             probe.releaseStream = true
             let contextualWordResult = try await contextualWord.value
             try check(contextualWordResult.text == "AI:" + wordPayloadText && contextualWordResult.model == "fixture-model" &&
@@ -215,7 +219,7 @@ enum SourceExtensionVerification {
             try check(!streamFinished && progress == ["AI:"], "Translation buffered progress until completion or reordered its first chunk.")
             probe.releaseStream = true
             let streamedResult = try await streamed.value
-            try check(streamedResult.text == "AI:" + sample && progress.count == 3 && progress.last == streamedResult.text &&
+            try check(streamedResult.text == "AI:" + samplePayload && progress.count == 3 && progress.last == streamedResult.text &&
                       progress[1].hasPrefix(progress[0]) && progress[2].hasPrefix(progress[1]),
                       "Partial results arrived out of order or failed to reconcile with the final result.")
             note("partial translations arrive before AI completion, in order, and reconcile with the final answer")
@@ -247,7 +251,7 @@ enum SourceExtensionVerification {
             lateProgress?(["text": "STALE STREAM MUST STAY HIDDEN", "delta": "STALE", "model": "fixture-model"])
             try await Task.sleep(nanoseconds: 80_000_000)
             try check(cancelledProgress == ["AI:"], "Late progress from a cancelled translation reached its display callback.")
-            try check(try await manager.performCommand(for: id, text: sample).text == "AI:" + sample,
+            try check(try await manager.performCommand(for: id, text: sample).text == "AI:" + samplePayload,
                       "Translation did not recover after cancelling a partial stream.")
             _ = try remember(manager.workerPID(for: id))
             note("cancelling a partial stream rejects late updates, stops its worker, and permits a fresh translation")
@@ -266,7 +270,7 @@ enum SourceExtensionVerification {
             let editedPID = try remember(manager.workerPID(for: id))
             try await eventually("The previous JavaScript worker was not reaped after reload.") { !processExists(firstPID) }
             try check(getpid() == hostPID && probe.calls == callsBeforeEdit, "Reload restarted the host or ran AI without a user action.")
-            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + sample,
+            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + samplePayload,
                       "A saved source edit did not change Translation output.")
             note("saving JavaScript changes behavior, replaces/reaps its worker, and keeps the host alive")
 
@@ -279,7 +283,7 @@ enum SourceExtensionVerification {
             let promptPID = try remember(manager.workerPID(for: id))
             try check(promptPID != editedPID, "Prompt reload reused the old worker.")
             _ = try await manager.performCommand(for: id, text: sample)
-            try check((probe.latest["guidance"] as? String)?.contains(markerText) == true, "The new prompt did not reach the AI capability.")
+            try check(Data((probe.latest["systemPrompt"] as? String ?? "").utf8) == Data((prompt + "\n" + markerText + "\n").utf8), "The new source prompt did not reach the AI capability verbatim.")
             note("saving nested prompt resources updates the next AI request")
 
             probe.streamNext = true; probe.releaseStream = false
@@ -304,7 +308,7 @@ enum SourceExtensionVerification {
             try await Task.sleep(nanoseconds: 80_000_000)
             try check(reloadedStreamProgress == ["AI:"], "A replaced source generation delivered stale progress.")
             let promptPIDAfterStreamingReload = try remember(manager.workerPID(for: id))
-            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + sample,
+            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + samplePayload,
                       "The new source generation did not work after replacing a streaming operation.")
             note("saving source during a partial stream cancels its old generation and suppresses late progress")
 
@@ -313,7 +317,15 @@ enum SourceExtensionVerification {
             try await eventually("An invalid JavaScript save did not report a reload error.") { (try? info(manager).error) != nil }
             try check(manager.workerPID(for: id) == promptPIDAfterStreamingReload && (try info(manager)).reloadCount == countBeforeSyntaxError,
                       "An invalid edit replaced the last working worker.")
-            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + sample,
+            let promptBeforeInvalidSave = try Data(contentsOf: promptURL)
+            var invalidSourcePromptRejected = false
+            do {
+                try await manager.updatePrompt("translationPrompt", value: "A draft that must stay unsaved.",
+                                               expectedValue: manager.promptValue("translationPrompt", for: id), for: id)
+            } catch { invalidSourcePromptRejected = true }
+            try check(invalidSourcePromptRejected && (try Data(contentsOf: promptURL)) == promptBeforeInvalidSave,
+                      "Saving a prompt overwrote source while an invalid JavaScript edit was awaiting repair.")
+            try check(try await manager.performCommand(for: id, text: sample).text == "Edited: AI:" + samplePayload,
                       "The last working version stopped serving results after a syntax error.")
             note("syntax errors are visible while the last working generation remains usable")
 
@@ -324,22 +336,72 @@ enum SourceExtensionVerification {
                 return value.error == nil && value.reloadCount > countBeforeSyntaxError
             }
             _ = try remember(manager.workerPID(for: id))
-            try check(try await manager.performCommand(for: id, text: sample).text == "Recovered: AI:" + sample,
+            try check(try await manager.performCommand(for: id, text: sample).text == "Recovered: AI:" + samplePayload,
                       "The repaired source did not become active.")
             note("fixing source clears the reload error and activates the repaired version")
 
             try await manager.updateSetting("targetLanguage", value: "en", for: id)
-            try await manager.updateSetting("style", value: "formal", for: id)
+            samplePayload = "{\"text\":" + quotedSample + ",\"targetLanguage\":\"en\"}"
             _ = try remember(manager.workerPID(for: id))
             _ = try await manager.performCommand(for: id, text: sample)
-            try check(probe.latest["targetLanguage"] as? String == "en" && (probe.latest["guidance"] as? String)?.contains("Writing style: formal") == true,
-                      "Updated per-extension settings did not reach JavaScript.")
+            try check(probe.latest["targetLanguage"] as? String == "en" && probe.latest["text"] as? String == samplePayload &&
+                      probe.latest["guidance"] == nil,
+                      "Updated per-extension language settings did not reach JavaScript as separate input data.")
             let settingsFile = state.appendingPathComponent("ExtensionSettings/" + id + "/settings.json")
             let savedSettings = try JSONSerialization.jsonObject(with: Data(contentsOf: settingsFile)) as? [String: Any]
-            try check(savedSettings?["targetLanguage"] as? String == "en" && savedSettings?["style"] as? String == "formal",
-                      "Per-extension settings were not persisted.")
+            try check(savedSettings?["targetLanguage"] as? String == "en" && savedSettings?.count == 1 &&
+                      savedSettings?["translationPrompt"] == nil && savedSettings?["wordPrompt"] == nil,
+                      "Ordinary language settings were not persisted independently of source prompts.")
             try check(try privatePermissions(settingsFile) == 0o600, "Extension settings must be private on disk.")
             note("extension settings update live, persist independently, and use private file permissions")
+
+            let oldPrompt = try manager.promptValue("translationPrompt", for: id)
+            let exactPrompt = "  \r\n\t" + oldPrompt + "\r\n\n"
+            let callsBeforePromptSave = probe.calls
+            let promptSaveCount = try info(manager).reloadCount
+            try await manager.updatePrompt("translationPrompt", value: exactPrompt, expectedValue: oldPrompt, for: id)
+            _ = try remember(manager.workerPID(for: id))
+            try check((try info(manager)).reloadCount > promptSaveCount && probe.calls == callsBeforePromptSave &&
+                      (try Data(contentsOf: promptURL)) == Data(exactPrompt.utf8) &&
+                      Data((try manager.promptValue("translationPrompt", for: id)).utf8) == Data(exactPrompt.utf8),
+                      "Explicit prompt save changed whitespace, ran AI, or failed to refresh the active generation.")
+            _ = try await manager.performCommand(for: id, text: sample)
+            try check(Data((probe.latest["systemPrompt"] as? String ?? "").utf8) == Data(exactPrompt.utf8) && probe.latest["guidance"] == nil,
+                      "A saved general prompt acquired hidden instructions or changed bytes on the worker bridge.")
+            let oldWordPrompt = try manager.promptValue("wordPrompt", for: id)
+            let exactWordPrompt = "\n  " + oldWordPrompt + "\r\n\n"
+            try await manager.updatePrompt("wordPrompt", value: exactWordPrompt, expectedValue: oldWordPrompt, for: id)
+            _ = try remember(manager.workerPID(for: id))
+            _ = try await manager.performCommand(for: id, text: selectedWord, sentence: surroundingSentence)
+            try check(Data((probe.latest["systemPrompt"] as? String ?? "").utf8) == Data(exactWordPrompt.utf8),
+                      "The second prompt field was not independently editable or was rewritten by the host.")
+            let promptState = try JSONSerialization.jsonObject(with: Data(contentsOf: settingsFile)) as? [String: Any]
+            try check(promptState?.count == 1 && promptState?["targetLanguage"] as? String == "en" &&
+                      promptState?["translationPrompt"] == nil && promptState?["wordPrompt"] == nil,
+                      "Prompt source text leaked into ordinary extension settings.")
+            note("explicit prompt saves preserve exact source bytes, hot reload both prompt fields, and forward each verbatim without settings copies")
+
+            let validPromptCount = try info(manager).reloadCount
+            for invalid in ["", " \n\t", "Invalid\0prompt", String(repeating: "x", count: 12_001)] {
+                var rejected = false
+                do { try await manager.updatePrompt("translationPrompt", value: invalid, expectedValue: exactPrompt, for: id) }
+                catch { rejected = true }
+                try check(rejected && (try Data(contentsOf: promptURL)) == Data(exactPrompt.utf8) &&
+                          (try info(manager)).reloadCount == validPromptCount,
+                          "An invalid prompt replaced the saved source or reloaded its last working generation.")
+            }
+            let externalPrompt = exactPrompt + "\n"
+            try Data(externalPrompt.utf8).write(to: promptURL, options: .atomic)
+            var stalePromptRejected = false
+            do { try await manager.updatePrompt("translationPrompt", value: "Keep my editor draft", expectedValue: exactPrompt, for: id) }
+            catch { stalePromptRejected = true }
+            try check(stalePromptRejected && (try Data(contentsOf: promptURL)) == Data(externalPrompt.utf8),
+                      "A stale prompt editor overwrote a newer external source edit.")
+            try await eventually("Explicit prompt save failed to restore the source watcher.") {
+                ((try? info(manager).reloadCount) ?? 0) > validPromptCount
+            }
+            _ = try remember(manager.workerPID(for: id))
+            note("invalid or stale prompt saves preserve source and the last working generation; later external edits still hot reload")
 
             let busyPID = try remember(manager.workerPID(for: id))
             probe.blockNext = true
@@ -353,7 +415,7 @@ enum SourceExtensionVerification {
                       "Overlapping actions must be rejected before a second AI request without interrupting the first action.")
             probe.releaseBlocked = true
             let completedFirst = try await inFlight.value
-            try check(completedFirst.text == "Recovered: AI:" + sample && completedFirst.model == "fixture-model",
+            try check(completedFirst.text == "Recovered: AI:" + samplePayload && completedFirst.model == "fixture-model",
                       "Rejecting an overlapping action corrupted the first action or its model metadata.")
             note("overlapping actions are rejected without extra AI calls or corrupting the active result")
 
@@ -369,7 +431,7 @@ enum SourceExtensionVerification {
                 probe.cancellations > 0 && manager.workerPID(for: id) == nil && !processExists(cancelledPID)
             }
             try check(await operation.value, "A cancelled translation returned a result.")
-            try check(try await manager.performCommand(for: id, text: sample).text == "Recovered: AI:" + sample,
+            try check(try await manager.performCommand(for: id, text: sample).text == "Recovered: AI:" + samplePayload,
                       "A new user action did not recreate the worker after cancellation.")
             let afterCancellationPID = try remember(manager.workerPID(for: id))
             try check(afterCancellationPID != cancelledPID, "Cancellation recovery reused the stopped process.")
@@ -386,9 +448,9 @@ enum SourceExtensionVerification {
             try check((try info(restarted)).isEnabled && (try info(restarted)).isRunning && (try info(restarted)).error != nil,
                       "Restart with an invalid local edit did not recover its last good cache and show the error.")
             try check(try String(contentsOf: mainURL, encoding: .utf8) == invalidMain, "Recovery overwrote the user's invalid local edit.")
-            try check(restarted.settings(for: id)["targetLanguage"] as? String == "en" && restarted.settings(for: id)["style"] as? String == "formal",
+            try check(restarted.settings(for: id)["targetLanguage"] as? String == "en" && restarted.settings(for: id).count == 1,
                       "Settings were lost when restarting the manager.")
-            try check(try await restarted.performCommand(for: id, text: sample).text == "Recovered: AI:" + sample,
+            try check(try await restarted.performCommand(for: id, text: sample).text == "Recovered: AI:" + samplePayload,
                       "The last good cached generation did not serve a translation after restart.")
             note("restart preserves invalid local edits and settings while running the last good cached source")
 
@@ -453,6 +515,110 @@ enum SourceExtensionVerification {
                           "Preferences retained message content or an AI result.")
             }
             note("reload/restart preserve editable files and never persist selected text or AI results in preferences")
+
+            // This independently authored tool uses unrelated field names and
+            // no AI capability. Its deliberately throwing entry proves that
+            // viewing/configuring a disabled tool never evaluates JavaScript.
+            let externalID = "com.example.personal-greeting"
+            let external = workspace.appendingPathComponent("external-greeting.macsource", isDirectory: true)
+            try FileManager.default.createDirectory(at: external.appendingPathComponent("config"), withIntermediateDirectories: true)
+            let externalManifest = SourceExtensionManifest(identifier: externalID, displayName: "Personal Greeting", version: "1.0.0",
+                summary: "An independently authored settings fixture.", permissions: ["ui.panel"],
+                commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")], settingsSchema: "config/preferences.json")
+            try JSONEncoder().encode(externalManifest).write(to: external.appendingPathComponent("extension.json"), options: .atomic)
+            try "throw new Error('Settings must not execute this tool.');".write(to: external.appendingPathComponent("main.js"), atomically: true, encoding: .utf8)
+            var externalFields: [[String: Any]] = [
+                ["key": "greeting", "label": "Greeting words", "type": "text", "default": "Hello"],
+                ["key": "loud", "label": "Use uppercase", "type": "boolean", "default": false],
+                ["key": "punctuation", "label": "Ending", "type": "select", "default": "!",
+                 "options": [["value": "!", "label": "Exclamation"], ["value": ".", "label": "Period"]]],
+                ["key": "personalPrompt", "label": "Personal instructions", "type": "prompt", "path": "config/instructions.txt"]
+            ]
+            func externalSchema() throws -> Data {
+                try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "fields": externalFields], options: [.sortedKeys])
+            }
+            try externalSchema().write(to: external.appendingPathComponent("config/preferences.json"), options: .atomic)
+            try Data("External tool instructions.\n".utf8).write(to: external.appendingPathComponent("config/instructions.txt"))
+            let callsBeforeSettings = probe.calls
+            try await restarted.importSource(from: external)
+            try await restarted.prepareSettings(for: externalID)
+            try check(restarted.settingsSchema(for: externalID)?.fields.map(\.key) == ["greeting", "loud", "punctuation", "personalPrompt"] &&
+                      restarted.settings(for: externalID)["greeting"] as? String == "Hello" &&
+                      restarted.permissions(for: externalID) == ["ui.panel"] && restarted.workerPID(for: externalID) == nil &&
+                      restarted.tools.first(where: { $0.id == externalID })?.isEnabled == false && probe.calls == callsBeforeSettings,
+                      "An unrelated disabled extension's own schema did not load without executing code or AI.")
+            try await restarted.updateSetting("greeting", value: "Welcome", for: externalID)
+            try await restarted.updateSetting("loud", value: true, for: externalID)
+            try await restarted.updateSetting("punctuation", value: ".", for: externalID)
+            guard let externalSource = restarted.sourceURL(for: externalID) else { throw Failure(message: "The external fixture source is missing.") }
+            let disabledPrompt = "  Independent prompt.\r\n\tSaved while disabled.\n\n"
+            try await restarted.updatePrompt("personalPrompt", value: disabledPrompt,
+                                             expectedValue: restarted.promptValue("personalPrompt", for: externalID), for: externalID)
+            try check((try Data(contentsOf: externalSource.appendingPathComponent("config/instructions.txt"))) == Data(disabledPrompt.utf8) &&
+                      restarted.workerPID(for: externalID) == nil && probe.calls == callsBeforeSettings &&
+                      restarted.tools.first(where: { $0.id == externalID })?.isEnabled == false &&
+                      restarted.settings(for: externalID)["personalPrompt"] == nil,
+                      "Saving an unrelated disabled tool's prompt executed JavaScript/AI, enabled it, or copied prompt text to settings.")
+            note("a disabled external tool edits its own prompt resource without evaluating its deliberately throwing JavaScript or enabling AI")
+            let externalSchemaURL = externalSource.appendingPathComponent("config/preferences.json")
+            externalFields.append(["key": "signature", "label": "Signature", "type": "text", "default": " / local"])
+            try externalSchema().write(to: externalSchemaURL, options: .atomic)
+            try await restarted.prepareSettings(for: externalID)
+            try check(restarted.settingsSchema(for: externalID)?.fields.last?.key == "signature" &&
+                      restarted.settings(for: externalID)["signature"] as? String == " / local" &&
+                      restarted.settings(for: externalID)["greeting"] as? String == "Welcome",
+                      "Selecting a disabled tool did not reread its edited schema while preserving saved values.")
+            try await restarted.updateSetting("signature", value: " / custom", for: externalID)
+            let externalSettingsFile = state.appendingPathComponent("ExtensionSettings/" + externalID + "/settings.json")
+            let externalSaved = try JSONSerialization.jsonObject(with: Data(contentsOf: externalSettingsFile)) as? [String: Any]
+            try check(externalSaved?["greeting"] as? String == "Welcome" && externalSaved?["loud"] as? Bool == true &&
+                      externalSaved?["signature"] as? String == " / custom" &&
+                      restarted.workerPID(for: externalID) == nil && probe.calls == callsBeforeSettings,
+                      "Saving disabled-tool settings did not persist independently or unexpectedly started AI/code.")
+            note("a second external tool loads its own four field types on selection and saves disabled settings without running code")
+
+            let externalMain = """
+            MacHelper.define({commands:{greet(input){
+              const s=input.settings;
+              const text=(s.prefix||'')+s.greeting+' '+input.text+s.punctuation+s.signature;
+              return {text:s.loud?text.toUpperCase():text};
+            }}});
+            """
+            try externalMain.write(to: externalSource.appendingPathComponent("main.js"), atomically: true, encoding: .utf8)
+            try await restarted.setEnabled(true, for: externalID)
+            let externalPID = try remember(restarted.workerPID(for: externalID))
+            try check(try await restarted.performCommand(for: externalID, text: "there").text == "WELCOME THERE. / CUSTOM",
+                      "The external tool did not receive its independently saved settings.")
+            let externalReloads = restarted.tools.first(where: { $0.id == externalID })!.reloadCount
+            externalFields.append(["key": "prefix", "label": "Prefix", "type": "text", "default": "New "])
+            try externalSchema().write(to: externalSchemaURL, options: .atomic)
+            try await eventually("A new external schema field did not hot reload.") {
+                (restarted.tools.first(where: { $0.id == externalID })?.reloadCount ?? 0) > externalReloads
+            }
+            _ = try remember(restarted.workerPID(for: externalID))
+            let externalReloadedResult = try await restarted.performCommand(for: externalID, text: "there")
+            try check(restarted.workerPID(for: externalID) != externalPID &&
+                      restarted.settingsSchema(for: externalID)?.fields.last?.key == "prefix" &&
+                      externalReloadedResult.text == "NEW WELCOME THERE. / CUSTOM" &&
+                      getpid() == hostPID && probe.calls == callsBeforeSettings,
+                      "A schema field added outside the host required a rebuild or did not reach the refreshed worker.")
+            note("external schema additions hot reload into a new worker and affect behavior without rebuilding the host")
+            try await restarted.setEnabled(false, for: externalID)
+            let validExternalSchema = try externalSchema()
+            try Data("{broken".utf8).write(to: externalSchemaURL, options: .atomic)
+            var rejectedInvalidSchema = false
+            do { try await restarted.prepareSettings(for: externalID) } catch { rejectedInvalidSchema = true }
+            var rejectedInvalidSave = false
+            do { try await restarted.updateSetting("greeting", value: "Do not save", for: externalID) } catch { rejectedInvalidSave = true }
+            try check(rejectedInvalidSchema && rejectedInvalidSave && restarted.settingsSchema(for: externalID)?.fields.last?.key == "prefix" &&
+                      restarted.settings(for: externalID)["greeting"] as? String == "Welcome" && restarted.workerPID(for: externalID) == nil &&
+                      restarted.tools.first(where: { $0.id == externalID })?.isEnabled == false,
+                      "Invalid disabled source lost the last valid form, accepted stale-schema writes, or enabled code.")
+            try validExternalSchema.write(to: externalSchemaURL, options: .atomic)
+            try await restarted.prepareSettings(for: externalID)
+            try check(restarted.tools.first(where: { $0.id == externalID })?.error == nil && probe.calls == callsBeforeSettings,
+                      "Repairing a disabled tool's schema did not clear its configuration error without AI.")
+            note("invalid disabled settings retain the last valid form, reject writes, and recover after a source repair")
             await restarted.stopAll()
 
             let market = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
@@ -475,7 +641,7 @@ enum SourceExtensionVerification {
             try check(try SourcePackageInspector.snapshot(at: marketSource).fileHashes == expectedHashes,
                       "The approved marketplace install omitted or changed source files.")
             note("approving a marketplace tool installs every verified source file and enables its worker")
-            try await market.updateSetting("style", value: "formal", for: id)
+            try await market.updateSetting("targetLanguage", value: "ja", for: id)
             let marketMain = marketSource.appendingPathComponent("main.js")
             let customMain = try String(contentsOf: marketMain, encoding: .utf8) + "\n// A user's existing local marketplace customization.\n"
             try customMain.write(to: marketMain, atomically: true, encoding: .utf8)
@@ -485,7 +651,7 @@ enum SourceExtensionVerification {
                       market.workerPID(for: id) == nil && (try info(market)).isEnabled == false,
                       "A repeated marketplace click changed local edits or re-enabled a disabled tool.")
             let marketSettings = try JSONSerialization.jsonObject(with: Data(contentsOf: workspace.appendingPathComponent("market-state/ExtensionSettings/" + id + "/settings.json"))) as? [String: Any]
-            try check(marketSettings?["style"] as? String == "formal", "A repeated marketplace click reset saved settings.")
+            try check(marketSettings?["targetLanguage"] as? String == "ja", "A repeated marketplace click reset saved settings.")
             note("repeated marketplace installation preserves local edits, preferences, and disabled state")
             await market.stopAll()
 

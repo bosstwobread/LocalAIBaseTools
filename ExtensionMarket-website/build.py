@@ -2,6 +2,7 @@
 """Build the static marketplace and complete, hash-verified source downloads."""
 import argparse
 import hashlib
+import html
 import io
 import json
 import plistlib
@@ -17,6 +18,71 @@ from urllib.parse import quote, urlsplit
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+
+# Keep publication deliberate. Never copy the repository tree or local runbooks.
+PUBLIC_DOCUMENTS = (
+    "AI_EXTENSION_GUIDE.md",
+    "docs/Source-Extensions.md",
+    "docs/Extension-Development.md",
+    "docs/MacHelper-Protocol.md",
+    "docs/Native-Extensions.md",
+)
+PUBLIC_SDK_FILES = {
+    "NativeExtensionSDK/MacHelperNativeSDK.swift": "MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift",
+}
+
+
+def copy_public_documents(stage):
+    for relative, original in {**{path: path for path in PUBLIC_DOCUMENTS}, **PUBLIC_SDK_FILES}.items():
+        source = ROOT / original
+        if source.is_symlink() or not source.is_file():
+            raise ValueError("A public authoring document must be an ordinary file: " + relative)
+        destination = stage / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    guide = html.escape((ROOT / "AI_EXTENSION_GUIDE.md").read_text())
+    # Escaped Markdown is readable without JS, preserves complete copyable code,
+    # and cannot turn document content into executable HTML.
+    (stage / "developer-guide.html").write_text("""<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Create or customize a MacHelper source extension with your AI coding assistant.">
+<title>AI Extension Guide — LocalAI BaseTools</title><link rel="icon" href="./assets/mac-helper.png" type="image/png"><link rel="stylesheet" href="./styles.css"></head>
+<body><main class="shell guide-page"><a class="text-link" href="./#developers">← Back to the Extension Market</a>
+<p class="eyebrow">CREATE &amp; CUSTOMIZE</p><h1>Build a tool with your AI.</h1>
+<p class="guide-intro">Download this Markdown file and give it to your AI coding assistant. Ask it to create an independent MacHelper source extension, or open an installed tool with Edit Source and ask it to help change the behavior. The complete guide appears below in its original, copyable format.</p>
+<div class="guide-actions"><a class="button button-dark" href="./AI_EXTENSION_GUIDE.md" download="AI_EXTENSION_GUIDE.md">Download AI_EXTENSION_GUIDE.md ↓</a><a class="text-link" href="./#browse">Explore source tools ↗</a></div>
+<nav class="guide-references" aria-label="Extension reference documents"><a href="./docs/Source-Extensions.md" download>Source extension reference ↓</a><a href="./docs/Extension-Development.md" download>Development reference ↓</a><a href="./docs/MacHelper-Protocol.md" download>AI protocol reference ↓</a><a href="./docs/Native-Extensions.md" download>Native worker reference ↓</a><a href="./NativeExtensionSDK/MacHelperNativeSDK.swift" download>Swift worker SDK ↓</a></nav>
+<article class="guide-document" aria-label="Complete AI extension guide"><pre>""" + guide + """</pre></article></main></body></html>\n""")
+
+
+def source_runtime(manifest):
+    runtime = manifest.get("runtime")
+    if manifest.get("schemaVersion") != 2 or runtime not in {"javascript", "native"}:
+        raise ValueError("Unsupported marketplace source runtime.")
+    entry = manifest.get("entryPoint")
+    if not isinstance(entry, str) or not entry.endswith(".swift" if runtime == "native" else ".js"):
+        raise ValueError("The source entry point does not match its declared runtime.")
+    permissions = manifest.get("permissions")
+    if not isinstance(permissions, list) or ("native.execute" in permissions) != (runtime == "native"):
+        raise ValueError("Native source requires native.execute; JavaScript cannot request it.")
+    return runtime
+
+
+def validate_source_files(manifest, files):
+    entry = manifest["entryPoint"]
+    if entry not in files:
+        raise ValueError("The source package entry point is missing.")
+    try:
+        if not files[entry].decode("utf-8").strip():
+            raise ValueError("The source entry point is empty.")
+        if manifest["runtime"] == "native":
+            swift_files = sorted(path for path in files if Path(path).suffix.lower() == ".swift")
+            if swift_files != [entry]:
+                raise ValueError("Native source packages require exactly one Swift entry; the SDK is supplied by MacHelper.")
+            for data in files.values():
+                data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("Native source packages and source entry points require UTF-8 text, not prebuilt binaries.") from error
 
 
 def digest(data):
@@ -121,6 +187,7 @@ def build(output, app, without_app=False):
             shutil.copy2(HERE / filename, stage / filename)
         shutil.copytree(HERE / "assets", stage / "assets")
         shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")
+        copy_public_documents(stage)
         catalog = {"schemaVersion": 1, "extensions": []}
         tools = []
         known = config.get("tools", {})
@@ -134,8 +201,7 @@ def build(output, app, without_app=False):
             browser_manifest = folder / "manifest.json"
             if native_manifest.exists():
                 manifest = json.loads(native_manifest.read_text())
-                if manifest.get("schemaVersion") != 2 or manifest.get("runtime") != "javascript":
-                    raise ValueError("Unsupported marketplace source format: " + folder.name)
+                runtime = source_runtime(manifest)
                 kind = "mac-source"
                 identifier = manifest["identifier"]
                 name = manifest["displayName"]
@@ -145,6 +211,7 @@ def build(output, app, without_app=False):
             elif browser_manifest.exists():
                 manifest = json.loads(browser_manifest.read_text())
                 kind = "browser"
+                runtime = "browser"
                 identifier = metadata.get("id", "com.localaibasetools." + folder.name.lower())
                 name = manifest["name"]
                 summary = manifest["description"]
@@ -165,6 +232,7 @@ def build(output, app, without_app=False):
             seen_ids.add(identifier); seen_slugs.add(slug)
             files = source_files(folder)
             if kind == "mac-source":
+                validate_source_files(manifest, files)
                 inventory = []
                 for relative, data in files.items():
                     url = "packages/" + slug + "/" + quote(version, safe="") + "/" + quote(relative, safe="/")
@@ -189,7 +257,7 @@ def build(output, app, without_app=False):
                 "id": identifier, "slug": slug, "name": name, "version": version,
                 "summary": summary, "description": metadata.get("description", summary),
                 "category": metadata.get("category", "Productivity"), "platforms": platforms,
-                "kind": kind, "featured": metadata.get("featured", False),
+                "kind": kind, "runtime": runtime, "featured": metadata.get("featured", False),
                 "icon": metadata.get("icon", "assets/mac-helper.png"),
                 "screenshots": metadata.get("screenshots", []), "features": metadata.get("features", []),
                 "permissions": permissions, "installSteps": metadata.get("installSteps", []),
@@ -238,7 +306,7 @@ def main():
     try: tools, mac = build(args.output, args.app, args.without_app)
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, "Marketplace build failed: " + str(error) + "\n")
-    print("Built", args.output, "with", len(tools), "extensions and", len([t for t in tools if t["kind"] == "mac-source"]), "complete native source packages.")
+    print("Built", args.output, "with", len(tools), "extensions and", len([t for t in tools if t["kind"] == "mac-source"]), "complete MacHelper source packages.")
     print("MacHelper download:", "included" if mac["available"] else "omitted for local development")
 
 

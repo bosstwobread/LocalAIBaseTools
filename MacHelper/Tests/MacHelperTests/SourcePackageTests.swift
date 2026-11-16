@@ -136,6 +136,41 @@ final class SourcePackageTests: XCTestCase {
         }
     }
 
+    func testNativeManifestRequiresExplicitExecutionPermissionAndSwiftEntry() throws {
+        let commands = [SourceExtensionCommand(identifier: "greet", title: "Greet", trigger: "manual")]
+        let valid = SourceExtensionManifest(runtime: "native", identifier: identity, displayName: "Native tool",
+            version: "1.0.0", summary: "Native fixture", entryPoint: "Main.swift", permissions: ["native.execute"], commands: commands)
+        XCTAssertNoThrow(try valid.validate())
+        for (runtime, entry, permissions) in [
+            ("native", "Main.swift", [String]()), ("native", "main.js", ["native.execute"]),
+            ("javascript", "main.js", ["native.execute"]), ("shell", "Main.swift", ["native.execute"])
+        ] {
+            let value = SourceExtensionManifest(runtime: runtime, identifier: identity, displayName: "Tool",
+                version: "1.0.0", summary: "Fixture", entryPoint: entry, permissions: permissions, commands: commands)
+            XCTAssertThrowsError(try value.validate(), runtime + ":" + entry)
+        }
+    }
+
+    func testNativeSourceIsFrozenAndRejectsPrebuiltBinaryInventory() throws {
+        let root = try temporary()
+        let manifest = SourceExtensionManifest(runtime: "native", identifier: identity, displayName: "Native tool",
+            version: "1.0.0", summary: "Native fixture", entryPoint: "Main.swift", permissions: ["native.execute"],
+            commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")])
+        try write(["extension.json": JSONEncoder().encode(manifest), "Main.swift": Data("import Foundation\n".utf8),
+                   "prompts/greet.txt": Data("Original prompt\n".utf8)], to: root)
+        let snapshot = try SourcePackageInspector.snapshot(at: root)
+        XCTAssertEqual(snapshot.entrySource, "import Foundation\n")
+        XCTAssertEqual(snapshot.resources["Main.swift"], snapshot.entrySource)
+        XCTAssertEqual(snapshot.resources["prompts/greet.txt"], "Original prompt\n")
+        try Data("import Foundation\n".utf8).write(to: root.appendingPathComponent("Extra.swift"))
+        XCTAssertThrowsError(try SourcePackageInspector.snapshot(at: root), "Additional Swift files must not be silently ignored")
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Extra.swift"))
+        try Data("changed".utf8).write(to: root.appendingPathComponent("Main.swift"))
+        XCTAssertEqual(snapshot.entrySource, "import Foundation\n", "Native builds use the frozen generation rather than rereading a mutable file")
+        try Data([0xcf, 0xfa, 0xed, 0xfe, 0, 0]).write(to: root.appendingPathComponent("prebuilt"))
+        XCTAssertThrowsError(try SourcePackageInspector.snapshot(at: root))
+    }
+
     func testImportRejectsSymlinkEscapeAndDoesNotReplaceExistingUserSource() throws {
         let parent = try temporary(); let source = parent.appendingPathComponent("source")
         try write(fixtureFiles(), to: source)

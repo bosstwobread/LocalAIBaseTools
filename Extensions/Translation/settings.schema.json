@@ -12,8 +12,10 @@
       ]
     },
     {
-      "key":"style", "label":"Writing style", "type":"select", "default":"natural",
-      "options":[{"value":"natural","label":"Natural"},{"value":"formal","label":"Formal"},{"value":"conversational","label":"Conversational"}]
+      "key": "translationPrompt", "label": "Translation prompt", "type": "prompt", "path": "prompts/translate.txt"
+    },
+    {
+      "key": "wordPrompt", "label": "Word lookup prompt", "type": "prompt", "path": "prompts/word-in-context.txt"
     }
   ]
 }

@@ -10,3 +10,6 @@ __pycache__/
 .env.*
 !.env.example
 .artifacts/
+
+# Private, machine-specific deployment notes. Keep this file local.
+/AI_DEPLOYMENT.md

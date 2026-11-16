@@ -139,7 +139,9 @@ struct SelectionState {
         guard value != selection else { return false }
         generation &+= 1
         selection = value
-        dismissed = false
+        // AX can briefly return no selection, cached text, or different fallback
+        // bounds after an ordinary click. Observations invalidate old work but
+        // cannot undo a dismissal; only an explicit selection gesture can.
         return true
     }
 
@@ -148,8 +150,8 @@ struct SelectionState {
         dismissed = true
     }
 
-    /// Only real drag/double-click/keyboard selection gestures rearm an
-    /// unchanged dismissed selection. Timer reads cannot bring it back.
+    /// Only real selection gestures rearm a dismissed selection. Timer reads,
+    /// geometry changes, and intermittent AX availability cannot bring it back.
     mutating func rearmAfterSelectionGesture() {
         guard dismissed else { return }
         generation &+= 1

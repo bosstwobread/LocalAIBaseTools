@@ -30,54 +30,81 @@ final class AISettingsViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 490))
+        view = NSView()
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scroll)
+        let document = AISettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document
         let container = NSStackView()
         container.orientation = .vertical
         container.alignment = .leading
         container.spacing = 16
         container.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(container)
+        document.addSubview(container)
+        let preferredWidth = container.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -56)
+        preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            container.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
-            container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28),
-            container.topAnchor.constraint(equalTo: view.topAnchor, constant: 26)
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            container.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
+            container.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
+            container.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
+            preferredWidth,
+            container.topAnchor.constraint(equalTo: document.topAnchor, constant: 28),
+            container.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -28)
         ])
 
-        let title = NSTextField(labelWithString: "One AI connection for your tools")
-        title.font = .systemFont(ofSize: 19, weight: .semibold)
+        let title = NSTextField(labelWithString: "AI Connection")
+        title.font = .systemFont(ofSize: 24, weight: .semibold)
         container.addArrangedSubview(title)
-        let subtitle = NSTextField(wrappingLabelWithString: "Choose the AI service used by Translation and your extensions.")
+        let subtitle = NSTextField(wrappingLabelWithString: "Choose the AI service and model shared by your tools.")
+        subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
         container.addArrangedSubview(subtitle)
+        subtitle.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         providerPicker.addItems(withTitles: AIProvider.allCases.map(\.displayName))
         providerPicker.target = self
         providerPicker.action = #selector(providerChanged(_:))
         providerPicker.setAccessibilityLabel("AI service")
-        container.addArrangedSubview(row(label: "AI service", control: providerPicker))
+        addRow(label: "AI service", control: providerPicker, in: container)
 
         explanation.font = .systemFont(ofSize: 12)
         explanation.textColor = .secondaryLabelColor
-        explanation.widthAnchor.constraint(equalToConstant: 504).isActive = true
         container.addArrangedSubview(explanation)
+        explanation.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         addressField.placeholderString = "http://127.0.0.1:11434"
         addressField.setAccessibilityLabel("Local service address")
-        addressRow = row(label: "Address", control: addressField)
-        container.addArrangedSubview(addressRow)
+        addressRow = addRow(label: "Address", control: addressField, in: container)
 
         modelPicker.setAccessibilityLabel("AI model")
         refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshModels(_:)))
         let modelControls = NSStackView(views: [modelPicker, refreshButton])
         modelControls.spacing = 8
+        modelControls.distribution = .fill
         modelPicker.widthAnchor.constraint(greaterThanOrEqualToConstant: 235).isActive = true
-        container.addArrangedSubview(row(label: "Model", control: modelControls))
+        modelPicker.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        modelPicker.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        refreshButton.setContentHuggingPriority(.required, for: .horizontal)
+        refreshButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addRow(label: "Model", control: modelControls, in: container)
 
         let note = NSTextField(wrappingLabelWithString: "Refresh reads the current model list from your AI service. New models appear without updating your tools.")
         note.font = .systemFont(ofSize: 12)
         note.textColor = .secondaryLabelColor
-        note.widthAnchor.constraint(equalToConstant: 504).isActive = true
         container.addArrangedSubview(note)
+        note.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -85,11 +112,13 @@ final class AISettingsViewController: NSViewController {
         spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
         spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
         status.font = .systemFont(ofSize: 12)
-        status.maximumNumberOfLines = 3
+        status.maximumNumberOfLines = 0
+        status.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let statusRow = NSStackView(views: [spinner, status])
         statusRow.spacing = 8
-        statusRow.widthAnchor.constraint(equalToConstant: 504).isActive = true
         container.addArrangedSubview(statusRow)
+        statusRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         testButton = NSButton(title: "Test Connection", target: self, action: #selector(testConnection(_:)))
         saveButton = NSButton(title: "Save", target: self, action: #selector(save(_:)))
@@ -97,16 +126,18 @@ final class AISettingsViewController: NSViewController {
         let buttons = NSStackView(views: [testButton, saveButton])
         buttons.spacing = 12
         container.addArrangedSubview(buttons)
-        container.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -24).isActive = true
     }
 
-    private func row(label: String, control: NSView) -> NSStackView {
+    @discardableResult
+    private func addRow(label: String, control: NSView, in container: NSStackView) -> NSStackView {
         let title = NSTextField(labelWithString: label)
         title.widthAnchor.constraint(equalToConstant: 78).isActive = true
         let row = NSStackView(views: [title, control])
         row.spacing = 12
         row.alignment = .centerY
-        row.widthAnchor.constraint(equalToConstant: 504).isActive = true
+        row.distribution = .fill
+        container.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
         control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return row
     }
@@ -217,4 +248,8 @@ final class AISettingsViewController: NSViewController {
         status.stringValue = message
         status.textColor = error ? .systemRed : .secondaryLabelColor
     }
+}
+
+private final class AISettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
 }

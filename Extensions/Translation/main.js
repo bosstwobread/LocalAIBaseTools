@@ -83,25 +83,23 @@ MacHelper.define({
       const wordMode = isSingleWord(selectedWord);
       const sentence = wordMode ? sentenceForWord(input.sentence, selectedWord) : null;
       const labels = wordLabels[targetLanguage] || wordLabels.en;
-      let prompt = MacHelper.readText(wordMode ? "prompts/word-in-context.txt" : "prompts/translate.txt");
-      if (wordMode) {
-        prompt += sentence
-          ? "\nA surroundingSentence is supplied. Use these exact plain-text section labels in this order:\n" + labels.meaning + "\n" + labels.sentence + "\nPut the context-specific word meaning first and the full supplied sentence translation below it. Separate the sections with a blank line."
-          : "\nThe surroundingSentence is null. Return only a concise word meaning or possible senses in the target language, without section labels, example sentences, or a sentence translation. Do not guess a context. The caller will add a localized context-unavailable note.";
-      }
+      // The complete instruction is the editable source file, sent verbatim.
+      // Language, selected text, context, and labels remain separate input data.
+      const prompt = MacHelper.readText(wordMode ? "prompts/word-in-context.txt" : "prompts/translate.txt");
+      const data = wordMode
+        ? {selectedWord, surroundingSentence: sentence, targetLanguage, labels}
+        : {text: input.text, targetLanguage};
       const response = await MacHelper.ai.transform({
         action: "translate",
-        text: wordMode ? JSON.stringify({selectedWord, surroundingSentence: sentence}) : input.text,
+        text: JSON.stringify(data),
         targetLanguage,
         model: "", // Use MacHelper's shared provider/model choice.
-        guidance: prompt + "\nWriting style: " + (settings.style || "natural")
+        systemPrompt: prompt
       }, partial => input.reportProgress({
-        text: wordMode && !sentence ? labels.word + "\n" + partial.text : partial.text,
+        text: partial.text,
         title: "Translation"
       }));
-      // Customize formatting here, e.g. return {text: "译文：" + response.text}.
-      if (!wordMode || sentence) return {text: response.text, title: "Translation"};
-      return {text: labels.word + "\n" + response.text + "\n\n" + labels.unavailable, title: "Translation"};
+      return {text: response.text, title: "Translation"};
     }
   }
 });

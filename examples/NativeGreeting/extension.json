@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "runtime": "native",
+  "identifier": "com.example.native-greeting",
+  "displayName": "Native Greeting",
+  "version": "1.0.0",
+  "summary": "A small independent Swift extension with hot reload and shared settings.",
+  "entryPoint": "Main.swift",
+  "permissions": ["native.execute", "ui.panel"],
+  "commands": [{"identifier": "greet", "title": "Greet", "trigger": "manual"}],
+  "settingsSchema": "settings.schema.json"
+}

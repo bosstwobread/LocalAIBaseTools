@@ -300,6 +300,7 @@ public final class LocalGPTClient {
     private var requestTimers: [Int: Task<Void, Never>] = [:]
     private var isConnecting = false
     private var reasoningEffort: String?
+    private var connectionSystemPrompt: String?
     private var active: ActiveAnswer?
     private let requestTimeout: TimeInterval
     private let answerTimeout: TimeInterval
@@ -351,13 +352,19 @@ public final class LocalGPTClient {
         return try await readModelCatalog(config: config)
     }
 
-    public func connect(threadID: String?, workingDirectory: URL, model selectedModel: String? = nil) async throws -> LocalGPTConnection {
+    public func connect(threadID: String?, workingDirectory: URL, model selectedModel: String? = nil,
+                        systemPrompt: String? = nil) async throws -> LocalGPTConnection {
         guard !isConnecting, active == nil else { throw LocalGPTError.busy }
+        if let systemPrompt { try HelperRequest.validateSystemPrompt(systemPrompt) }
         let selected = selectedModel?.isEmpty == false ? selectedModel : nil
         if let selected, !LocalGPTModel.validIdentifier(selected) {
             throw LocalGPTError.unavailable("Choose a model with a valid ID of at most 200 bytes.")
         }
-        if selected == nil, let connection, connection.threadID == threadID { return connection }
+        let samePrompt: Bool
+        if let current = connectionSystemPrompt, let requested = systemPrompt {
+            samePrompt = current.utf8.elementsEqual(requested.utf8)
+        } else { samePrompt = connectionSystemPrompt == nil && systemPrompt == nil }
+        if selected == nil, let connection, connection.threadID == threadID, samePrompt { return connection }
         failConnection(LocalGPTError.disconnected)
         isConnecting = true
         defer { isConnecting = false }
@@ -372,7 +379,7 @@ public final class LocalGPTClient {
                 "approvalPolicy": "never",
                 "sandbox": "read-only",
                 "config": LocalGPTToolPolicy.threadOverrides(config),
-                "developerInstructions": Self.answerInstructions
+                "developerInstructions": systemPrompt ?? Self.answerInstructions
             ]
             // An empty selection preserves the model configured in the local desktop app.
             if let selected { parameters["model"] = selected }
@@ -408,6 +415,7 @@ public final class LocalGPTClient {
             let connected = LocalGPTConnection(threadID: id, model: model)
             reasoningEffort = catalog.models.first(where: { $0.model == model })?.messageReasoningEffort
             connection = connected
+            connectionSystemPrompt = systemPrompt
             return connected
         } catch {
             failConnection(error)
@@ -494,7 +502,7 @@ public final class LocalGPTClient {
     private func initializeServer(workingDirectory: URL, disabledMCPServers: [String]) async throws -> [String: Any] {
         try transport.start(workingDirectory: workingDirectory, disabledMCPServers: disabledMCPServers)
         _ = try await request("initialize", [
-            "clientInfo": ["name": "mac_helper", "title": "MacHelper", "version": "4.3.1"],
+            "clientInfo": ["name": "mac_helper", "title": "MacHelper", "version": "6.1.0"],
             "capabilities": ["experimentalApi": false]
         ])
         try send(["method": "initialized"])
@@ -639,6 +647,7 @@ public final class LocalGPTClient {
     private func failConnection(_ error: Error) {
         let wasConnected = connection != nil
         connection = nil
+        connectionSystemPrompt = nil
         reasoningEffort = nil
         transport.close()
         decoder = LocalGPTLineDecoder()

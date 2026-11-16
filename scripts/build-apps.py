@@ -71,11 +71,11 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "4.3.1", "CFBundleVersion": "432", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.1.0", "CFBundleVersion": "610", "CFBundleIconFile": "AppIcon",
         "MacHelperMarketplaceURL": args.marketplace_url,
         "CFBundleURLTypes": [{"CFBundleURLName": "com.localaibasetools.marketplace", "CFBundleURLSchemes": ["machelper"], "CFBundleTypeRole": "Viewer"}],
         "LSMinimumSystemVersion": "14.0", "NSPrincipalClass": "NSApplication",
-        "NSHighResolutionCapable": True, "LSUIElement": True,
+        "NSHighResolutionCapable": True, "LSUIElement": False,
         "NSHumanReadableCopyright": "© 2026 LocalAIBaseTools contributors. MIT License.",
     }
     with (contents / "Info.plist").open("wb") as stream:
@@ -85,6 +85,13 @@ def main():
     sign(worker, identity)
     resources = contents / "Resources"
     (resources / "SourceCatalog").mkdir(parents=True)
+    # Explicit public documentation only; AI_DEPLOYMENT.md stays local.
+    for relative in ["AI_EXTENSION_GUIDE.md", "docs/Extension-Development.md", "docs/Source-Extensions.md", "docs/Native-Extensions.md", "docs/MacHelper-Protocol.md"]:
+        destination = resources / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, destination)
+    (resources / "NativeExtensionSDK").mkdir()
+    shutil.copy2(ROOT / "MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift", resources / "NativeExtensionSDK/MacHelperNativeSDK.swift")
     shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.icns", resources / "AppIcon.icns")
     shutil.copy2(ROOT / "catalog/extensions.json", resources / "SourceCatalog/extensions.json")
     shutil.copytree(ROOT / "Extensions/Translation", resources / "SourceSeeds/Translation",

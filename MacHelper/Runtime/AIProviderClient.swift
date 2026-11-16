@@ -97,7 +97,7 @@ public final class AIProviderClient {
         if settings.provider == .chatGPT {
             do {
                 let connection = try await chatGPTClient.connect(threadID: nil, workingDirectory: workingDirectory,
-                                                                model: selectedModel)
+                                                                model: selectedModel, systemPrompt: request.systemPrompt)
                 // LocalGPTClient delivers callbacks synchronously on this actor.
                 // Forward directly so the terminal response cannot overtake a delta.
                 let answer = try await chatGPTClient.answer(prompt: prompt, requestID: UUID(), onDelta: { delta in
@@ -120,7 +120,7 @@ public final class AIProviderClient {
             "model": selectedModel,
             "stream": onDelta != nil,
             "messages": [
-                ["role": "system", "content": LocalGPTClient.answerInstructions],
+                ["role": "system", "content": request.systemPrompt ?? LocalGPTClient.answerInstructions],
                 ["role": "user", "content": prompt]
             ]
         ]

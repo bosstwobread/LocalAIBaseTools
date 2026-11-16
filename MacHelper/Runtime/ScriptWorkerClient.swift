@@ -10,7 +10,7 @@ public enum ScriptWorkerError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .unavailable: return "The MacHelper script worker is unavailable. Reinstall the MacHelper app."
+        case .unavailable: return "The extension worker is unavailable. Check the extension build or reinstall MacHelper."
         case .invalid(let message), .failed(let message): return message
         case .timedOut: return "The extension took too long to respond. Its worker was stopped."
         case .cancelled: return "The extension request was cancelled."
@@ -18,7 +18,8 @@ public enum ScriptWorkerError: LocalizedError, Equatable {
     }
 }
 
-/// One replaceable JS process per source generation. Messages and selected text
+/// One replaceable extension process per source generation (JavaScript or native).
+/// Messages and selected text
 /// use bounded stdin/stdout frames, never command arguments or diagnostic logs.
 @MainActor
 public final class ScriptWorkerClient {

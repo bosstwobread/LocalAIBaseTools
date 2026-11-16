@@ -347,6 +347,68 @@ final class LocalGPTClientTests: XCTestCase {
         await client.disconnect()
     }
 
+    func testExplicitPromptReplacesMacHelperInstructionsAndPreservesLiteralUserInput() async throws {
+        let mock = MockLocalGPTTransport()
+        mock.configuredMCPServers = ["computer-use": [:]]
+        let client = LocalGPTClient(transport: mock, requestTimeout: 1, answerTimeout: 2)
+        let system = "  \nMy editable prompt e\u{0301} 中文🙂\n\tOnly this text.  "
+        let text = " \tLiteral first line\n\n{\"source\":\"你好🙂\"}\n  "
+        _ = try await client.connect(threadID: nil, workingDirectory: directory, systemPrompt: system)
+        let start = try XCTUnwrap(mock.sent.first { $0["method"] as? String == "thread/start" })
+        let params = try XCTUnwrap(start["params"] as? [String: Any])
+        XCTAssertEqual(Array(try XCTUnwrap(params["developerInstructions"] as? String).utf8), Array(system.utf8))
+        XCTAssertEqual(params["ephemeral"] as? Bool, true)
+        XCTAssertEqual(params["approvalPolicy"] as? String, "never")
+        XCTAssertEqual(params["sandbox"] as? String, "read-only")
+        XCTAssertEqual(mock.disabledMCPHistory, [[], ["computer-use"]])
+        let config = try XCTUnwrap(params["config"] as? [String: Any])
+        XCTAssertEqual(config["web_search"] as? String, "disabled")
+        mock.onTurn = { request in
+            try mock.emit(["id": request["id"]!, "result": ["turn": ["id": "literal-turn"]]])
+            try mock.emit(["method": "turn/completed", "params": self.completion(turn: "literal-turn", text: "Literal answer")])
+        }
+        let answer = try await client.answer(prompt: text, requestID: UUID(), onDelta: { _ in })
+        XCTAssertEqual(answer.text, "Literal answer")
+        let turn = try XCTUnwrap(mock.sent.first { $0["method"] as? String == "turn/start" })
+        let turnParams = try XCTUnwrap(turn["params"] as? [String: Any])
+        let input = try XCTUnwrap(turnParams["input"] as? [[String: String]])
+        XCTAssertEqual(input.count, 1)
+        XCTAssertEqual(input[0]["type"], "text")
+        XCTAssertEqual(Array(try XCTUnwrap(input[0]["text"]).utf8), Array(text.utf8))
+        let policy = try XCTUnwrap(turnParams["sandboxPolicy"] as? [String: Any])
+        XCTAssertEqual(policy["type"] as? String, "readOnly")
+        XCTAssertEqual(policy["networkAccess"] as? Bool, false)
+        await client.disconnect()
+    }
+
+    func testChangingExplicitPromptCannotReuseAConnectionWithOldInstructions() async throws {
+        let mock = MockLocalGPTTransport()
+        let client = LocalGPTClient(transport: mock)
+        _ = try await client.connect(threadID: nil, workingDirectory: directory, systemPrompt: "Prompt A")
+        _ = try await client.connect(threadID: "thread", workingDirectory: directory, systemPrompt: "Prompt A")
+        XCTAssertEqual(mock.sent.filter { ["thread/start", "thread/resume"].contains($0["method"] as? String ?? "") }.count, 1)
+        _ = try await client.connect(threadID: "thread", workingDirectory: directory, systemPrompt: "Prompt B")
+        _ = try await client.connect(threadID: "thread", workingDirectory: directory, systemPrompt: "Prompt é")
+        _ = try await client.connect(threadID: "thread", workingDirectory: directory, systemPrompt: "Prompt e\u{0301}")
+        _ = try await client.connect(threadID: "thread", workingDirectory: directory)
+        let instructions = mock.sent.filter { ["thread/start", "thread/resume"].contains($0["method"] as? String ?? "") }
+            .compactMap { ($0["params"] as? [String: Any])?["developerInstructions"] as? String }
+        XCTAssertEqual(instructions.map { Array($0.utf8) },
+                       ["Prompt A", "Prompt B", "Prompt é", "Prompt e\u{0301}", LocalGPTClient.answerInstructions].map { Array($0.utf8) })
+        await client.disconnect()
+    }
+
+    func testInvalidExplicitPromptNeverStartsTheLocalService() async {
+        for system in ["", " \n\t", "Prompt\0tail", String(repeating: "a", count: 12_001)] {
+            let mock = MockLocalGPTTransport()
+            let client = LocalGPTClient(transport: mock)
+            do { _ = try await client.connect(threadID: nil, workingDirectory: directory, systemPrompt: system); XCTFail("Expected invalid prompt rejection") }
+            catch { XCTAssertTrue(error is MacHelperError) }
+            XCTAssertTrue(mock.sent.isEmpty)
+            XCTAssertFalse(mock.isOpen)
+        }
+    }
+
     func testUnverifiedToolConfigurationFailsBeforeConversationCreation() async throws {
         let mock = MockLocalGPTTransport()
         mock.bypassToolPolicy = true

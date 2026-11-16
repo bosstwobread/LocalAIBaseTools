@@ -37,21 +37,25 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 2, runtime == "javascript" else {
-            throw SourcePackageError.invalid("This source extension needs the JavaScript extension API version 2.")
+        guard schemaVersion == 2, ["javascript", "native"].contains(runtime) else {
+            throw SourcePackageError.invalid("This extension needs API version 2 and a supported javascript or native runtime.")
         }
         try SourcePackageRules.validateIdentifier(identifier)
         guard SourcePackageRules.validText(displayName, limit: 256), SourcePackageRules.validText(summary, limit: 2000),
-              SourcePackageRules.validVersion(version), entryPoint.hasSuffix(".js") else {
-            throw SourcePackageError.invalid("The source extension's name, summary, version, or JavaScript entry point is invalid.")
+              SourcePackageRules.validVersion(version), entryPoint.hasSuffix(runtime == "native" ? ".swift" : ".js") else {
+            throw SourcePackageError.invalid("The extension's name, summary, version, or runtime entry point is invalid.")
         }
         try SourcePackageRules.validatePath(entryPoint)
         if let settingsSchema { try SourcePackageRules.validatePath(settingsSchema) }
-        let allowed: Set<String> = ["selection.read", "clipboard.read", "ai.transform", "ui.panel"]
+        var allowed: Set<String> = ["selection.read", "clipboard.read", "ai.transform", "ui.panel"]
+        if runtime == "native" { allowed.insert("native.execute") }
         guard permissions.count <= allowed.count, Set(permissions).count == permissions.count,
               permissions.allSatisfy(allowed.contains), !commands.isEmpty, commands.count <= 16,
               Set(commands.map(\.identifier)).count == commands.count else {
             throw SourcePackageError.invalid("The source extension declares unsupported permissions or duplicate commands.")
+        }
+        if runtime == "native", !permissions.contains("native.execute") {
+            throw SourcePackageError.invalid("Native extensions must declare native.execute permission for trusted native code execution.")
         }
         for command in commands {
             guard command.identifier.range(of: #"^[a-z][a-z0-9-]{0,47}$"#, options: .regularExpression) != nil,
@@ -139,6 +143,12 @@ public enum SourcePackageInspector {
         let manifest = try JSONDecoder().decode(SourceExtensionManifest.self, from: SourcePackageRules.boundedData(manifestURL, maximum: 64 * 1024))
         try manifest.validate()
         let files = try sourceFiles(in: root)
+        if manifest.runtime == "native" {
+            let swiftFiles = files.filter { URL(fileURLWithPath: $0).pathExtension.lowercased() == "swift" }
+            guard swiftFiles == [manifest.entryPoint] else {
+                throw SourcePackageError.invalid("This native extension API compiles exactly one Swift entry file. Combine native code in its declared entryPoint; the SDK is supplied by MacHelper.")
+            }
+        }
         var resources: [String: String] = [:]
         var hashes: [String: String] = [:]
         var packageBytes = 0
@@ -148,11 +158,17 @@ public enum SourcePackageInspector {
             packageBytes += data.count
             guard packageBytes <= SourcePackageRules.maximumPackageBytes else { throw SourcePackageError.invalid("The source package is too large.") }
             hashes[relative] = SourcePackageRules.digest(data)
+            if manifest.runtime == "native" {
+                guard let text = String(data: data, encoding: .utf8), !text.contains("\0") else {
+                    throw SourcePackageError.invalid("Native source packages contain UTF-8 source and text resources, not prebuilt executable files.")
+                }
+            }
             if let text = String(data: data, encoding: .utf8) {
                 // Documentation and licenses remain editable on disk but do not
                 // need to cross the bounded worker protocol on every generation.
                 let ext = URL(fileURLWithPath: relative).pathExtension.lowercased()
-                if ["js", "json", "txt", "md", "prompt"].contains(ext), !relative.lowercased().hasPrefix("readme") {
+                let runtimeExtensions = manifest.runtime == "native" ? ["js", "swift", "json", "txt", "md", "prompt"] : ["js", "json", "txt", "md", "prompt"]
+                if runtimeExtensions.contains(ext), !relative.lowercased().hasPrefix("readme") {
                     runtimeBytes += data.count
                     guard runtimeBytes <= SourcePackageRules.maximumRuntimeTextBytes else {
                         throw SourcePackageError.invalid("The extension's runtime scripts and resources exceed 96 KiB.")
@@ -162,7 +178,7 @@ public enum SourcePackageInspector {
             }
         }
         guard let entry = resources[manifest.entryPoint], !entry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw SourcePackageError.invalid("The JavaScript entry point is missing, empty, or not UTF-8 text.")
+            throw SourcePackageError.invalid("The extension entry point is missing, empty, or not UTF-8 text.")
         }
         if let schema = manifest.settingsSchema {
             guard let text = resources[schema], let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)), object is [String: Any] else {

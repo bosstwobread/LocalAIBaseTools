@@ -100,10 +100,12 @@ private final class StreamingProviderURLProtocol: URLProtocol, @unchecked Sendab
 private final class StreamingChatGPTTransport: LocalGPTTransport {
     var onBytes: ((Data) -> Void)?
     var onEnd: (() -> Void)?
+    var sent: [[String: Any]] = []
     func start(workingDirectory: URL, disabledMCPServers: [String]) throws {}
     func close() {}
     func write(_ data: Data) throws {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        sent.append(object)
         guard let id = object["id"], let method = object["method"] as? String else { return }
         let result: [String: Any]
         switch method {
@@ -157,6 +159,34 @@ final class AIProviderStreamingTests: XCTestCase {
         XCTAssertEqual(capture.state.models, ["selected-model", "selected-model"])
     }
 
+    func testChatGPTStreamsWithOnlyTheExactExtensionSystemPromptAndLiteralUserText() async throws {
+        let transport = StreamingChatGPTTransport()
+        let subject = AIProviderClient(chatGPTClient: LocalGPTClient(transport: transport))
+        let capture = StreamingCapture(expectation(description: "Literal prompt delta before completion"))
+        let system = " \nExtension prompt e\u{0301} 中文🙂\n\t  "
+        let text = " \t{\"source\":\"original text\"}\n\n🙂  "
+        let operation = Task {
+            try await subject.answer(request: HelperRequest(id: "literal", action: .translate, text: text,
+                targetLanguage: "ja", tone: "friendly", guidance: "Do not append legacy guidance.", systemPrompt: system),
+                workingDirectory: directory, settings: HelperSettings(model: "selected-model"),
+                onDelta: { capture.append($0, model: $1) })
+        }
+        await fulfillment(of: [capture.firstDelta], timeout: 2)
+        let start = try XCTUnwrap(transport.sent.first { $0["method"] as? String == "thread/start" })
+        let params = try XCTUnwrap(start["params"] as? [String: Any])
+        XCTAssertEqual(Array(try XCTUnwrap(params["developerInstructions"] as? String).utf8), Array(system.utf8))
+        XCTAssertEqual(params["ephemeral"] as? Bool, true)
+        XCTAssertEqual(params["sandbox"] as? String, "read-only")
+        let turn = try XCTUnwrap(transport.sent.first { $0["method"] as? String == "turn/start" })
+        let input = try XCTUnwrap((turn["params"] as? [String: Any])?["input"] as? [[String: String]])
+        XCTAssertEqual(input.count, 1)
+        XCTAssertEqual(Array(try XCTUnwrap(input[0]["text"]).utf8), Array(text.utf8))
+        XCTAssertEqual(capture.state.deltas, ["你好🙂", " second"])
+        try transport.finish()
+        let result = try await operation.value
+        XCTAssertEqual(result, AIProviderAnswer(text: "你好🙂 second", model: "selected-model"))
+    }
+
     func testBothProvidersDeliverFragmentedUnicodeBeforeResponseCompletion() async throws {
         for provider in [AIProvider.ollama, .lmStudio] {
             let fixture = StreamingFixture(provider: provider,
@@ -200,6 +230,35 @@ final class AIProviderStreamingTests: XCTestCase {
             do { _ = try await operation.value; XCTFail("Cancelled streams must not succeed") }
             catch { XCTAssertEqual(error as? LocalGPTError, .cancelled) }
             fixture.release()
+        }
+    }
+
+    func testLiteralPromptsRemainUnchangedWhileStreamingAndCancellingLocalProviders() async throws {
+        let system = " \nExact e\u{0301} prompt 中文🙂\n\t  "
+        let text = " \tLiteral data\n{\"word\":\"ready\"}\n  "
+        for provider in [AIProvider.ollama, .lmStudio] {
+            let fixture = StreamingFixture(provider: provider, initial: try frame(provider, text: "partial"), hold: true)
+            let subject = client(fixture)
+            let capture = StreamingCapture(expectation(description: "Literal \(provider.rawValue) delta before cancellation"))
+            let operation = Task {
+                try await subject.answer(request: HelperRequest(id: "literal", action: .polish, text: text,
+                    guidance: "Ignored legacy guidance", systemPrompt: system), workingDirectory: directory, settings: settings(provider),
+                    onDelta: { capture.append($0, model: $1) })
+            }
+            await fulfillment(of: [capture.firstDelta], timeout: 3)
+            let generated = try XCTUnwrap(fixture.requests.last { $0.httpMethod == "POST" })
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(generated.httpBody)) as? [String: Any])
+            let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
+            XCTAssertEqual(messages.count, 2)
+            XCTAssertEqual(Array(try XCTUnwrap(messages[0]["content"]).utf8), Array(system.utf8))
+            XCTAssertEqual(Array(try XCTUnwrap(messages[1]["content"]).utf8), Array(text.utf8))
+            XCTAssertEqual(body["stream"] as? Bool, true)
+            XCTAssertNil(body["tools"])
+            operation.cancel()
+            do { _ = try await operation.value; XCTFail("Cancelled literal-prompt streams must not succeed") }
+            catch { XCTAssertEqual(error as? LocalGPTError, .cancelled) }
+            fixture.release()
+            XCTAssertEqual(capture.state.deltas, ["partial"])
         }
     }
 
