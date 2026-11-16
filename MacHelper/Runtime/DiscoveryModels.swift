@@ -135,23 +135,6 @@ public struct DiscoverySearchResult: Codable, Equatable, Sendable {
     }
 }
 
-public struct DiscoverySearchLink: Sendable {
-    public let query: String
-    public let language: String?
-    public init(url: URL) throws {
-        guard url.absoluteString.utf8.count <= 20_000, url.absoluteString.hasPrefix("machelper://search?"),
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.host == "search",
-              components.path.isEmpty, components.user == nil, components.password == nil, components.port == nil,
-              components.fragment == nil, let items = components.queryItems, (1...2).contains(items.count),
-              Set(items.map(\.name)).count == items.count, Set(items.map(\.name)).isSubset(of: ["query", "language"]),
-              let query = items.first(where: { $0.name == "query" })?.value else { throw DiscoveryError.invalidQuery }
-        self.query = try DiscoveryQuery.validate(query)
-        let language = items.first(where: { $0.name == "language" })?.value
-        guard language == nil || AppLocalization.supportedLanguages.contains(where: { $0.code == language }) else { throw DiscoveryError.invalidQuery }
-        self.language = language
-    }
-}
-
 public enum DiscoveryQuery {
     public static func validate(_ value: String) throws -> String {
         guard DiscoveryEntry.validText(value, units: 2000, bytes: 8000) else { throw DiscoveryError.invalidQuery }

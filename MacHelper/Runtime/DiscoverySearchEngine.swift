@@ -19,7 +19,7 @@ public final class DiscoverySearchEngine {
         workingDirectory = settingsStore.fileURL.deletingLastPathComponent().appendingPathComponent("Runtime", isDirectory: true)
     }
 
-    public func search(query: String, language: String, onStatus: (@Sendable (String) -> Void)? = nil) async throws -> DiscoverySearchResult {
+    public func search(query: String, language: String) async throws -> DiscoverySearchResult {
         guard ticket == nil else { throw LocalGPTError.busy }
         let query = try DiscoveryQuery.validate(query)
         guard AppLocalization.supportedLanguages.contains(where: { $0.code == language }) else { throw DiscoveryError.invalidQuery }
@@ -27,7 +27,6 @@ public final class DiscoverySearchEngine {
         defer { ticket = nil; cancelled.remove(id) }
         return try await withTaskCancellationHandler {
             do {
-                onStatus?("Updating tool catalog…")
                 let snapshot = try await store.load()
                 try check(id)
                 guard !snapshot.index.extensions.isEmpty else {
@@ -40,7 +39,6 @@ public final class DiscoverySearchEngine {
                 if candidates.count > 40 {
                     // Translate/expand the user's own query before local lexical
                     // retrieval. Do not send a large catalog to the model.
-                    onStatus?("Understanding your request…")
                     let response = try await ask(["query": query], prompt: "expand", settings: settings, id: id)
                     let expanded = try Self.expansion(response.text)
                     var scores: [String: Double] = [:]
@@ -57,7 +55,6 @@ public final class DiscoverySearchEngine {
                                      model: response.model, matches: [], noMatchReason: "No suitable extension was found.")
                     }
                 }
-                onStatus?("Comparing matching tools…")
                 // Bound the data independently of descriptor limits. Local
                 // retrieval selects candidates; full limitations remain visible
                 // in the catalog UI and are supplied to ranking when possible.

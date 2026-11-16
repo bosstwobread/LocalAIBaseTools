@@ -496,17 +496,19 @@ test('cancel stops the current bridge request and ignores its late response; no-
   }finally{view.close();}
 });
 
-test('missing connector has a safe MacHelper prefill fallback and keyword search needs no AI',async()=>{
+test('missing connector offers setup links while keyword search stays available on the website',async()=>{
   const view=await page({storedLanguage:'zh-Hans'});
   try{
     input(view,'#search','Explain a selected word');
     assert.equal(view.document.querySelectorAll('.extension-card').length,1);
     view.document.querySelector('#description-mode').click();await delay(0);
     input(view,'#need-query','A & B? 翻译');
-    const link=new URL(view.document.querySelector('#open-search-in-machelper').href);
-    assert.equal(link.protocol,'machelper:');assert.equal(link.host,'search');
-    assert.equal(link.searchParams.get('query'),'A & B? 翻译');assert.equal(link.searchParams.get('language'),'zh-Hans');
-    assert.equal(view.document.querySelector('#connector-help').hidden,false);
+    const help=view.document.querySelector('#connector-help');
+    assert.equal(help.hidden,false);
+    assert.ok(help.querySelector('a[href="#extension/machelper-connector"]'));
+    assert.ok(help.querySelector('a[href="#get-machelper"]'));
+    assert.equal(view.document.querySelector('#open-search-in-machelper'),null);
+    assert.equal(view.document.querySelector('a[href^="machelper://search"]'),null);
     view.document.querySelector('#find-with-ai').click();await delay(0);
     assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
     assert.match(view.document.querySelector('#discovery-status').textContent,/MacHelper/);
@@ -516,21 +518,26 @@ test('missing connector has a safe MacHelper prefill fallback and keyword search
   }finally{view.close();}
 });
 
-test('native search fallback stays disabled for blank, overlong, or NUL-containing needs',async()=>{
-  const view=await page();
+test('website-only AI search rejects blank, overlong, and NUL-containing needs without invoking the bridge',async()=>{
+  const requests=[];
+  const view=await page({bridge:(_id,message,callback)=>{
+    requests.push(message);
+    callback(message.action==='status'?{ok:true,compatible:true}:{ok:true,search:{matches:[],noMatchReason:'No matching tool.'}});
+  }});
   try{
     view.document.querySelector('#description-mode').click();await delay(0);
-    const link=view.document.querySelector('#open-search-in-machelper');
     for(const query of ['', '  \n ', 'a'.repeat(2001),'word\0private']){
       input(view,'#need-query',query);
-      assert.equal(link.hasAttribute('href'),false);
-      assert.equal(link.getAttribute('aria-disabled'),'true');
-      assert.equal(link.tabIndex,-1);
+      view.document.querySelector('#find-with-ai').click();await delay(0);
+      assert.match(view.document.querySelector('#discovery-status').textContent,/1–2,000/);
+      assert.equal(requests.filter(request=>request.action==='search').length,0);
+      assert.equal(view.document.querySelector('a[href^="machelper://search"]'),null);
     }
     input(view,'#need-query','Explain a selected word');
-    assert.equal(link.getAttribute('aria-disabled'),'false');
-    assert.equal(new URL(link.href).searchParams.get('query'),'Explain a selected word');
-    assert.equal(link.tabIndex,0);
+    view.document.querySelector('#find-with-ai').click();await delay(0);
+    assert.equal(requests.filter(request=>request.action==='search').length,1);
+    assert.equal(requests.find(request=>request.action==='search').query,'Explain a selected word');
+    assert.equal(view.document.querySelector('#no-match-reason').textContent,'No matching tool.');
   }finally{view.close();}
 });
 

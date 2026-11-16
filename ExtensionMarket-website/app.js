@@ -62,14 +62,6 @@
     $('#discovery-status').textContent = t(discovery.message);
     $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running)));
     $('#connector-help').hidden = discovery.available;
-    const open = new URL('machelper://search');
-    open.searchParams.set('query', queryValue());
-    open.searchParams.set('language', i18n?.locale || 'en');
-    const fallback = $('#open-search-in-machelper');
-    const canOpen = validQuery(queryValue());
-    if(canOpen) fallback.href = open.href; else fallback.removeAttribute('href');
-    fallback.setAttribute('aria-disabled',String(!canOpen));
-    fallback.tabIndex=canOpen ? 0 : -1;
     $('#discovery-model').textContent = [discovery.model, discovery.stale && t('Using cached extension descriptions.')].filter(Boolean).join(' · ');
     const examples = state.tools.flatMap(tool => tool.exampleQueries.slice(0,1).map(value => ({ tool, value }))).slice(0,3);
     $('#discovery-examples').replaceChildren(...examples.map(({tool,value}) => {
@@ -116,7 +108,7 @@
     const pending={ id, timeout:null };
     discovery.running=pending; discovery.matches=null; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
     discovery.message='Finding extensions with your AI…';
-    pending.timeout=setTimeout(()=>{ if(discovery.running===pending) { cancelDiscovery(false); discovery.message='Search timed out. Try again or open MacHelper.';renderDiscovery(); } },180000);
+    pending.timeout=setTimeout(()=>{ if(discovery.running===pending) { cancelDiscovery(false); discovery.message='Search timed out. Please try again.';renderDiscovery(); } },180000);
     renderDiscovery();renderCards();
     try {
       const response=await connectorMessage({action:'search',requestId:id,query,language:i18n?.locale || 'en'});
@@ -131,7 +123,7 @@
       $('#no-match-reason').textContent=!discovery.matches.length && typeof result.noMatchReason==='string' ? result.noMatchReason.slice(0,4000) : '';
     } catch {
       if(discovery.running!==pending) return;
-      discovery.available=false; discovery.message='Could not connect to MacHelper. Check the connector and AI connection, or open MacHelper.';
+      discovery.available=false; discovery.message='Could not connect to MacHelper. Check the connector and AI connection settings in MacHelper.';
     } finally {
       if(discovery.running===pending) { clearTimeout(pending.timeout); discovery.running=null; renderDiscovery();renderCards(); }
     }

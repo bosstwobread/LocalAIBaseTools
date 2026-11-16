@@ -1,6 +1,6 @@
 # Translation — editable source extension
 
-Translation 4.5.0 requires MacHelper 4.5 or later for translation, and MacHelper 6.2 or later for localized interface labels. This folder is its complete JavaScript source, manifest, settings schema, prompts, UI translations, searchable discovery metadata, and license. It needs no separate app or compiler. It requests only selection, AI, and result-panel permissions; the unused clipboard-reading declaration has been removed. Copying a finished result remains an explicit user action.
+Translation 4.5.1 requires MacHelper 4.5 or later for translation, and MacHelper 6.2 or later for localized interface labels. This folder is its complete JavaScript source, manifest, settings schema, prompts, UI translations, searchable discovery metadata, and license. It needs no separate app or compiler. It requests only selection, AI, and result-panel permissions; the unused clipboard-reading declaration has been removed. Copying a finished result remains an explicit user action.
 
 MacHelper's interface language is chosen under General and is separate from this tool's target language. The extension owns `localizations.json`, which translates its description and settings labels into 13 interface languages. Prompt source files stay exactly as authored; changing the interface language never rewrites prompts or changes the target language.
 
@@ -40,4 +40,4 @@ If context is unavailable, invalid, oversized, or unrelated to the word, `surrou
 
 The marketplace catalog includes every source file with its SHA-256. Existing editable installations are not overwritten by repeat marketplace installs. Older published source versions remain available at their immutable URLs. See `docs/Source-Extensions.md` in the main repository for the format and protocol.
 
-Public listing and search text belong in `discovery.json`, including capabilities, example needs, keywords, limitations, and translations. MacHelper 6.3 can search the lightweight catalog through **Find tools** without downloading extension source; installed prompts and behavior remain independent. Metadata edits require a new package version when published.
+Public listing and search text belong in `discovery.json`, including capabilities, example needs, keywords, limitations, and translations. The Extension Market searches the lightweight catalog without downloading extension source. Its explicit AI search uses your saved MacHelper connection through the MacHelper Connector; installed prompts and behavior remain independent. Metadata edits require a new package version when published.

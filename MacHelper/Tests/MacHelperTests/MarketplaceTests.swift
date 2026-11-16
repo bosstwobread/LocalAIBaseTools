@@ -96,6 +96,7 @@ final class MarketplaceTests: XCTestCase {
             valid + "&enable=true", valid + "#fragment",
             "machelper://install?extension=" + identifier,
             "machelper://install?catalog=&extension=" + identifier,
+            "machelper://search?query=translate&language=en",
         ]
         for text in invalid {
             guard let url = URL(string: text) else { continue }

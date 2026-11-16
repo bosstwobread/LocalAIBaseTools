@@ -4,10 +4,12 @@ A small Chrome/Edge extension that connects the official Extension Market to Mac
 
 ## Install
 
-1. Install MacHelper 6.3 or later in Applications, open it, and choose **Install Browser Support** in General settings.
+1. Install MacHelper 6.3 or later in Applications, open it, and choose **MacHelper → Install Browser Support…** from the app menu.
 2. Download and extract this complete extension folder. In Chrome or Edge, open the Extensions page, enable Developer mode, choose **Load unpacked**, and select this folder.
 3. Keep the `key` in `manifest.json`. The stable extension ID is `kkmffpbghoojlnldpdolonpjmkhdenkh`, already authorized by MacHelper's installer.
 4. Open <https://local-ai-extension.nelson007.com/>. Describe the tool you need and explicitly start AI search. The ordinary keyword search works without this connector.
+
+Search is available on the website. MacHelper manages the shared provider/model settings and serves AI search requests; it has no search screen.
 
 Use the toolbar button to open the marketplace. The connector does not request access to Upwork, browsing history, page contents, or browser storage. It accepts requests only from the official HTTPS marketplace's top-level page. Browser stores may assign a different ID; such a release must update the website connector ID and register its exact ID in MacHelper first.
 

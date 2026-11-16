@@ -14,12 +14,6 @@ enum MacHelperApplication {
             setenv("MACHELPER_INTERFACE_LANGUAGE", "en", 1)
         }
         let app = NSApplication.shared
-        if CommandLine.arguments.contains("--verify-discovery") {
-            app.setActivationPolicy(.prohibited)
-            Task { @MainActor in exit(await DiscoveryVerification.run()) }
-            RunLoop.main.run()
-            return
-        }
         if CommandLine.arguments.contains("--verify-extension-list") {
             app.setActivationPolicy(.prohibited)
             Task { @MainActor in exit(await ExtensionListVerification.run()) }
@@ -77,10 +71,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var sourceManager: SourceExtensionManager!
     private var startupTask: Task<Void, Never>?
     private var general: GeneralSettingsViewController!
-    private let discoveryStore = DiscoveryCatalogStore()
-    private lazy var discoveryEngine = DiscoverySearchEngine(store: discoveryStore)
-    private var discovery: DiscoveryViewController!
-    private var pendingDiscoveryQuery: String?
     private var currentController: NSViewController?
     private var rootController: NSViewController!
     private var pendingSettingsTab: Int?
@@ -102,7 +92,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds/Translation"))
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
-        discovery = makeDiscoveryController()
         general = GeneralSettingsViewController(login: login)
         general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
         createWindow()
@@ -116,11 +105,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         startBrowserSupportBootstrap()
         // The first Apple open event carries the login launch reason. Do not
         // open a window here: a login launch must remain in the background.
-        if let query = pendingDiscoveryQuery {
-            pendingDiscoveryQuery = nil
-            discovery.present(query: query)
-            showSettings(tab: 3)
-        } else if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
+        if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
         else if let pending = pendingSettingsTab { pendingSettingsTab = nil; showSettings(tab: pending) }
     }
 
@@ -148,19 +133,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let development = Bundle.main.object(forInfoDictionaryKey: MarketplaceConfiguration.developmentKey) as? Bool == true
         for url in urls.prefix(8) {
             do {
-                if url.scheme == "machelper", url.host == "search" {
-                    let request = try DiscoverySearchLink(url: url)
-                    // A website link is a draft, never an instruction to run AI
-                    // or change the user's saved interface language.
-                    if discovery != nil {
-                        discovery.present(query: request.query)
-                        showSettings(tab: 3)
-                    } else {
-                        pendingDiscoveryQuery = request.query
-                        pendingSettingsTab = 3
-                    }
-                    continue
-                }
                 let request = try MarketplaceInstallRequest(url: url, allowLocalDevelopment: development)
                 guard marketplaceRequests.count < 8 else { break }
                 if !marketplaceRequests.contains(request) { marketplaceRequests.append(request) }
@@ -172,7 +144,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminating = true
         browserSupportTask?.cancel()
-        discovery?.prepareForTermination()
         marketplaceTask?.cancel()
         marketplaceRequests.removeAll()
         startupTask?.cancel()
@@ -192,7 +163,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: L("MacHelper"))
         appMenu.addItem(withTitle: L("MacHelper Settings…"), action: #selector(openSettings), keyEquivalent: ",").target = self
-        appMenu.addItem(withTitle: L("Find tools…"), action: #selector(openDiscovery), keyEquivalent: "").target = self
         appMenu.addItem(withTitle: L("Marketplace…"), action: #selector(openMarketplace), keyEquivalent: "").target = self
         let appBrowserSupport = appMenu.addItem(withTitle: L("Install Browser Support…"), action: #selector(installBrowserSupport), keyEquivalent: "")
         appBrowserSupport.target = self
@@ -216,7 +186,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = L("MacHelper · AI connection and extensions")
         let statusMenu = NSMenu()
         statusMenu.addItem(withTitle: L("Extensions…"), action: #selector(openExtensions), keyEquivalent: "").target = self
-        statusMenu.addItem(withTitle: L("Find tools…"), action: #selector(openDiscovery), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: L("Marketplace…"), action: #selector(openMarketplace), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: L("AI Connection…"), action: #selector(openAI), keyEquivalent: "").target = self
         statusMenu.addItem(withTitle: L("General…"), action: #selector(openGeneral), keyEquivalent: "").target = self
@@ -271,7 +240,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         navigation.alignment = .leading
         navigation.spacing = 5
         navigation.translatesAutoresizingMaskIntoConstraints = false
-        for (index, name, symbol) in [(2, "General", "gearshape"), (0, "AI Connection", "sparkles"), (1, "Extensions", "puzzlepiece.extension"), (3, "Find tools", "magnifyingglass")] {
+        for (index, name, symbol) in [(2, "General", "gearshape"), (0, "AI Connection", "sparkles"), (1, "Extensions", "puzzlepiece.extension")] {
             let button = SettingsNavigationButton(title: L(name), symbol: symbol, target: self, action: #selector(sectionChanged(_:)))
             button.tag = index
             navigationButtons[index] = button
@@ -340,7 +309,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         switch index {
         case 0: controller = ai
         case 1: controller = extensions
-        case 3: controller = discovery
         default: controller = general
         }
         if currentController === controller {
@@ -371,7 +339,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         guard code != AppLocalization.shared.language else { return true }
         // Rebuilding presentation must never discard an unfinished prompt or AI setting.
         guard !extensions.hasPendingOperations, !extensions.hasUnsavedPromptChanges,
-              !ai.hasPendingChanges, !discovery.isBusy, marketplaceTask == nil else {
+              !ai.hasPendingChanges, marketplaceTask == nil else {
             let alert = NSAlert()
             alert.messageText = L("Finish your changes first")
             alert.informativeText = L("Save or revert unsaved prompts and AI settings, and wait for current operations before changing the interface language.")
@@ -379,9 +347,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             return false
         }
-        let discoveryDraft = discovery.draft
         AppLocalization.shared.language = code
-        discovery = makeDiscoveryController(draft: discoveryDraft)
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         ai = AISettingsViewController()
@@ -392,14 +358,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         createWindow()
         general.refreshStatus()
         return true
-    }
-
-    private func makeDiscoveryController(draft: DiscoveryViewController.Draft = .init()) -> DiscoveryViewController {
-        let store = discoveryStore, engine = discoveryEngine
-        return DiscoveryViewController(services: .init(
-            load: { try await store.load(refresh: $0) },
-            search: { try await engine.search(query: $0, language: $1, onStatus: $2) },
-            cancel: { await engine.cancel() }), draft: draft)
     }
 
     private func processMarketplaceRequests() {
@@ -505,7 +463,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         extensions.showOverview()
         showSettings(tab: 1)
     }
-    @objc private func openDiscovery() { showSettings(tab: 3) }
     @objc private func openAI() { showSettings(tab: 0) }
     @objc private func openGeneral() { showSettings(tab: 2) }
     @objc private func openMarketplace() {

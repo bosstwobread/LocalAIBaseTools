@@ -488,7 +488,6 @@
 .catalog-controls.description-mode { grid-template-columns:repeat(2,minmax(0,1fr)); margin-top:1rem; }
 @media (max-width:600px) { .description-search { padding:1rem; } .discovery-actions .button { width:100%; text-align:center; } }
 
-#open-search-in-machelper[aria-disabled="true"] { opacity:.5; cursor:default; text-decoration:none; }
 
 /* Authored illustration text follows UI language, independently of live input. */
 .hero-stage [data-preview-key] { unicode-bidi:plaintext; overflow-wrap:anywhere; }

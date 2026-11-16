@@ -189,9 +189,9 @@ reason; a no-match result explains when the catalog has no suitable tool.
 Descriptions are untrusted data, and reasons are displayed as plain text. Only
 real current catalog IDs can become result cards. Search never installs a tool.
 
-The MacHelper app bundles an initial lightweight discovery snapshot, refreshes
-its metadata cache from the public manifest/index, and keeps the last valid
-snapshot for offline use. Only descriptions are cached for discovery. Full tool
+MacHelper's local browser service bundles an initial lightweight discovery snapshot,
+refreshes its metadata cache from the public manifest/index, and keeps the last
+valid snapshot when an update is unavailable. Only descriptions are cached for discovery. Full tool
 source is downloaded after the separate installation review. Index revisions
 hash canonical entry JSON; the manifest also hashes the exact index bytes.
 Update checks do not consume AI usage. Finding with AI sends the user's request
@@ -206,9 +206,10 @@ unpacked flow and separately review that browser permission. **Cancel search**
 disconnects the current native AI request and ignores late responses; leaving the
 page also cancels it. Search requests stay in memory, not browser local storage.
 
-Without the connector, **Open in MacHelper** uses
-`machelper://search?query=...&language=...` to prefill native search. Opening the
-link alone does not call AI; the user clicks **Find with AI** in MacHelper. The
+Search is available on the website. MacHelper provides the shared AI connection
+and browser service; it has no search screen or search-prefill URL. Without the
+connector, keyword filtering still works and the description-search panel links
+to Connector and MacHelper setup. AI searches stay on this page after setup. The
 website does not expose a localhost HTTP server or add a CORS exception.
 
 A standalone seed build (metadata only, with no app or source downloads) is:

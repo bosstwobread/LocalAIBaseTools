@@ -30,7 +30,7 @@ When `systemPrompt` is supplied, `text` is opaque extension-prepared data and ma
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"6.3.2","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.4.0","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -38,7 +38,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"6.3.2","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.4.0","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.
@@ -65,7 +65,7 @@ Discovery searches public descriptions using the provider/model already saved in
 {
   "id": "discovery-example",
   "ok": true,
-  "version": "6.3.2",
+  "version": "6.4.0",
   "search": {
     "revision": "<64 lowercase hexadecimal characters>",
     "updatedAt": "2026-11-17T00:00:00Z",
@@ -84,7 +84,7 @@ The host refreshes a fixed configured `discovery-manifest.json` and verifies its
 
 ### Official website Connector
 
-The shared Chrome/Edge **MacHelper Connector** is `kkmffpbghoojlnldpdolonpjmkhdenkh`, version 1.0.0. Both browser installers authorize it alongside the existing Upwork extension while preserving previously approved IDs and compatibility host names. They install public discovery configuration/index/manifest and the fixed `DiscoveryPrompts/rank.txt` and `expand.txt` resources beside the host, with private file permissions; they never copy user AI settings or query history. The extension itself needs only `nativeMessaging`. Its manifest permits external connections only from `https://local-ai-extension.nelson007.com/*`; the bridge additionally verifies the exact HTTPS origin, credential-free sender URL, top-level frame, and tab identity. Other extensions, opaque origins, and child frames cannot call it.
+The shared Chrome/Edge **MacHelper Connector** is `kkmffpbghoojlnldpdolonpjmkhdenkh`, version 1.0.1. Both browser installers authorize it alongside the existing Upwork extension while preserving previously approved IDs and compatibility host names. They install public discovery configuration/index/manifest and the fixed `DiscoveryPrompts/rank.txt` and `expand.txt` resources beside the host, with private file permissions; they never copy user AI settings or query history. The extension itself needs only `nativeMessaging`. Its manifest permits external connections only from `https://local-ai-extension.nelson007.com/*`; the bridge additionally verifies the exact HTTPS origin, credential-free sender URL, top-level frame, and tab identity. Other extensions, opaque origins, and child frames cannot call it.
 
 The website sends messages to that fixed ID:
 
@@ -104,13 +104,7 @@ chrome.runtime.sendMessage("kkmffpbghoojlnldpdolonpjmkhdenkh", {
 
 These are the only bridge actions; extra request fields are rejected. Status pings the host without AI and returns `{ok:true, version, connectorVersion, compatible}`. Search requires MacHelper 6.3+, maps to native `{id:"discovery-<requestId>", action:"searchExtensions", text:query, interfaceLanguage:language}`, and returns `{ok:true, version, search}` using the envelope above. Errors use `{ok:false,error}`. Cancellation returns `{ok:true,cancelled}` and disconnects only the matching request's port from the same originating document. One search runs per tab; concurrent status checks are independent. Native fields are whitelisted before returning to the website. The bridge does not persist queries/results and cannot expose general native-host actions, files, settings, shell commands, or automatic installation. See the [Connector source guide](../Extensions/MacHelper-Connector/README.md) for browser loading, timeouts, and reload behavior.
 
-Without the connector, the website can open a bounded native-prefill link:
-
-```text
-machelper://search?query=<percent-encoded task>&language=en
-```
-
-Only `query` and optional `language` are accepted, without duplicate keys, credentials, path, port, or fragment. Opening it selects **Find tools → Describe need** and fills the text; it does not change interface-language preferences, start AI, install a tool, or execute code. The user explicitly chooses **Search with AI**. Ordinary keyword search needs neither connector nor inference.
+Tool search is provided by the website. Without the Connector, ordinary keyword search remains available and the website offers MacHelper/Connector setup links for AI search. Marketplace installation links remain supported separately.
 
 ## Unified extension worker boundary
 

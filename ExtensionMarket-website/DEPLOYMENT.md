@@ -101,8 +101,9 @@ and rebuild. Previously published versioned source files remain immutable.
 The optional website AI search uses a user-installed MacHelper Connector and
 native messaging on the user's own Mac. No AI backend, API credential,
 localhost listener, or new server container is deployed. The connector permits
-only `https://local-ai-extension.nelson007.com/*`, so local previews use the
-MacHelper prefill fallback or a mocked bridge for automated tests. Do not widen
+only `https://local-ai-extension.nelson007.com/*`, so local previews use keyword
+filtering or a mocked bridge for automated tests. MacHelper has no search screen
+or native search-prefill link. Do not widen
 that production permission for preview convenience. Searches never install or
 execute the matched tools. The existing deployment per-file checksum gate covers
 the discovery files and connector source download as ordinary public assets.

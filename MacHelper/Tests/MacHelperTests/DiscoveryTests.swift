@@ -91,13 +91,6 @@ final class DiscoveryTests: XCTestCase {
         XCTAssertThrowsError(try DiscoveryQuery.validate(" \n "))
         XCTAssertThrowsError(try DiscoveryQuery.validate("hi\0"))
     }
-    func testSearchLinksPrefillOnlyAndRejectInstallOrProviderOverrides() throws {
-        let valid = try DiscoverySearchLink(url: URL(string: "machelper://search?query=translate&language=zh-Hans")!)
-        XCTAssertEqual(valid.query, "translate"); XCTAssertEqual(valid.language, "zh-Hans")
-        for link in ["machelper://search?query=translate&run=true", "machelper://search?query=a&query=b", "machelper://search?query=a&language=xx", "machelper://search/?query=a", "machelper://search?query=a#fragment", "machelper://install?query=a"] {
-            XCTAssertThrowsError(try DiscoverySearchLink(url: URL(string: link)!))
-        }
-    }
     func testNativeDiscoveryForbidsGenericAIAndSettingsOverrides() throws {
         XCTAssertNoThrow(try HelperRequest(id: "q", action: .searchExtensions, text: "Translate", interfaceLanguage: "zh-Hans").validate())
         for request in [HelperRequest(id: "q", action: .searchExtensions, text: "Translate", provider: "ollama"),

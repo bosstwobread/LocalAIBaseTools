@@ -30,7 +30,7 @@
     "Edge"
   ],
   "installSteps": [
-    "Install MacHelper and choose Install Browser Support in General settings.",
+    "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….",
     "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.",
     "Open the official marketplace and explicitly start AI search."
   ],
@@ -44,7 +44,7 @@
       "Find an extension for improving English drafts.": "查找润色英文草稿的扩展。",
       "Requires MacHelper 6.3 or later with browser support installed.": "需要 MacHelper 6.3 或更新版本，并安装浏览器支持。",
       "Works only on the official Extension Market website.": "仅适用于官方扩展市场网站。",
-      "Install MacHelper and choose Install Browser Support in General settings.": "安装 MacHelper，在通用设置中选择安装浏览器支持。",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "将 MacHelper 安装到“应用程序”文件夹，打开应用，然后选择“MacHelper → 安装浏览器支持…”。",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "解压此浏览器扩展，在 Chrome 或 Edge 启用开发者模式，选择加载已解压的扩展程序。",
       "Open the official marketplace and explicitly start AI search.": "打开官方扩展市场，主动开始 AI 搜索。"
     },
@@ -57,7 +57,7 @@
       "Find an extension for improving English drafts.": "尋找潤飾英文草稿的擴充功能。",
       "Requires MacHelper 6.3 or later with browser support installed.": "需要 MacHelper 6.3 或更新版本，並安裝瀏覽器支援。",
       "Works only on the official Extension Market website.": "僅適用於官方擴充功能市場網站。",
-      "Install MacHelper and choose Install Browser Support in General settings.": "安裝 MacHelper，在一般設定中選擇安裝瀏覽器支援。",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "將 MacHelper 安裝到「應用程式」資料夾，開啟應用程式，然後選擇「MacHelper → 安裝瀏覽器支援…」。",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "解壓縮此瀏覽器擴充功能，在 Chrome 或 Edge 啟用開發人員模式，選擇載入未封裝項目。",
       "Open the official marketplace and explicitly start AI search.": "開啟官方市場，主動開始 AI 搜尋。"
     },
@@ -70,7 +70,7 @@
       "Find an extension for improving English drafts.": "Busca una extensión para mejorar borradores en inglés.",
       "Requires MacHelper 6.3 or later with browser support installed.": "Requiere MacHelper 6.3 o posterior con soporte del navegador instalado.",
       "Works only on the official Extension Market website.": "Solo funciona en el sitio oficial de Extension Market.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "Instala MacHelper y elige Instalar soporte del navegador en General.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "Instala MacHelper en Aplicaciones, ábrelo y elige «MacHelper → Instalar soporte del navegador…».",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "Extrae esta extensión, activa el modo desarrollador en Chrome o Edge y elige Cargar descomprimida.",
       "Open the official marketplace and explicitly start AI search.": "Abre el mercado oficial e inicia la búsqueda con IA."
     },
@@ -83,7 +83,7 @@
       "Find an extension for improving English drafts.": "Trouvez une extension pour améliorer mes brouillons en anglais.",
       "Requires MacHelper 6.3 or later with browser support installed.": "Nécessite MacHelper 6.3 ou ultérieur avec la prise en charge du navigateur.",
       "Works only on the official Extension Market website.": "Fonctionne uniquement sur le site officiel Extension Market.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "Installez MacHelper et choisissez Installer la prise en charge du navigateur dans Général.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "Installez MacHelper dans Applications, ouvrez-le, puis choisissez « MacHelper → Installer la prise en charge du navigateur… ».",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "Décompressez cette extension, activez le mode développeur de Chrome ou Edge et choisissez Charger l’extension non empaquetée.",
       "Open the official marketplace and explicitly start AI search.": "Ouvrez le marché officiel et lancez la recherche IA."
     },
@@ -96,7 +96,7 @@
       "Find an extension for improving English drafts.": "Finde eine Erweiterung zum Verbessern englischer Entwürfe.",
       "Requires MacHelper 6.3 or later with browser support installed.": "Benötigt MacHelper ab 6.3 mit installierter Browser-Unterstützung.",
       "Works only on the official Extension Market website.": "Funktioniert nur auf der offiziellen Extension-Market-Website.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "Installiere MacHelper und wähle Browser-Unterstützung installieren unter Allgemein.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "Installiere MacHelper im Programme-Ordner, öffne die App und wähle „MacHelper → Browser-Unterstützung installieren…“.",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "Entpacke diese Erweiterung, aktiviere den Entwicklermodus in Chrome oder Edge und wähle Entpackte Erweiterung laden.",
       "Open the official marketplace and explicitly start AI search.": "Öffne den offiziellen Marktplatz und starte die KI-Suche."
     },
@@ -109,7 +109,7 @@
       "Find an extension for improving English drafts.": "英語の下書きを改善する拡張機能を探して。",
       "Requires MacHelper 6.3 or later with browser support installed.": "ブラウザーサポートをインストールした MacHelper 6.3 以降が必要です。",
       "Works only on the official Extension Market website.": "公式 Extension Market サイトでのみ動作します。",
-      "Install MacHelper and choose Install Browser Support in General settings.": "MacHelper をインストールし、一般設定でブラウザーサポートをインストールします。",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "MacHelper を「アプリケーション」フォルダにインストールして開き、「MacHelper → ブラウザー連携をインストール…」を選択します。",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "この拡張機能を解凍し、Chrome または Edge の開発者モードでパッケージ化されていない拡張機能を読み込みます。",
       "Open the official marketplace and explicitly start AI search.": "公式マーケットを開き、AI 検索を開始します。"
     },
@@ -122,7 +122,7 @@
       "Find an extension for improving English drafts.": "영어 초안을 다듬는 확장 기능을 찾아 주세요.",
       "Requires MacHelper 6.3 or later with browser support installed.": "브라우저 지원이 설치된 MacHelper 6.3 이상이 필요합니다.",
       "Works only on the official Extension Market website.": "공식 Extension Market 웹사이트에서만 작동합니다.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "MacHelper를 설치하고 일반 설정에서 브라우저 지원 설치를 선택하세요.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "MacHelper를 응용 프로그램 폴더에 설치하고 연 다음 “MacHelper → 브라우저 지원 설치…”를 선택하세요.",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "이 확장 기능의 압축을 풀고 Chrome 또는 Edge에서 개발자 모드를 켠 후 압축해제된 확장 프로그램 로드를 선택하세요.",
       "Open the official marketplace and explicitly start AI search.": "공식 마켓을 열고 AI 검색을 시작하세요."
     },
@@ -135,7 +135,7 @@
       "Find an extension for improving English drafts.": "Encontre uma extensão para melhorar rascunhos em inglês.",
       "Requires MacHelper 6.3 or later with browser support installed.": "Requer MacHelper 6.3 ou posterior com suporte do navegador instalado.",
       "Works only on the official Extension Market website.": "Funciona apenas no site oficial do Extension Market.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "Instale o MacHelper e escolha Instalar suporte do navegador nas definições Gerais.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "Instale o MacHelper em Aplicações, abra-o e escolha «MacHelper → Instalar suporte do navegador…».",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "Extraia esta extensão, ative o modo de programador no Chrome ou Edge e escolha Carregar expandida.",
       "Open the official marketplace and explicitly start AI search.": "Abra o mercado oficial e inicie a pesquisa com IA."
     },
@@ -148,7 +148,7 @@
       "Find an extension for improving English drafts.": "ابحث عن إضافة لتحسين المسودات الإنجليزية.",
       "Requires MacHelper 6.3 or later with browser support installed.": "يتطلب MacHelper 6.3 أو أحدث مع تثبيت دعم المتصفح.",
       "Works only on the official Extension Market website.": "يعمل فقط على موقع Extension Market الرسمي.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "ثبّت MacHelper واختر تثبيت دعم المتصفح في الإعدادات العامة.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "ثبّت MacHelper في مجلد «التطبيقات»، وافتحه، ثم اختر «MacHelper → تثبيت دعم المتصفح…».",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "فك ضغط هذه الإضافة، وفعل وضع المطور في Chrome أو Edge، واختر تحميل إضافة غير مضغوطة.",
       "Open the official marketplace and explicitly start AI search.": "افتح السوق الرسمي وابدأ البحث بالذكاء الاصطناعي."
     },
@@ -161,7 +161,7 @@
       "Find an extension for improving English drafts.": "अंग्रेज़ी ड्राफ़्ट सुधारने वाला एक्सटेंशन खोजें।",
       "Requires MacHelper 6.3 or later with browser support installed.": "ब्राउज़र सपोर्ट के साथ MacHelper 6.3 या नया संस्करण आवश्यक है।",
       "Works only on the official Extension Market website.": "केवल आधिकारिक Extension Market वेबसाइट पर काम करता है।",
-      "Install MacHelper and choose Install Browser Support in General settings.": "MacHelper इंस्टॉल करें और सामान्य सेटिंग में ब्राउज़र सपोर्ट इंस्टॉल करें चुनें।",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "MacHelper को एप्लिकेशन फ़ोल्डर में इंस्टॉल करके खोलें, फिर “MacHelper → ब्राउज़र समर्थन स्थापित करें…” चुनें।",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "इस एक्सटेंशन को निकालें, Chrome या Edge में डेवलपर मोड चालू करें और अनपैक्ड लोड करें चुनें।",
       "Open the official marketplace and explicitly start AI search.": "आधिकारिक बाज़ार खोलें और AI खोज शुरू करें।"
     },
@@ -174,7 +174,7 @@
       "Find an extension for improving English drafts.": "Найдите расширение для улучшения английских черновиков.",
       "Requires MacHelper 6.3 or later with browser support installed.": "Нужен MacHelper 6.3 или новее с установленной поддержкой браузера.",
       "Works only on the official Extension Market website.": "Работает только на официальном сайте Extension Market.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "Установите MacHelper и выберите установку поддержки браузера в общих настройках.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "Установите MacHelper в папку «Программы», откройте его и выберите «MacHelper → Установить поддержку браузера…».",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "Распакуйте расширение, включите режим разработчика в Chrome или Edge и выберите загрузку распакованного расширения.",
       "Open the official marketplace and explicitly start AI search.": "Откройте официальный каталог и запустите поиск с ИИ."
     },
@@ -187,7 +187,7 @@
       "Find an extension for improving English drafts.": "Trova un’estensione per migliorare bozze in inglese.",
       "Requires MacHelper 6.3 or later with browser support installed.": "Richiede MacHelper 6.3 o successivo con supporto browser installato.",
       "Works only on the official Extension Market website.": "Funziona solo sul sito ufficiale Extension Market.",
-      "Install MacHelper and choose Install Browser Support in General settings.": "Installa MacHelper e scegli Installa supporto browser nelle impostazioni Generali.",
+      "Install MacHelper in Applications, open it, and choose MacHelper → Install Browser Support….": "Installa MacHelper in Applicazioni, aprilo e scegli «MacHelper → Installa supporto browser…».",
       "Extract this browser extension, enable Developer mode in Chrome or Edge, and choose Load unpacked.": "Estrai questa estensione, attiva la modalità sviluppatore in Chrome o Edge e scegli Carica estensione non pacchettizzata.",
       "Open the official marketplace and explicitly start AI search.": "Apri il mercato ufficiale e avvia la ricerca IA."
     }

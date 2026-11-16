@@ -214,10 +214,10 @@ public struct HelperResponse: Encodable, Sendable {
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "6.3.2"; error = nil; models = nil; defaultModel = nil; search = nil
+        version = "6.4.0"; error = nil; models = nil; defaultModel = nil; search = nil
     }
     public init(id: String, catalog: LocalGPTModelCatalog) {
-        self.id = id; ok = true; text = nil; model = nil; version = "6.3.2"; error = nil; search = nil
+        self.id = id; ok = true; text = nil; model = nil; version = "6.4.0"; error = nil; search = nil
         models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {
@@ -225,7 +225,7 @@ public struct HelperResponse: Encodable, Sendable {
         models = nil; defaultModel = nil; search = nil
     }
     public init(id: String, search: DiscoverySearchResult) {
-        self.id = id; ok = true; self.search = search; text = nil; model = nil; version = "6.3.2"
+        self.id = id; ok = true; self.search = search; text = nil; model = nil; version = "6.4.0"
         models = nil; defaultModel = nil; error = nil
     }
 }
