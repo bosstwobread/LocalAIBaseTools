@@ -180,7 +180,7 @@ public enum SourcePackageInspector {
                 // need to cross the bounded worker protocol on every generation.
                 let ext = URL(fileURLWithPath: relative).pathExtension.lowercased()
                 let runtimeExtensions = manifest.runtime == "native" ? ["js", "swift", "json", "txt", "md", "prompt"] : ["js", "json", "txt", "md", "prompt"]
-                if runtimeExtensions.contains(ext), !relative.lowercased().hasPrefix("readme") {
+                if runtimeExtensions.contains(ext), !relative.lowercased().hasPrefix("readme"), relative != "discovery.json" {
                     runtimeBytes += data.count
                     guard runtimeBytes <= SourcePackageRules.maximumRuntimeTextBytes else {
                         throw SourcePackageError.invalid("The extension's runtime scripts and resources exceed 96 KiB.")

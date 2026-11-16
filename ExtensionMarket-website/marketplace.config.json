@@ -3,7 +3,7 @@
   "baseUrl": "https://local-ai-extension.nelson007.com/",
   "sourceUrl": "https://github.com/bosstwobread/LocalAIBaseTools",
   "macHelper": {
-    "version": "6.2.1",
+    "version": "6.3.0",
     "minimumOS": "macOS 14+",
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
@@ -13,28 +13,26 @@
       "slug": "translation",
       "category": "Translation",
       "icon": "assets/translation-icon.svg",
-      "screenshots": [{
-        "src": "assets/translation-preview.svg",
-        "alt": "Illustrated MacHelper Translation panel showing a selected sentence and a Chinese translation.",
-        "caption": "Interface preview — selected text, a nearby translation, and streaming output."
-      }],
-      "description": "Select text in an app on your Mac, click the small Translation icon, and read the translation nearby as your AI responds. Choose your language and edit the original prompts in MacHelper. Your saved prompt goes to the selected AI service unchanged.",
-      "features": ["Translate selected text across supported Mac apps", "Explain a selected word in context, with the full sentence translation below", "Read the result as the AI generates it", "Choose from 10 target languages", "Edit the complete prompts directly in Settings", "Move the translation panel by its header", "Edit scripts and prompts with reload on save", "Keep settings in one MacHelper app"],
-      "installSteps": ["Install and open MacHelper on an Apple Silicon Mac.", "Choose Install in MacHelper and review the tool's permissions.", "Enable Accessibility for MacHelper to read selected text in other apps.", "Select a sentence, click the floating icon, and press Esc to dismiss the translation."]
+      "screenshots": [
+        {
+          "src": "assets/translation-preview.svg",
+          "alt": "Illustrated MacHelper Translation panel showing a selected sentence and a Chinese translation.",
+          "caption": "Interface preview — selected text, a nearby translation, and streaming output."
+        }
+      ]
     },
     "MessageHelper-Upwork": {
       "id": "com.localaibasetools.messagehelper-upwork",
       "slug": "messagehelper-upwork",
       "category": "Writing",
       "icon": "assets/messagehelper-icon.svg",
-      "screenshots": [{
-        "src": "assets/messagehelper-preview.svg",
-        "alt": "Illustrated browser extension preview showing a translated message and an English draft polishing preview.",
-        "caption": "Interface preview — translate messages and review polished drafts before applying."
-      }],
-      "description": "Translate client messages and polish English drafts on supported Upwork message and feedback pages. This browser companion connects Chrome or Edge to MacHelper on your Mac. You review changes and send messages yourself.",
-      "features": ["Translate supported Upwork messages inline", "Polish English drafts with a preview", "Apply and undo draft changes", "Use MacHelper's shared provider and model", "Send messages and feedback only yourself"],
-      "installSteps": ["Install and open MacHelper on your Mac.", "Download and unzip the browser extension source.", "Open chrome://extensions or edge://extensions and enable Developer mode.", "Choose Load unpacked and select the extracted MessageHelper-Upwork folder.", "Open the extension settings and check the connection to MacHelper. Only you send messages or submit feedback."]
+      "screenshots": [
+        {
+          "src": "assets/messagehelper-preview.svg",
+          "alt": "Illustrated browser extension preview showing a translated message and an English draft polishing preview.",
+          "caption": "Interface preview — translate messages and review polished drafts before applying."
+        }
+      ]
     }
   }
 }

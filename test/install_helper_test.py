@@ -32,7 +32,7 @@ class InstallHelperTests(unittest.TestCase):
         extra = "a" * 32
         self.install("--extension-id", extra)
         self.install()
-        expected = sorted([installer.DEFAULT_EXTENSION_ID, extra])
+        expected = sorted([*installer.DEFAULT_EXTENSION_IDS, extra])
         config = self.destination / "allowed-extension-ids.json"
         self.assertEqual(json.loads(config.read_text()), expected)
         self.assertEqual(config.stat().st_mode & 0o777, 0o600)
@@ -68,6 +68,78 @@ class InstallHelperTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.install("--extension-id", "https://example.com")
         self.assertFalse(self.destination.exists())
+
+    def test_public_discovery_sidecars_are_installed_privately_and_atomically(self):
+        values = {"discovery-config.json": {"schemaVersion": 1, "websiteURL": "https://local-ai-extension.nelson007.com/"},
+                  "discovery-index.json": {"schemaVersion": 1, "extensions": []},
+                  "discovery-manifest.json": {"schemaVersion": 1, "revision": "old"}}
+        for name, value in values.items():
+            (self.binary.parent / name).write_text(json.dumps(value))
+        self.install()
+        settings = self.destination / "settings.json"
+        settings.write_bytes(b"user AI settings unchanged")
+        cache = self.destination / "discovery-cache.json"
+        cache.write_bytes(b"user discovery cache unchanged")
+        old_index = (self.destination / "discovery-index.json").open("rb")
+        self.addCleanup(old_index.close)
+        previous = old_index.read()
+        old_index.seek(0)
+        values["discovery-index.json"] = {"schemaVersion": 1, "extensions": [{"id": "new"}]}
+        (self.binary.parent / "discovery-index.json").write_text(json.dumps(values["discovery-index.json"]))
+        self.install()
+        self.assertEqual(old_index.read(), previous)
+        for name, value in values.items():
+            installed = self.destination / name
+            self.assertEqual(json.loads(installed.read_bytes()), value)
+            self.assertEqual(installed.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(settings.read_bytes(), b"user AI settings unchanged")
+        self.assertEqual(cache.read_bytes(), b"user discovery cache unchanged")
+
+    def test_embedded_app_seed_layout_is_supported(self):
+        self.binary = self.home / "Applications/MacHelper.app/Contents/MacOS/mac-helper-host"
+        self.binary.parent.mkdir(parents=True)
+        self.binary.write_bytes(b"embedded helper")
+        resources = self.binary.parent.parent / "Resources/Discovery"
+        resources.mkdir(parents=True)
+        for name in installer.DISCOVERY_SIDECARS:
+            folder = self.binary.parent if name == "discovery-config.json" else resources
+            (folder / name).write_text('{"schemaVersion":1}')
+        self.install()
+        for name in installer.DISCOVERY_SIDECARS:
+            self.assertEqual(json.loads((self.destination / name).read_text()), {"schemaVersion": 1})
+
+    def test_discovery_prompts_are_copied_without_rewriting(self):
+        prompts = self.binary.parent / "DiscoveryPrompts"
+        prompts.mkdir()
+        for name in ["rank.txt", "expand.txt"]:
+            (prompts / name).write_text("  Owned prompt \n中文  ", encoding="utf-8")
+        self.install()
+        for name in ["rank.txt", "expand.txt"]:
+            copied = self.destination / "DiscoveryPrompts" / name
+            self.assertEqual(copied.read_bytes(), (prompts / name).read_bytes())
+            self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
+
+    def test_invalid_discovery_seed_fails_before_changing_existing_installation(self):
+        self.install()
+        installed = self.destination / "mac-helper-host"
+        self.binary.write_bytes(b"changed host fixture")
+        for invalid in [b"not json", b"[]", b"{" + b" " * (64 * 1024)]:
+            (self.binary.parent / "discovery-config.json").write_bytes(invalid)
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.install()
+            self.assertEqual(installed.read_bytes(), b"new-host-fixture")
+
+    def test_discovery_source_and_destination_links_are_rejected(self):
+        self.install()
+        outside = self.home / "outside.json"
+        outside.write_bytes(b'{"private":"unchanged"}')
+        for link in [self.binary.parent / "discovery-config.json", self.destination / "discovery-config.json"]:
+            link.symlink_to(outside)
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.install()
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(outside.read_bytes(), b'{"private":"unchanged"}')
+            link.unlink()
 
 
 if __name__ == "__main__":

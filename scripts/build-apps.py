@@ -51,6 +51,10 @@ def main():
         parser.error("The marketplace URL must be a public HTTPS website URL without credentials, query, or fragment.")
     subprocess.run([sys.executable, str(ROOT / "scripts/build-app-icon.py")], check=True)
     identity = signing_identity(args.signing_identity)
+    discovery_stage = ROOT / "dist"
+    subprocess.run([sys.executable, str(ROOT / "ExtensionMarket-website/discovery.py"), "--output", str(discovery_stage)], check=True)
+    shutil.copytree(ROOT / "MacHelper/Runtime/DiscoveryPrompts", discovery_stage / "DiscoveryPrompts", dirs_exist_ok=True)
+    (discovery_stage / "discovery-config.json").write_text(json.dumps({"schemaVersion": 1, "websiteURL": args.marketplace_url}) + "\n")
     helper_bin = build(ROOT / "MacHelper")
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
@@ -71,7 +75,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "6.2.1", "CFBundleVersion": "621", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.3.0", "CFBundleVersion": "630", "CFBundleIconFile": "AppIcon",
         "CFBundleDevelopmentRegion": "en",
         "CFBundleLocalizations": sorted(path.stem for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")),
         "MacHelperMarketplaceURL": args.marketplace_url,
@@ -87,6 +91,11 @@ def main():
     sign(worker, identity)
     resources = contents / "Resources"
     shutil.copytree(ROOT / "MacHelper/Runtime/Localization", resources / "Localization")
+    shutil.copytree(ROOT / "MacHelper/Runtime/DiscoveryPrompts", resources / "DiscoveryPrompts")
+    (resources / "Discovery").mkdir()
+    for name in ["discovery-index.json", "discovery-manifest.json"]:
+        shutil.copy2(dist / name, resources / "Discovery" / name)
+    shutil.copy2(dist / "discovery-config.json", resources / "Discovery/discovery-config.json")
     (resources / "SourceCatalog").mkdir(parents=True)
     # Explicit public documentation only; AI_DEPLOYMENT.md stays local.
     for relative in ["AI_EXTENSION_GUIDE.md", "docs/Extension-Development.md", "docs/Source-Extensions.md", "docs/Native-Extensions.md", "docs/MacHelper-Protocol.md"]:

@@ -33,7 +33,7 @@ final class BrowserSupportInstallerTests: XCTestCase {
         let installed = try installer.install(from: app, additionalExtensionIDs: [customID])
         XCTAssertEqual(installed.binaryURL, home.appendingPathComponent(helper + "/mac-helper-host"))
         XCTAssertEqual(try Data(contentsOf: installed.binaryURL), Data("embedded helper fixture".utf8))
-        XCTAssertEqual(installed.extensionIDs, [customID, BrowserSupportInstaller.defaultExtensionID].sorted())
+        XCTAssertEqual(installed.extensionIDs, (BrowserSupportInstaller.defaultExtensionIDs + [customID]).sorted())
         XCTAssertEqual(installed.manifestURLs.count, 4)
         for folder in [chrome, edge] {
             for name in [BrowserSupportInstaller.hostName, BrowserSupportInstaller.legacyHostName] {
@@ -69,7 +69,7 @@ final class BrowserSupportInstallerTests: XCTestCase {
         defer { try? before.close() }
         try write(Data("new embedded helper fixture".utf8), to: app.appendingPathComponent("Contents/MacOS/mac-helper-host"), mode: 0o700)
         let updated = try installer.install(from: app)
-        XCTAssertEqual(updated.extensionIDs, [customID, BrowserSupportInstaller.defaultExtensionID].sorted())
+        XCTAssertEqual(updated.extensionIDs, (BrowserSupportInstaller.defaultExtensionIDs + [customID]).sorted())
         XCTAssertEqual(try before.readToEnd(), Data("embedded helper fixture".utf8), "An existing native-host connection keeps its old inode during an atomic upgrade")
         XCTAssertEqual(try Data(contentsOf: updated.binaryURL), Data("new embedded helper fixture".utf8))
         XCTAssertEqual(try Data(contentsOf: settings), originalSettings)
@@ -84,7 +84,7 @@ final class BrowserSupportInstallerTests: XCTestCase {
         let legacyData = try json([customID, legacyID])
         try write(legacyData, to: legacy)
         let result = try installer.install(from: app)
-        XCTAssertEqual(Set(result.extensionIDs), [customID, legacyID, BrowserSupportInstaller.defaultExtensionID])
+        XCTAssertEqual(Set(result.extensionIDs), Set(BrowserSupportInstaller.defaultExtensionIDs + [customID, legacyID]))
         XCTAssertEqual(try Data(contentsOf: legacy), legacyData)
     }
 
@@ -102,6 +102,83 @@ final class BrowserSupportInstallerTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: result.manifestURLs[0]), oldManifest)
         }
         XCTAssertThrowsError(try installer.install(from: app, additionalExtensionIDs: [String(repeating: "z", count: 32)]))
+    }
+
+    func testPublicDiscoverySeedsAreInstalledAtomicallyWithoutReplacingUserSettingsOrCache() throws {
+        let (home, app, installer) = try fixture()
+        let sourceConfig = app.appendingPathComponent("Contents/MacOS/discovery-config.json")
+        let sourceIndex = app.appendingPathComponent("Contents/Resources/Discovery/discovery-index.json")
+        let sourceManifest = app.appendingPathComponent("Contents/Resources/Discovery/discovery-manifest.json")
+        let config = try json(["schemaVersion": 1, "websiteURL": "https://local-ai-extension.nelson007.com/"])
+        let index = try json(["schemaVersion": 1, "extensions": []])
+        let manifest = try json(["schemaVersion": 1, "revision": "original"])
+        for (url, data) in [(sourceConfig, config), (sourceIndex, index), (sourceManifest, manifest)] { try write(data, to: url) }
+        _ = try installer.install(from: app)
+        let settings = home.appendingPathComponent(helper + "/settings.json")
+        let cache = home.appendingPathComponent(helper + "/discovery-cache.json")
+        try write(Data("user settings fixture".utf8), to: settings)
+        try write(Data("cached public metadata fixture".utf8), to: cache)
+        let installedIndex = home.appendingPathComponent(helper + "/discovery-index.json")
+        let previous = try FileHandle(forReadingFrom: installedIndex)
+        defer { try? previous.close() }
+        let updatedIndex = try json(["schemaVersion": 1, "extensions": [["id": "new"]]])
+        try write(updatedIndex, to: sourceIndex)
+        _ = try installer.install(from: app)
+        XCTAssertEqual(try previous.readToEnd(), index, "An existing reader retains the complete old inode")
+        for (name, data) in [("discovery-config.json", config), ("discovery-index.json", updatedIndex), ("discovery-manifest.json", manifest)] {
+            let installed = home.appendingPathComponent(helper + "/" + name)
+            XCTAssertEqual(try Data(contentsOf: installed), data)
+            XCTAssertEqual(try permissions(installed), 0o600)
+        }
+        XCTAssertEqual(try String(contentsOf: settings, encoding: .utf8), "user settings fixture")
+        XCTAssertEqual(try String(contentsOf: cache, encoding: .utf8), "cached public metadata fixture")
+    }
+
+    func testDiscoveryPromptResourcesAreCopiedVerbatim() throws {
+        let (home, app, installer) = try fixture()
+        let original = Data("  Owned prompt\n中文  ".utf8)
+        for name in ["rank.txt", "expand.txt"] { try write(original, to: app.appendingPathComponent("Contents/Resources/DiscoveryPrompts/" + name)) }
+        _ = try installer.install(from: app)
+        for name in ["rank.txt", "expand.txt"] {
+            let copied = home.appendingPathComponent(helper + "/DiscoveryPrompts/" + name)
+            XCTAssertEqual(try Data(contentsOf: copied), original)
+            XCTAssertEqual(try permissions(copied), 0o600)
+        }
+    }
+
+    func testInvalidDiscoveryJSONOrOversizedConfigPreservesExistingInstallation() throws {
+        let (home, app, installer) = try fixture()
+        let installed = try installer.install(from: app)
+        let previousBinary = try Data(contentsOf: installed.binaryURL)
+        let previousRegistration = try Data(contentsOf: installed.manifestURLs[0])
+        let source = app.appendingPathComponent("Contents/MacOS/discovery-config.json")
+        try write(Data("updated helper fixture".utf8), to: app.appendingPathComponent("Contents/MacOS/mac-helper-host"), mode: 0o700)
+        for invalid in [Data("invalid".utf8), Data("[]".utf8), Data(repeating: 32, count: 64 * 1024 + 1)] {
+            try write(invalid, to: source)
+            XCTAssertThrowsError(try installer.install(from: app))
+            XCTAssertEqual(try Data(contentsOf: installed.binaryURL), previousBinary)
+            XCTAssertEqual(try Data(contentsOf: installed.manifestURLs[0]), previousRegistration)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(helper + "/discovery-config.json").path))
+    }
+
+    func testDiscoverySourceAndDestinationSymlinksAreRejectedBeforeUpgrade() throws {
+        for embedded in [true, false] {
+            let (home, app, installer) = try fixture()
+            let installed = try installer.install(from: app)
+            let outside = home.appendingPathComponent("outside.json")
+            let outsideData = Data(#"{"private":"must remain unchanged"}"#.utf8)
+            try write(outsideData, to: outside)
+            let link = embedded ? app.appendingPathComponent("Contents/Resources/Discovery/discovery-index.json")
+                : home.appendingPathComponent(helper + "/discovery-index.json")
+            try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+            try write(Data("updated helper fixture".utf8), to: app.appendingPathComponent("Contents/MacOS/mac-helper-host"), mode: 0o700)
+            XCTAssertThrowsError(try installer.install(from: app))
+            XCTAssertEqual(try Data(contentsOf: outside), outsideData)
+            XCTAssertEqual(try Data(contentsOf: installed.binaryURL), Data("embedded helper fixture".utf8))
+            XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType, .typeSymbolicLink)
+        }
     }
 
     func testCustomOrInvalidOwnedNameRegistrationIsPreservedBeforeAnyUpgrade() throws {

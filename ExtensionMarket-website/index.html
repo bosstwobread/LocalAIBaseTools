@@ -54,6 +54,16 @@
 
     <section class="catalog-section shell" id="browse" aria-labelledby="catalog-title">
       <div class="section-heading"><div><p class="eyebrow">THE COLLECTION</p><h2 id="catalog-title">Find your next<br><em>small advantage.</em></h2></div><p class="section-intro">Focused tools for everyday moments.<br>Choose one. Make it part of your flow.</p></div>
+      <div class="discovery-modes" role="group" aria-label="Search method"><button id="keyword-mode" type="button" aria-pressed="true">Keywords</button><button id="description-mode" type="button" aria-pressed="false">Describe your need</button></div>
+      <section id="description-search" class="description-search" aria-label="Find extensions with AI" hidden>
+        <label for="need-query">What would you like a tool to do?</label>
+        <textarea id="need-query" rows="3" maxlength="2000" placeholder="Describe a task, such as understanding a word while reading…" autocomplete="off"></textarea>
+        <div id="discovery-examples" class="discovery-examples" aria-label="Example needs"></div>
+        <p class="discovery-note">Only Find with AI calls your configured AI. Keyword search uses no AI. Only descriptions are cached; tool source downloads when you install.</p>
+        <div class="discovery-actions"><button id="find-with-ai" class="button button-dark" type="button">Find with AI</button><button id="cancel-ai-search" class="button button-outline" type="button" hidden>Cancel search</button><a id="open-search-in-machelper" class="text-link" href="machelper://search">Open in MacHelper ↗</a></div>
+        <div id="connector-help" class="connector-help"><p>For AI results here, install the MacHelper Connector in Chrome or Edge and run MacHelper 6.3 or later. You can also search inside MacHelper.</p><a class="text-link" href="#extension/machelper-connector">Get MacHelper Connector ↗</a><p>Opening MacHelper fills your request. Click Find with AI there to start.</p></div>
+        <p id="discovery-status" class="discovery-status" role="status" aria-live="polite"></p><p id="discovery-model" class="discovery-note"></p><p id="no-match-reason" class="discovery-note"></p>
+      </section>
       <form id="filters" class="catalog-controls" role="search" aria-label="Find extensions">
         <label class="search-control"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 4.5 4.5"></path></svg><span class="sr-only">Search extensions</span><input id="search" type="search" placeholder="Search tools, features, platforms…" autocomplete="off"></label>
         <label class="select-control"><span>Category</span><select id="category"><option value="all">All categories</option></select></label>
@@ -84,7 +94,7 @@
         <p class="guide-language-note">The technical AI guide is in English. Code, prompts, and package names are preserved.</p>
         <p class="authoring-note">One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval. Chrome/Edge companions use the browser’s reload control.</p>
       </div>
-      <div class="source-preview" aria-label="Translation source package files"><div class="source-preview-heading"><span class="folder-symbol" aria-hidden="true">⌁</span><strong>Translation/</strong><span>COMPLETE SOURCE</span></div><div class="file-row"><span class="file-type">{ }</span><code>extension.json</code><span>Identity & capabilities</span></div><div class="file-row active"><span class="file-type">JS</span><code>main.js</code><span>Make it yours <i aria-hidden="true">↗</i></span></div><div class="file-row"><span class="file-type">Aa</span><code>prompts/translate.txt</code><span>Your instructions</span></div><div class="file-row"><span class="file-type">{ }</span><code>settings.schema.json</code><span>Settings & defaults</span></div><div class="source-preview-footer"><span class="source-dot" aria-hidden="true"></span> Save a file. Only this tool reloads.</div></div>
+      <div class="source-preview" aria-label="Translation source package files"><div class="source-preview-heading"><span class="folder-symbol" aria-hidden="true">⌁</span><strong>Translation/</strong><span>COMPLETE SOURCE</span></div><div class="file-row"><span class="file-type">{ }</span><code>extension.json</code><span>Identity & capabilities</span></div><div class="file-row"><span class="file-type">{ }</span><code>discovery.json</code><span>Descriptions & search examples</span></div><div class="file-row active"><span class="file-type">JS</span><code>main.js</code><span>Make it yours <i aria-hidden="true">↗</i></span></div><div class="file-row"><span class="file-type">Aa</span><code>prompts/translate.txt</code><span>Your instructions</span></div><div class="file-row"><span class="file-type">{ }</span><code>settings.schema.json</code><span>Settings & defaults</span></div><div class="source-preview-footer"><span class="source-dot" aria-hidden="true"></span> Save a file. Only this tool reloads.</div></div>
     </section>
   </main>
 

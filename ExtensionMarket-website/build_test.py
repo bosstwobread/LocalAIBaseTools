@@ -44,6 +44,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
             "commands": [{"identifier": "run", "title": "Run", "trigger": "manual"}],
         }
         self.write_manifest()
+        (self.package / "discovery.json").write_text(json.dumps({"schemaVersion":1,"description":"A synthetic native tool.","capabilities":["Show a native panel"],"exampleQueries":["Show a panel"],"keywords":["native"],"limitations":["Test only"],"platforms":["macOS"]}))
         (self.package / "Main.swift").write_text("// Synthetic source: packaging test does not execute it.\n")
         (self.package / "README.md").write_text("# Native Tool\n")
         (self.package / "LICENSE").write_text("MIT\n")
@@ -65,7 +66,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
         self.assertEqual(tools[0]["catalogUrl"], "catalog.json")
         output = self.site / "dist"
         catalog = json.loads((output / "catalog.json").read_text())
-        expected = {"extension.json", "Main.swift", "README.md", "LICENSE"}
+        expected = {"extension.json", "Main.swift", "README.md", "LICENSE", "discovery.json"}
         self.assertEqual({file["path"] for file in catalog["extensions"][0]["files"]}, expected)
         with zipfile.ZipFile(output / tools[0]["packageUrl"]) as archive:
             self.assertEqual(set(archive.namelist()), {"com.example.native-tool.macsource/" + path for path in expected})

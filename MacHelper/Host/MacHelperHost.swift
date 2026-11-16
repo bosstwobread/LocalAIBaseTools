@@ -16,7 +16,7 @@ struct MacHelperHost {
                     throw MacHelperError.invalid("The native host extension allowlist is invalid. Reinstall MacHelper.")
                 }
             } else {
-                allowedIDs = ["fmhfobfddchbeibojepeocgfemkpcklo"]
+                allowedIDs = BrowserSupportInstaller.defaultExtensionIDs
             }
             try NativeHostOrigin.validate(arguments: CommandLine.arguments, allowedExtensionIDs: allowedIDs)
             let host = NativeHost()
@@ -31,6 +31,7 @@ struct MacHelperHost {
 @MainActor
 private final class NativeHost {
     private let client = AIProviderClient()
+    private let discovery = DiscoverySearchEngine()
     private let settingsStore = HelperSettingsStore()
     private var decoder = NativeFrameDecoder()
     private var activeTask: Task<Void, Never>?
@@ -111,11 +112,15 @@ private final class NativeHost {
         activeTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let settings = try request.resolvedSettings(from: self.settingsStore)
-                if request.action == .listModels {
+                if request.action == .searchExtensions {
+                    let result = try await self.discovery.search(query: request.text ?? "", language: request.interfaceLanguage ?? "en")
+                    if !self.ended { self.write(.init(id: request.id, search: result)) }
+                } else if request.action == .listModels {
+                    let settings = try request.resolvedSettings(from: self.settingsStore)
                     let catalog = try await self.client.listModels(workingDirectory: self.workingDirectory, settings: settings)
                     if !self.ended { self.write(.init(id: request.id, catalog: catalog)) }
                 } else {
+                    let settings = try request.resolvedSettings(from: self.settingsStore)
                     let progress: (@Sendable (String, String) -> Void)?
                     if request.stream == true {
                         progress = { [weak self] delta, model in
@@ -173,6 +178,7 @@ private final class NativeHost {
         FileHandle.standardInput.readabilityHandler = nil
         activeTask?.cancel()
         Task { [self] in
+            await discovery.cancel()
             await client.disconnect()
             let continuation = exitContinuation
             exitContinuation = nil

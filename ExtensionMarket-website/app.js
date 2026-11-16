@@ -31,7 +31,110 @@
   function normalize(tool) {
     if (!tool || typeof tool.id !== 'string' || typeof tool.slug !== 'string' || typeof tool.name !== 'string' || !['mac-source', 'browser'].includes(tool.kind)) return null;
     if (tool.kind === 'mac-source' && tool.runtime !== undefined && !['javascript', 'native'].includes(tool.runtime)) return null;
-    return { ...tool, runtime: tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'native' : 'javascript') : 'browser', summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
+    return { ...tool, runtime: tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'native' : 'javascript') : 'browser', summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), keywords: strings(tool.keywords), exampleQueries: strings(tool.exampleQueries), limitations: strings(tool.limitations), translations: tool.translations && typeof tool.translations === 'object' ? tool.translations : {}, screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
+  }
+  const CONNECTOR_ID = 'kkmffpbghoojlnldpdolonpjmkhdenkh';
+  const discovery = { mode: 'keywords', running: null, matches: null, message: '', model: '', stale: false, available: false };
+  const toolText = (tool, text) => tool.translations?.[i18n?.locale || 'en']?.[text] || t(text);
+  const queryValue = () => $('#need-query').value.replace(/\s+/g, ' ').trim();
+  const validQuery = value => Boolean(value) && !value.includes('\0') && value.length <= 2000 && new TextEncoder().encode(value).length <= 8000;
+  function connectorMessage(message) {
+    return new Promise((resolve, reject) => {
+      if (!window.chrome?.runtime?.sendMessage) { reject(new Error('connector')); return; }
+      try {
+        window.chrome.runtime.sendMessage(CONNECTOR_ID, { type: 'machelper.discovery', ...message }, response => {
+          if (window.chrome.runtime.lastError || !response?.ok) reject(new Error('connector'));
+          else resolve(response);
+        });
+      } catch { reject(new Error('connector')); }
+    });
+  }
+  function renderDiscovery() {
+    const isAI = discovery.mode === 'description';
+    $('#keyword-mode').setAttribute('aria-pressed', String(!isAI));
+    $('#description-mode').setAttribute('aria-pressed', String(isAI));
+    $('#description-search').hidden = !isAI;
+    $('#filters').classList.toggle('description-mode',isAI);
+    $('#search').closest('label').hidden = isAI;
+    $('#find-with-ai').disabled = Boolean(discovery.running) || !state.data;
+    $('#cancel-ai-search').hidden = !discovery.running;
+    $('#need-query').disabled = Boolean(discovery.running);
+    $('#discovery-status').textContent = t(discovery.message);
+    $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running)));
+    $('#connector-help').hidden = discovery.available;
+    const open = new URL('machelper://search');
+    open.searchParams.set('query', queryValue());
+    open.searchParams.set('language', i18n?.locale || 'en');
+    const fallback = $('#open-search-in-machelper');
+    const canOpen = validQuery(queryValue());
+    if(canOpen) fallback.href = open.href; else fallback.removeAttribute('href');
+    fallback.setAttribute('aria-disabled',String(!canOpen));
+    fallback.tabIndex=canOpen ? 0 : -1;
+    $('#discovery-model').textContent = [discovery.model, discovery.stale && t('Using cached extension descriptions.')].filter(Boolean).join(' · ');
+    const examples = state.tools.flatMap(tool => tool.exampleQueries.slice(0,1).map(value => ({ tool, value }))).slice(0,3);
+    $('#discovery-examples').replaceChildren(...examples.map(({tool,value}) => {
+      const button = h('button', { type:'button', class:'example-query', disabled:discovery.running ? '' : null }, toolText(tool,value));
+      button.addEventListener('click', () => { $('#need-query').value=toolText(tool,value); updateNeed(); $('#need-query').focus(); });
+      return button;
+    }));
+  }
+  function updateNeed() {
+    if (!discovery.running && discovery.matches !== null) {
+      discovery.matches=null; discovery.message=''; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
+      if(state.data) renderCards();
+    }
+    renderDiscovery();
+  }
+  async function chooseSearchMode(mode) {
+    if (mode !== discovery.mode) cancelDiscovery(false);
+    discovery.mode=mode;
+    renderDiscovery();
+    if (state.data) renderCards();
+    if (mode === 'description') {
+      try { const result=await connectorMessage({action:'status'}); discovery.available=result.compatible === true; }
+      catch { discovery.available=false; }
+      renderDiscovery();
+    }
+  }
+  function cancelDiscovery(showMessage = true) {
+    const pending=discovery.running;
+    discovery.running=null;
+    if(pending) {
+      clearTimeout(pending.timeout);
+      connectorMessage({action:'cancel',requestId:pending.id}).catch(()=>{});
+      if(showMessage) discovery.message='Search cancelled.';
+    }
+    renderDiscovery();
+  }
+  async function searchWithAI() {
+    if(discovery.running || !state.data) return;
+    const query=queryValue();
+    if(!validQuery(query)) {
+      discovery.message='Describe your need in 1–2,000 characters.'; renderDiscovery(); return;
+    }
+    const id=window.crypto?.randomUUID?.() || `search_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const pending={ id, timeout:null };
+    discovery.running=pending; discovery.matches=null; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
+    discovery.message='Finding extensions with your AI…';
+    pending.timeout=setTimeout(()=>{ if(discovery.running===pending) { cancelDiscovery(false); discovery.message='Search timed out. Try again or open MacHelper.';renderDiscovery(); } },180000);
+    renderDiscovery();renderCards();
+    try {
+      const response=await connectorMessage({action:'search',requestId:id,query,language:i18n?.locale || 'en'});
+      if(discovery.running!==pending) return;
+      const result=response.search;
+      if(!result || !Array.isArray(result.matches) || result.matches.length > 100) throw new Error('invalid');
+      const known=new Set(state.tools.map(tool=>tool.id)), seen=new Set();
+      discovery.matches=result.matches.filter(match => match && known.has(match.id) && !seen.has(match.id) && ['good','partial'].includes(match.fit) && typeof match.reason==='string' && match.reason.length <= 4000 && seen.add(match.id));
+      discovery.available=true; discovery.model=typeof result.model==='string' ? result.model.slice(0,200) : '';
+      discovery.stale=result.stale===true;
+      discovery.message=discovery.matches.length ? 'AI suggestions — review each tool before installing.' : 'No matching extensions found. Try describing your need differently.';
+      $('#no-match-reason').textContent=!discovery.matches.length && typeof result.noMatchReason==='string' ? result.noMatchReason.slice(0,4000) : '';
+    } catch {
+      if(discovery.running!==pending) return;
+      discovery.available=false; discovery.message='Could not connect to MacHelper. Check the connector and AI connection, or open MacHelper.';
+    } finally {
+      if(discovery.running===pending) { clearTimeout(pending.timeout); discovery.running=null; renderDiscovery();renderCards(); }
+    }
   }
   async function loadCatalog() {
     if (state.loading) return;
@@ -52,6 +155,7 @@
       state.data = data;
       state.tools = tools;
       populateFilters();
+      renderDiscovery();
       renderCards();
       updateHelperLinks();
       $('#spotlight').hidden = !tools.some(tool => tool.slug === 'translation');
@@ -77,19 +181,20 @@
     }
   }
   function renderCards() {
-    const query = $('#search').value.trim().toLocaleLowerCase();
+    const query = discovery.mode === 'keywords' ? $('#search').value.trim().toLocaleLowerCase() : '';
     const category = $('#category').value;
     const platform = $('#platform').value;
-    const filtered = state.tools.filter(tool => {
-      const searchable = [tool.name, tool.summary, tool.description, tool.category, ...tool.features, ...tool.platforms, t(tool.summary), t(tool.description), t(tool.category), ...tool.features.map(feature => t(feature))].join(' ').toLocaleLowerCase();
+    const matched = discovery.mode === 'description' && discovery.matches !== null ? discovery.matches.map(match=>state.tools.find(tool=>tool.id===match.id)).filter(Boolean) : state.tools;
+    const filtered = matched.filter(tool => {
+      const searchable = [tool.name, tool.summary, tool.description, tool.category, ...tool.features, ...tool.platforms, ...tool.keywords, ...tool.exampleQueries, toolText(tool,tool.summary), toolText(tool,tool.description), t(tool.category), ...tool.features.map(feature => toolText(tool,feature)), ...tool.exampleQueries.map(value=>toolText(tool,value))].join(' ').toLocaleLowerCase();
       return (!query || searchable.includes(query)) && (category === 'all' || tool.category === category) && (platform === 'all' || tool.platforms.includes(platform));
     });
-    $('#extension-grid').replaceChildren(...filtered.map(card));
+    $('#extension-grid').replaceChildren(...filtered.map(tool=>card(tool, discovery.mode === 'description' ? discovery.matches?.find(match=>match.id===tool.id) : null)));
     $('#catalog-empty').hidden = filtered.length !== 0;
     $('#result-count').textContent = filtered.length === state.tools.length ? t('Extensions: {count}', { count: filtered.length }) : t('Extensions: {count} / {total}', { count: filtered.length, total: state.tools.length });
     $('#clear-filters').hidden = !query && category === 'all' && platform === 'all';
   }
-  function card(tool) {
+  function card(tool, match = null) {
     const details = `#extension/${encodeURIComponent(tool.slug)}`;
     const shot = tool.screenshots[0];
     const visual = h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) }, image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('span', { class: 'preview-label' }, t("Interface preview")));
@@ -99,11 +204,14 @@
       h('div', { class: 'card-content' },
         h('div', { class: 'card-kicker' }, h('span', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("NATIVE MACOS TOOL") : t("MACOS SOURCE TOOL")) : t("BROWSER COMPANION")), h('span', { class: 'card-version' }, `v${tool.version || '—'}`)),
         h('div', { class: 'card-heading' }, image(tool.icon, '', { class: 'card-icon', width: '42', height: '42' }), h('div', {}, h('h3', {}, h('a', { href: details }, tool.name)), h('p', {}, t(tool.category)))),
-        h('p', { class: 'card-summary' }, t(tool.summary)),
-        h('ul', { class: 'card-features' }, tool.features.slice(0, 2).map(feature => h('li', {}, t(feature)))),
+        h('p', { class: 'card-summary' }, toolText(tool,tool.summary)),
+        match && h('div', { class:'discovery-match' }, h('strong',{},t(match.fit==='good' ? 'Good fit' : 'Partial fit')),h('p',{},match.reason)),
+        h('ul', { class: 'card-features' }, tool.features.slice(0, 2).map(feature => h('li', {}, toolText(tool,feature)))),
         h('div', { class: 'card-bottom' }, h('div', { class: 'platform-labels', 'aria-label': t("Platforms") }, tool.platforms.map(label => h('span', {}, label))), h('div', { class: 'card-links' }, textLink(t("Details"), details, { 'aria-label': t('Details for {name}', { name: tool.name }) }), install))));
   }
   function resetFilters() {
+    cancelDiscovery(false); discovery.matches=null; discovery.mode='keywords'; discovery.message=''; discovery.model=''; discovery.stale=false;
+    $('#need-query').value=''; $('#no-match-reason').textContent=''; renderDiscovery();
     $('#search').value = '';
     $('#category').value = 'all';
     $('#platform').value = 'all';
@@ -189,8 +297,9 @@
     close.focus({ preventScroll: true });
   }
   function overviewContent(tool) {
-    const main = h('div', {}, h('p', { class: 'detail-description' }, t(tool.description)));
-    if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, t("What it does")), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, t(feature)))));
+    const main = h('div', {}, h('p', { class: 'detail-description' }, toolText(tool,tool.description)));
+    if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, t("What it does")), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, toolText(tool,feature)))));
+    if(tool.limitations.length) main.append(h('h3',{class:'detail-subheading'},t('Limitations')),h('ul',{class:'detail-list'},tool.limitations.map(value=>h('li',{},toolText(tool,value)))));
     for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, t(shot.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('figcaption', {}, t(shot.caption) || t("Interface preview · Example content"))));
     if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
     const facts = h('dl', {}, h('dt', {}, t("Platforms")), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, t("Package")), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("Editable native Swift source") : t("Editable JavaScript source")) : t("Browser extension ZIP")), h('dt', {}, t("Version")), h('dd', {}, tool.version || '—'));
@@ -247,7 +356,7 @@
       }
       container.append(pages);
     }
-    if (tool.installSteps.length) container.append(h('h3', { class: 'detail-subheading' }, t("Installation, step by step")), h('ol', { class: 'install-steps' }, tool.installSteps.map(step => h('li', {}, t(step)))));
+    if (tool.installSteps.length) container.append(h('h3', { class: 'detail-subheading' }, t("Installation, step by step")), h('ol', { class: 'install-steps' }, tool.installSteps.map(step => h('li', {}, toolText(tool,step)))));
     const preview = /preview/i.test(state.data?.macHelper?.releaseChannel || t("Developer preview"));
     container.append(h('p', { class: 'install-footnote' }, t('MacHelper supports {architecture}, {minimumOS}. Unzip the app, move it to Applications, and open it.', { architecture: state.data?.macHelper?.architecture || 'Apple Silicon', minimumOS: state.data?.macHelper?.minimumOS || 'macOS 14+' }) + ' ' + (preview ? t('This developer preview is not notarized; macOS may require you to review it in Privacy & Security.') + ' ' : '') + t('Prefer to build it yourself? The full source is available below.')), textLink(t("Review the project source"), sourceURL(), external));
     return container;
@@ -276,6 +385,12 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { node.hidden = true; }, 3500);
   }
+  $('#keyword-mode').addEventListener('click',()=>chooseSearchMode('keywords'));
+  $('#description-mode').addEventListener('click',()=>chooseSearchMode('description'));
+  $('#need-query').addEventListener('input',updateNeed);
+  $('#find-with-ai').addEventListener('click',searchWithAI);
+  $('#cancel-ai-search').addEventListener('click',()=>cancelDiscovery());
+  window.addEventListener('pagehide',()=>cancelDiscovery(false));
   $('#filters').addEventListener('submit', event => event.preventDefault());
   $('#search').addEventListener('input', () => { if (state.data) renderCards(); });
   $('#category').addEventListener('change', () => { if (state.data) renderCards(); });
@@ -298,7 +413,7 @@
   window.addEventListener('market-language-change', () => {
     if (state.data) {
       const returnHref = state.returnFocus?.getAttribute('href') || state.returnFocus?.closest('.extension-card')?.querySelector('a')?.getAttribute('href');
-      populateFilters(); renderCards(); updateHelperLinks();
+      populateFilters(); renderDiscovery(); renderCards(); updateHelperLinks();
       if (dialog.open && returnHref) state.returnFocus = [...document.querySelectorAll('.extension-card a')].find(link => link.getAttribute('href') === returnHref) || $('#search');
       if (dialog.open && state.activeSlug) openTool(state.activeSlug, state.activeTab);
     } else {

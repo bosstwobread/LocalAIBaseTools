@@ -25,6 +25,10 @@ public struct BrowserSupportInstaller: Sendable {
     public static let hostName = "com.localaibasetools.mac_helper"
     public static let legacyHostName = "com.messagehelper.gpt"
     public static let defaultExtensionID = "fmhfobfddchbeibojepeocgfemkpcklo"
+    public static let connectorExtensionID = "kkmffpbghoojlnldpdolonpjmkhdenkh"
+    public static let defaultExtensionIDs = [defaultExtensionID, connectorExtensionID]
+    private static let discoveryFiles = [("discovery-index.json", 16 * 1024 * 1024),
+        ("discovery-manifest.json", 64 * 1024), ("discovery-config.json", 64 * 1024)]
     private static let supportPath = "Library/Application Support"
     private static let helperPath = supportPath + "/LocalAIBaseTools/MacHelper"
     private static let browserPaths = [supportPath + "/Google/Chrome/NativeMessagingHosts", supportPath + "/Microsoft Edge/NativeMessagingHosts"]
@@ -63,10 +67,29 @@ public struct BrowserSupportInstaller: Sendable {
         guard let source = try sourceRoot.read(relativeApp + "/Contents/MacOS/mac-helper-host", maximum: 64 * 1024 * 1024, requireUserOwner: false, executable: true) else {
             throw BrowserSupportError.invalid("This MacHelper app does not contain its browser helper. Download a complete MacHelper release.")
         }
+        // Discovery seeds contain only public marketplace metadata. Resolve the
+        // embedded release files explicitly; never copy the user's cache or AI
+        // settings into browser support. Older app fixtures may omit all seeds.
+        var discovery: [(String, Data)] = []
+        for (name, maximum) in Self.discoveryFiles {
+            let direct = try sourceRoot.read(relativeApp + "/Contents/MacOS/" + name, maximum: maximum, requireUserOwner: false)
+            if let data = try direct ?? sourceRoot.read(relativeApp + "/Contents/Resources/Discovery/" + name, maximum: maximum, requireUserOwner: false) {
+                guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
+                    throw BrowserSupportError.invalid("A bundled discovery file is invalid. Existing browser support was preserved; download a complete MacHelper release.")
+                }
+                discovery.append((name, data))
+            }
+        }
+        for name in ["rank.txt", "expand.txt"] {
+            if let data = try sourceRoot.read(relativeApp + "/Contents/Resources/DiscoveryPrompts/" + name, maximum: 16 * 1024, requireUserOwner: false) {
+                guard let text = String(data: data, encoding: .utf8), !text.isEmpty, !text.contains("\0") else { throw BrowserSupportError.invalid("A bundled discovery prompt is invalid.") }
+                discovery.append(("DiscoveryPrompts/" + name, data))
+            }
+        }
         let home = try BrowserSafeDirectory(root: homeDirectory)
         let currentConfig = Self.helperPath + "/allowed-extension-ids.json"
         let legacyConfig = Self.supportPath + "/MessageHelper/allowed-extension-ids.json"
-        var ids = Set([Self.defaultExtensionID] + additionalExtensionIDs)
+        var ids = Set(Self.defaultExtensionIDs + additionalExtensionIDs)
         let current = try home.read(currentConfig, maximum: 64 * 1024)
         let previous = try current ?? home.read(legacyConfig, maximum: 64 * 1024)
         if let data = previous {
@@ -107,6 +130,10 @@ public struct BrowserSupportInstaller: Sendable {
         // Validate the old destination too, even though rename never follows a
         // final symlink. No registration can redirect writes outside this home.
         _ = try home.read(Self.helperPath + "/mac-helper-host", maximum: 64 * 1024 * 1024)
+        for (name, maximum) in Self.discoveryFiles {
+            _ = try home.read(Self.helperPath + "/" + name, maximum: maximum)
+        }
+        for name in ["rank.txt", "expand.txt"] { _ = try home.read(Self.helperPath + "/DiscoveryPrompts/" + name, maximum: 16 * 1024) }
         let orderedIDs = ids.sorted()
         let allowed = try JSONSerialization.data(withJSONObject: orderedIDs, options: [.prettyPrinted, .sortedKeys])
         var registrations: [(String, Data)] = []
@@ -117,6 +144,8 @@ public struct BrowserSupportInstaller: Sendable {
         }
         try home.makePrivateDirectory(Self.helperPath)
         try home.write(source, path: Self.helperPath + "/mac-helper-host", mode: 0o700)
+        if discovery.contains(where: { $0.0.hasPrefix("DiscoveryPrompts/") }) { try home.makePrivateDirectory(Self.helperPath + "/DiscoveryPrompts") }
+        for (name, data) in discovery { try home.write(data, path: Self.helperPath + "/" + name, mode: 0o600) }
         try home.write(allowed, path: currentConfig, mode: 0o600)
         for (path, data) in registrations { try home.write(data, path: path, mode: 0o600) }
         return BrowserSupportInstallation(binaryURL: binaryURL, manifestURLs: manifestPaths.map { homeDirectory.appendingPathComponent($0.0) }, extensionIDs: orderedIDs)

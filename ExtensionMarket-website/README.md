@@ -5,7 +5,11 @@ Public marketplace: **https://local-ai-extension.nelson007.com/**
 The website lists every current tool under `Extensions`, with search, category
 and platform filters, interface previews, details, source links, and complete
 source downloads. JavaScript and native Swift tools share the same catalog, install review, and editable package format. It is a static website served from its own Docker container.
-It does not receive selected text, call an AI provider, or read visitor app state.
+Keyword search reads only public metadata and does not call AI. The optional
+**Describe your need → Find with AI** action sends the request through the
+MacHelper Connector in Chrome or Edge to the visitor's MacHelper and configured
+AI. It never reads a selection, installs a tool, or runs extension source merely
+by searching. The AI connection may use a cloud provider, depending on settings.
 
 **Create & customize** is available from the main navigation and every source
 tool's details. Visitors can read the complete AI extension guide in the browser
@@ -28,9 +32,10 @@ with Chrome/Edge Developer mode installation instructions.
 
 - `index.html`, `styles.css`, `app.js`: buildless responsive interface.
 - `i18n.js`, `locales.js`: language detection, saved selection, safe text rendering,
-  and authored interface/first-party tool translations.
+  and authored shared interface translations. Extension descriptions and their
+  translations live in each extension’s `discovery.json`.
 - `assets/`: app/tool artwork and clearly labelled illustrative previews.
-- `marketplace.config.json`: public URL, tool descriptions, and display metadata.
+- `marketplace.config.json`: public URL and visual display metadata (categories, artwork, and screenshots).
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
   while the current catalog lists only the latest versions. This includes the
@@ -42,6 +47,14 @@ with Chrome/Edge Developer mode installation instructions.
   `PUBLIC_DOCUMENTS` allowlist publishes only the AI extension guide and four
   extension/protocol references. `developer-guide.html` displays escaped,
   wrapping Markdown without JavaScript; the original `.md` is a separate download.
+- `discovery.py`: validates extension-owned `discovery.json` files and publishes
+  `discovery-index.json` plus its SHA-256/size/revision manifest without requiring
+  an app build. The index contains descriptions, capabilities, example queries,
+  keywords, limitations, platforms, and translations, with stable manifest IDs,
+  names, summaries, versions, and runtimes. It contains no code, source inventory,
+  source download URLs, or images. `build.py` uses the same generator.
+- `discovery_test.py`: strict descriptor validation, source-free index integrity,
+  stable content revisions, browser identity, and explicit legacy import checks.
 - `verify.py`: checks the built file inventories, package hashes, prefix-safe
   links, and the app archive's metadata and executable permissions.
   It also checks public document bytes and rejects the private `AI_DEPLOYMENT.md`
@@ -75,8 +88,10 @@ follow the interface language. No AI call or translation service is used.
 The technical AI guide and its downloadable reference documents remain English
 and are labelled accordingly. Source code, prompts, model IDs, and user data are
 not translated. Unknown third-party metadata retains its original text. Add new
-interface copy and first-party metadata translations to every catalog in
-`locales.js`; `i18n.js` supplies safe fallback and placeholder interpolation.
+interface copy to every shared catalog in `locales.js`, and first-party tool
+metadata translations to that tool's `discovery.json`. `i18n.js` supplies shared
+fallback and placeholder interpolation. Tool metadata falls back to its original
+source text when an extension does not provide the requested language.
 The frontend checks exercise all 13 languages, language detection/persistence,
 RTL, accessible labels, dynamic dialogs, localized search, and unchanged URLs.
 
@@ -89,7 +104,7 @@ python3 scripts/build-apps.py
 python3 ExtensionMarket-website/build.py
 python3 ExtensionMarket-website/verify.py
 node --test ExtensionMarket-website/test.cjs
-python3 -m unittest discover -s ExtensionMarket-website -p build_test.py -v
+python3 -m unittest discover -s ExtensionMarket-website -p '*_test.py' -v
 python3 -m unittest discover -s test -p marketplace_deploy_test.py -v
 ```
 
@@ -120,8 +135,15 @@ Building the site, committing code, or pushing to GitHub does not deploy it.
 `marketplace.config.json` describes the next build; the live release metadata is
 served from `/data/extensions.json` and changes only after a successful rollout.
 
-To add a tool, add its independent source folder under `Extensions`, optionally
-add display metadata in `marketplace.config.json`, then rebuild and deploy.
+To add a tool, add its independent source folder under `Extensions`, include its
+required `discovery.json`, optionally add visual metadata in
+`marketplace.config.json`, then rebuild and deploy. The descriptor uses schema 1
+with `description`, `capabilities`, `exampleQueries`, `keywords`, `limitations`,
+and `platforms`; `translations` and `installSteps` are optional. Browser tools
+should supply a stable reverse-domain `identifier` in the descriptor. Source
+tools retain their manifest identifier. Normal publication rejects missing or
+invalid descriptors. Explicit legacy import fallback is for compatibility tests,
+not a way to publish incomplete new tools. See the AI guide for exact bounds.
 MacHelper source packages require a schema-version-two manifest declaring
 `runtime: "javascript"` or `"native"`. Browser packages use their browser manifest
 and receive a download/install guide. If a browser source folder has no README
@@ -137,7 +159,49 @@ The authoring section and AI guide describe both adapters and migration with a s
 Check native catalog support using an isolated synthetic website/package fixture:
 
 ```sh
-python3 -m unittest discover -s ExtensionMarket-website -p build_test.py -v
+python3 -m unittest discover -s ExtensionMarket-website -p '*_test.py' -v
 ```
 
 This check publishes no live content and compiles/runs no native code. Native worker execution and hot reload require the host's separate integration tests. The marketplace still has no publisher submission backend or automatic upstream source merging.
+
+## Description search and local discovery
+
+Users can choose **Keywords** for ordinary text matching or **Describe your
+need** for an explicit AI search. Keyword matching includes original and
+localized descriptions, capabilities, examples, and keywords. Category and
+platform filters apply to either mode. AI cards show a good/partial fit and a
+reason; a no-match result explains when the catalog has no suitable tool.
+Descriptions are untrusted data, and reasons are displayed as plain text. Only
+real current catalog IDs can become result cards. Search never installs a tool.
+
+The MacHelper app bundles an initial lightweight discovery snapshot, refreshes
+its metadata cache from the public manifest/index, and keeps the last valid
+snapshot for offline use. Only descriptions are cached for discovery. Full tool
+source is downloaded after the separate installation review. Index revisions
+hash canonical entry JSON; the manifest also hashes the exact index bytes.
+Update checks do not consume AI usage. Finding with AI sends the user's request
+and relevant public metadata to their configured provider. It uses no marketplace
+AI account, API key, or hosted AI service. Provider availability and limits apply.
+
+The browser bridge uses the shared **MacHelper Connector**, extension ID
+`kkmffpbghoojlnldpdolonpjmkhdenkh`, with MacHelper 6.3 or later. Its permission is
+limited to the official marketplace origin. It has no access to other tabs or
+selections. Visitors install the complete source ZIP through the browser's Load
+unpacked flow and separately review that browser permission. **Cancel search**
+disconnects the current native AI request and ignores late responses; leaving the
+page also cancels it. Search requests stay in memory, not browser local storage.
+
+Without the connector, **Open in MacHelper** uses
+`machelper://search?query=...&language=...` to prefill native search. Opening the
+link alone does not call AI; the user clicks **Find with AI** in MacHelper. The
+website does not expose a localhost HTTP server or add a CORS exception.
+
+A standalone seed build (metadata only, with no app or source downloads) is:
+
+```sh
+python3 ExtensionMarket-website/discovery.py --output /tmp/machelper-discovery
+```
+
+App packaging runs this generator before bundling its initial snapshot, avoiding
+an app-download/site-build dependency cycle. A release site build then includes
+the same metadata revision together with the independently built app ZIP.

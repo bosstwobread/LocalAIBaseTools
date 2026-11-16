@@ -150,9 +150,52 @@ MacHelper's Extensions overview lists installed tools first. Selecting one reads
 
 In MacHelper 6.1+, installed rows also have checkboxes for batch **Reload**, **Edit Source**, **Enable**, and **Disable**. **Select All** covers installed tools only. Checked identifiers persist across list refreshes and detail navigation, and are removed when their installed tool disappears. Reload targets only enabled tools; enablement actions skip tools already in the requested state. Each target retains its normal validation, native approval, and error handling, so one failure/cancellation does not stop remaining targets.
 
+## Public discovery metadata (MacHelper 6.3)
+
+New tools provide a root `discovery.json` beside `extension.json` or a browser `manifest.json`. Marketplace publication requires it. It describes the tool for people, keyword filtering, and AI matching; it is separate from executable commands, settings schema, and the installation catalog. Older installed source packages still load without this publication metadata. Include it in every new published package's full hash inventory. Root `discovery.json` stays on disk and counts toward package download/file limits, but is excluded from the worker's 96 KiB resource channel.
+
+```json
+{
+  "schemaVersion": 1,
+  "description": "Translate selected text in supported Mac apps and read the result nearby.",
+  "capabilities": ["Translate selected text through the shared AI connection"],
+  "exampleQueries": ["Translate text while I read in a Mac app."],
+  "keywords": ["translation", "selected text", "languages"],
+  "limitations": ["Requires selectable text and macOS Accessibility permission."],
+  "platforms": ["macOS"],
+  "translations": {
+    "zh-Hans": {
+      "Translate selected text in supported Mac apps and read the result nearby.": "在支持的 Mac 应用中翻译选中文字，并在附近阅读结果。"
+    }
+  }
+}
+```
+
+Schema 1 accepts only `schemaVersion`, `description`, `capabilities`, `exampleQueries`, `keywords`, `limitations`, `platforms`, optional `identifier`, optional `installSteps`, and optional `translations`. Unknown fields, blank strings, NUL, malformed types, symbolic links, and a non-regular descriptor are rejected by publication. The descriptor is at most **64 KiB** of UTF-8 JSON. Required arrays are nonempty.
+
+| Field | Publication bounds |
+| --- | --- |
+| `description` | 4,000 UTF-16 units / 16,000 UTF-8 bytes |
+| `capabilities` | 1–32 strings; each 1,000 UTF-16 units / 4,000 bytes |
+| `exampleQueries` | 1–8 strings; each 1,000 UTF-16 units / 4,000 bytes |
+| `keywords` | 1–32 strings; each 128 UTF-16 units / 512 bytes |
+| `limitations` | 1–16 strings; each 1,000 UTF-16 units / 4,000 bytes |
+| `platforms` | 1–8 strings; each 128 UTF-16 units / 512 bytes |
+| Optional `installSteps` | 1–16 strings; each 2,000 characters / 8,000 bytes |
+| Optional `identifier` | At most 128 UTF-8 bytes; `^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*){1,7}$`. For browser tools this stable reverse-domain ID is distinct from the browser's 32-letter ID. |
+| Optional `translations` | At most 32 locale maps, 256 exact-source-string mappings each; keys at most 2,000 UTF-8 bytes, values at most 8,000 bytes; neither empty nor containing NUL |
+
+Text bounds use UTF-16 units plus UTF-8 bytes as shown; optional manual installation-step character counts use Unicode code points. Prefer ordinary text well below the limits. Locale names match `[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}`. Supply English originals and maps for the supported interface locales: `en`, `zh-Hans`, `zh-Hant`, `es`, `fr`, `de`, `ja`, `ko`, `pt`, `ar`, `hi`, `ru`, and `it`. English can use the original text; missing translations fall back rather than invoking AI. These public description maps are separate from the manifest-declared `localizations` resource used by installed settings. Neither changes prompts, settings values, user input, or code.
+
+Source identity/name/version/summary come from `extension.json`; browser name/version/summary come from `manifest.json`, with a stable discovery identifier supplied by the descriptor or publisher configuration. Indexed names are at most 256 UTF-8 bytes without control characters, versions at most 80 bytes matching `major.minor.patch` with an optional prerelease suffix, and summaries at most 2,000 UTF-16 units / 8,000 bytes. Stable identifiers follow the reverse-domain rule above. Do not claim unsupported capabilities or hide material limitations. Example queries describe realistic tasks, not instructions for the search model. Metadata edits do not alter executable behavior.
+
+`ExtensionMarket-website/discovery.py` builds `discovery-index.json` and `discovery-manifest.json` independently of the Mac app. The source-free schema-1 index contains at most **10,000** unique IDs/slugs and **16 MiB**, including identity, summary, detailed descriptions, capabilities, examples, keywords, limitations, platforms, runtime/kind, and translation maps. The adjacent manifest advertises the index's revision, timestamp, exact size, and SHA-256. Runtime manifest reads are bounded to 8 KiB. MacHelper checks this manifest first, verifies changed index bytes, caches a complete validated pair privately, and can use a verified cache/bundled release seed with a stale indication if refresh fails. It never fetches source merely to search. Invalid network metadata cannot replace the last verified index; updated public descriptions do not require a new app release.
+
+Both **Find tools** and the website offer keyword filtering and explicit description-based AI search. Shared **AI Connection** settings select the model. At most 40 candidates and 160,000 bytes of ranking records are sent; for a larger index, AI first expands the query into up to eight terms and local lexical retrieval shortlists up to 40. The ranking payload may truncate descriptions/capabilities or omit records to fit, so matching is not guaranteed to be globally exhaustive. AI answers must contain at most five distinct known candidate IDs, readable reasons, and `good`/`partial` fits; unknown IDs or invalid answers fail validation. Query/metadata are untrusted, inference tools stay disabled, and no result installs or runs source code. Browser bridging and native-prefill links are described in [MacHelper Protocol](MacHelper-Protocol.md#extension-discovery-machelper-63).
+
 ## Download contract for a marketplace
 
-A website or repository serves a catalog as JSON. Each entry declares metadata and the complete source-file inventory, including the manifest, runtime scripts, prompts, settings schema, documentation, and license. Do not distribute only a compiled extension or omit source needed to understand its behavior.
+A website or repository serves a catalog as JSON. Each entry declares metadata and the complete source-file inventory, including the manifest, runtime scripts, prompts, settings schema, `discovery.json`, documentation, and license. Do not distribute only a compiled extension or omit source needed to understand its behavior.
 
 ```json
 {
@@ -192,11 +235,13 @@ The host validates a candidate generation before replacing the active worker. A 
 
 If an edit has invalid JavaScript, invalid Swift, a failed native build, or invalid package metadata, MacHelper shows a reload error and retains the last working generation. Repairing and saving the source triggers another attempt. Disabling an extension stops its worker and watcher; later source changes must not revive it automatically.
 
+Root `discovery.json` is publication metadata and is excluded from the runtime resource channel; it remains part of the complete source inventory.
+
 ## Limits and development checks
 
 A package can contain at most 128 regular files, each at most 512 KiB, with at most 4 MiB total source bytes. The manifest and settings schema each have an additional 64 KiB limit. Paths are at most 512 UTF-8 bytes and 12 segments; symlinks and case-colliding paths are rejected. Hidden files are not runtime dependencies.
 
-Frozen runtime resources are bounded to 96 KiB combined UTF-8 text. The runtime includes `.js`, `.json`, `.txt`, `.md`, and `.prompt` resources, plus `.swift` for native packages, except relative paths starting with `readme` (case-insensitive). Thus the manifest, schema, and other Markdown documentation count toward this limit; a root `README.md` and an extensionless `LICENSE` remain on disk without entering the worker resources. Native inventories additionally require every file to be UTF-8 text without NUL and exactly one Swift file matching the entry point.
+Frozen runtime resources are bounded to 96 KiB combined UTF-8 text. The runtime includes `.js`, `.json`, `.txt`, `.md`, and `.prompt` resources, plus `.swift` for native packages, except root `discovery.json` and relative paths starting with `readme` (case-insensitive). Thus the manifest, schema, and other Markdown documentation count toward this limit; root discovery metadata, a root `README.md`, and an extensionless `LICENSE` remain on disk without entering the worker resources. Native inventories additionally require every file to be UTF-8 text without NUL and exactly one Swift file matching the entry point.
 
 Command output/progress is bounded to 96,000 UTF-8 bytes without NUL, with an optional title of at most 120 Swift characters. Final text must be nonblank. At most eight shared AI calls are allowed per explicit action. Worker frames are limited to 256 KiB including encoded JSON; request-specific text and prompt bounds also apply. Here, Swift characters are extended grapheme clusters; optional sentence context instead uses the UTF-16 and UTF-8 bounds described above. Distribute complete editable source; the host builds native executables in its own cache rather than accepting opaque binaries in this source format.
 

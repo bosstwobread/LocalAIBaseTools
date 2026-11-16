@@ -85,3 +85,24 @@ extra container, or AI connection is needed. Publish these assets and the HTML
 from the same verified build so the selector and translations agree. Visitor
 language preferences stay in browser local storage. The technical authoring guide
 continues to be served in English with its original code and prompts intact.
+
+
+## Discovery metadata and browser bridge
+
+Publish `discovery-index.json` and `discovery-manifest.json` from the same
+verified build as `data/extensions.json` and the source ZIPs. These lightweight
+public files contain descriptions only; the manifest SHA-256 and byte size must
+match the exact index bytes. Existing no-cache responses let MacHelper check
+for a new revision without downloading extension source or making an AI call.
+A failed update keeps the last valid app snapshot/cache. Do not hand-edit the
+index, manifest, or generated website data; edit each tool's `discovery.json`
+and rebuild. Previously published versioned source files remain immutable.
+
+The optional website AI search uses a user-installed MacHelper Connector and
+native messaging on the user's own Mac. No AI backend, API credential,
+localhost listener, or new server container is deployed. The connector permits
+only `https://local-ai-extension.nelson007.com/*`, so local previews use the
+MacHelper prefill fallback or a mocked bridge for automated tests. Do not widen
+that production permission for preview convenience. Searches never install or
+execute the matched tools. The existing deployment per-file checksum gate covers
+the discovery files and connector source download as ordinary public assets.

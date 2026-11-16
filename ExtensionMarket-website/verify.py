@@ -8,6 +8,7 @@ import sys
 import zipfile
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
+from discovery import build_discovery_index, read_descriptor
 from build import PUBLIC_DOCUMENTS, PUBLIC_SDK_FILES, historical_files, source_runtime
 
 HERE = Path(__file__).resolve().parent
@@ -24,7 +25,22 @@ def main():
     assert len({tool["slug"] for tool in data["extensions"]}) == len(data["extensions"])
     folders = [p for p in (ROOT / "Extensions").iterdir() if p.is_dir() and not p.name.startswith(".")]
     assert len(folders) == len(data["extensions"]), "The website must list every extension directory."
-    print("PASS every current extension is listed with a unique identity")
+    index_bytes = (site / "discovery-index.json").read_bytes()
+    index = json.loads(index_bytes)
+    discovery_manifest = json.loads((site / "discovery-manifest.json").read_bytes())
+    expected_index, _ = build_discovery_index(ROOT, config)
+    assert index["extensions"] == expected_index["extensions"] and index["revision"] == expected_index["revision"]
+    assert discovery_manifest["schemaVersion"] == index["schemaVersion"] == 1
+    assert discovery_manifest["revision"] == index["revision"] and discovery_manifest["updatedAt"] == index["updatedAt"]
+    assert discovery_manifest["indexUrl"] == "discovery-index.json"
+    assert discovery_manifest["sha256"] == hashlib.sha256(index_bytes).hexdigest() and discovery_manifest["size"] == len(index_bytes)
+    indexed = {entry["id"]: entry for entry in index["extensions"]}
+    for tool in data["extensions"]:
+        entry = indexed[tool["id"]]
+        assert all(tool[key] == entry[key] for key in ["slug","name","version","summary","description","platforms","runtime","kind","translations","keywords","exampleQueries","limitations"])
+        assert tool["features"] == entry["capabilities"]
+        assert not set(entry) & {"files","source","code","screenshots","packageUrl"}, "Discovery must contain metadata only."
+    print("PASS every current extension has consistent source-owned discovery metadata and verified index hashes")
 
     for relative, original in {**{path: path for path in PUBLIC_DOCUMENTS}, **PUBLIC_SDK_FILES}.items():
         assert (site / relative).read_bytes() == (ROOT / original).read_bytes(), relative
@@ -73,13 +89,15 @@ def main():
                     assert (source / item["path"]).read_bytes() == raw
                 assert {manifest["entryPoint"], "extension.json", "README.md", "LICENSE"}.issubset({item["path"] for item in entry["files"]})
             else:
-                prefix = "MessageHelper-Upwork/"
-                for original in (ROOT / "Extensions/MessageHelper-Upwork").iterdir():
-                    if original.is_file() and not original.name.startswith("."):
-                        assert archive.read(prefix + original.name) == original.read_bytes()
+                source = next(folder for folder in folders if (folder / "manifest.json").exists() and read_descriptor(folder).get("identifier", config.get("tools", {}).get(folder.name, {}).get("id", "com.localaibasetools." + folder.name.lower())) == tool["id"])
+                prefix = source.name + "/"
+                for original in source.rglob("*"):
+                    if original.is_file() and not any(part.startswith(".") or part in {"node_modules","__pycache__"} for part in original.relative_to(source).parts):
+                        assert archive.read(prefix + original.relative_to(source).as_posix()) == original.read_bytes()
                 manifest = json.loads(archive.read(prefix + "manifest.json"))
-                paths = {manifest["background"]["service_worker"], manifest["action"]["default_popup"]}
-                for content in manifest["content_scripts"]: paths.update(content.get("js", []) + content.get("css", []))
+                paths = {manifest["background"]["service_worker"]}
+                if manifest.get("action", {}).get("default_popup"): paths.add(manifest["action"]["default_popup"])
+                for content in manifest.get("content_scripts", []): paths.update(content.get("js", []) + content.get("css", []))
                 assert all(prefix + path in archive.namelist() for path in paths)
                 assert prefix + "LICENSE" in archive.namelist() and prefix + "README.md" in archive.namelist()
     print("PASS source inventories, ZIP contents, hashes, icons, and previews match the actual projects")
@@ -105,6 +123,14 @@ def main():
                 assert archive.read("MacHelper.app/Contents/Resources/Localization/" + code + ".json") == source.read_bytes(), "App language catalog is stale: " + code
             for relative, original in {**{path: path for path in PUBLIC_DOCUMENTS}, **PUBLIC_SDK_FILES}.items():
                 assert archive.read("MacHelper.app/Contents/Resources/" + relative) == (ROOT / original).read_bytes(), "App guide/reference is stale: " + relative
+            bundled_index_bytes = archive.read("MacHelper.app/Contents/Resources/Discovery/discovery-index.json")
+            bundled_index = json.loads(bundled_index_bytes)
+            bundled_manifest = json.loads(archive.read("MacHelper.app/Contents/Resources/Discovery/discovery-manifest.json"))
+            assert bundled_index["extensions"] == index["extensions"] and bundled_index["revision"] == index["revision"], "The app discovery seed is stale."
+            assert bundled_manifest["revision"] == bundled_index["revision"] and bundled_manifest["updatedAt"] == bundled_index["updatedAt"]
+            assert bundled_manifest["sha256"] == hashlib.sha256(bundled_index_bytes).hexdigest() and bundled_manifest["size"] == len(bundled_index_bytes)
+            assert "MacHelper.app/Contents/Resources/Discovery/discovery-config.json" in archive.namelist()
+            assert any(name.startswith("MacHelper.app/Contents/Resources/DiscoveryPrompts/") and name.endswith(".txt") for name in archive.namelist())
             assert all(Path(name).name != "AI_DEPLOYMENT.md" for name in archive.namelist()), "Private deployment runbook entered the app download."
             assert not any(name.endswith("/settings.json") or "/.env" in name for name in archive.namelist())
         print("PASS MacHelper download has the correct version, marketplace URL, URL handler, icon, and executable permissions")

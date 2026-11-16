@@ -62,7 +62,7 @@ public enum NativeFrameEncoder {
 }
 
 public struct HelperRequest: Decodable, Sendable {
-    public enum Action: String, Decodable, Sendable { case ping, listModels, translate, polish }
+    public enum Action: String, Decodable, Sendable { case ping, listModels, translate, polish, searchExtensions }
     public static let languages = ["zh-CN", "zh-TW", "en", "ja", "ko", "fr", "de", "es", "pt", "it"]
     public static let tones = ["professional", "friendly", "concise"]
     public static let maximumTextCharacters = 24_000
@@ -78,8 +78,9 @@ public struct HelperRequest: Decodable, Sendable {
     public let guidance: String?
     public let stream: Bool?
     public let systemPrompt: String?
+    public let interfaceLanguage: String?
 
-    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil, stream: Bool? = nil, systemPrompt: String? = nil) {
+    public init(id: String, action: Action, text: String? = nil, targetLanguage: String? = nil, tone: String? = nil, model: String? = nil, provider: String? = nil, baseURL: String? = nil, guidance: String? = nil, stream: Bool? = nil, systemPrompt: String? = nil, interfaceLanguage: String? = nil) {
         self.id = id; self.action = action; self.text = text
         self.targetLanguage = targetLanguage; self.tone = tone
         self.model = model
@@ -88,12 +89,23 @@ public struct HelperRequest: Decodable, Sendable {
         self.guidance = guidance
         self.stream = stream
         self.systemPrompt = systemPrompt
+        self.interfaceLanguage = interfaceLanguage
     }
 
     public func validate() throws {
         guard !id.isEmpty, id.utf8.count <= 128, !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw MacHelperError.invalid("A valid request ID is required.")
         }
+        if action == .searchExtensions {
+            guard let text, targetLanguage == nil, tone == nil, model == nil, provider == nil, baseURL == nil,
+                  guidance == nil, systemPrompt == nil, stream != true,
+                  interfaceLanguage.map({ lang in AppLocalization.supportedLanguages.contains(where: { $0.code == lang }) }) ?? true else {
+                throw DiscoveryError.invalidQuery
+            }
+            _ = try DiscoveryQuery.validate(text)
+            return
+        }
+        if let interfaceLanguage, !AppLocalization.supportedLanguages.contains(where: { $0.code == interfaceLanguage }) { throw DiscoveryError.invalidQuery }
         if let targetLanguage, !Self.languages.contains(targetLanguage) {
             throw MacHelperError.invalid("Choose a supported translation language.")
         }
@@ -198,18 +210,23 @@ public struct HelperResponse: Encodable, Sendable {
     public let models: [LocalGPTModel]?
     public let defaultModel: String?
     public let error: String?
+    public let search: DiscoverySearchResult?
 
     public init(id: String, text: String? = nil, model: String? = nil) {
         self.id = id; ok = true; self.text = text; self.model = model
-        version = "6.2.1"; error = nil; models = nil; defaultModel = nil
+        version = "6.3.0"; error = nil; models = nil; defaultModel = nil; search = nil
     }
     public init(id: String, catalog: LocalGPTModelCatalog) {
-        self.id = id; ok = true; text = nil; model = nil; version = "6.2.1"; error = nil
+        self.id = id; ok = true; text = nil; model = nil; version = "6.3.0"; error = nil; search = nil
         models = catalog.models; defaultModel = catalog.defaultModel
     }
     public init(id: String, error: String) {
         self.id = id; ok = false; text = nil; model = nil; version = nil; self.error = error
-        models = nil; defaultModel = nil
+        models = nil; defaultModel = nil; search = nil
+    }
+    public init(id: String, search: DiscoverySearchResult) {
+        self.id = id; ok = true; self.search = search; text = nil; model = nil; version = "6.3.0"
+        models = nil; defaultModel = nil; error = nil
     }
 }
 

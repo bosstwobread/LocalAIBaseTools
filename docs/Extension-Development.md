@@ -2,7 +2,7 @@
 
 MacHelper is the installed app and settings host, accessible from the Dock or menu bar. Its unified extension format is an editable source package declaring either a JavaScript or native Swift runtime. An extension can be developed in a separate repository, downloaded or imported into the installed MacHelper, and changed locally without rebuilding the host or installing another app.
 
-The source package uses manifest schema version two. MacHelper chooses a JavaScriptCore worker for `runtime: "javascript"`, or compiles and starts an independent Swift worker for `runtime: "native"`. Both share the same Extensions list, settings, installation, and reload controls. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation is the first source tool; its files include `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, `README.md`, and `LICENSE`.
+The source package uses manifest schema version two. MacHelper chooses a JavaScriptCore worker for `runtime: "javascript"`, or compiles and starts an independent Swift worker for `runtime: "native"`. Both share the same Extensions list, settings, installation, and reload controls. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation is the first source tool; its files include `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, root `discovery.json`, `README.md`, and `LICENSE`. New tools keep searchable descriptions in their own `discovery.json`; publishing requires it, while older installed packages remain runnable without it.
 
 Browser extensions remain separate browser packages and can continue using the [framed MacHelper service](MacHelper-Protocol.md). The old version-one native bundle SDK is a legacy migration source, not the new hot-reload runtime.
 
@@ -67,9 +67,15 @@ For several installed tools, use the list checkboxes or **Select All**, then **R
 
 See [Editable source extensions](Source-Extensions.md) for the complete manifest, JavaScript, schema, bounds, path validation, permission, and download contracts.
 
+## Describe a tool so people can find it
+
+Add root `discovery.json` with schema version 1, an accurate description, capabilities, example task queries, keywords, limitations, and platforms. Optional installation steps and exact-source translation maps provide public display text. Keep metadata in the extension's source folder, including for tools in separate repositories; do not hard-code tool descriptions in MacHelper. Use all 13 supported language maps for a fully localized listing. See the [complete metadata schema and bounds](Source-Extensions.md#public-discovery-metadata-machelper-63).
+
+The website publisher generates an independent public index and revision/hash manifest. MacHelper refreshes metadata, not every tool's source; a verified local cache or release seed supports stale/offline results. **Find tools** and the website have keyword search plus **Describe need → Search with AI**, using shared AI settings only after that explicit action. Larger catalogs use AI query expansion, a local shortlist, and bounded ranking; up to five known tools are suggested with reasons and fit labels. Search cannot install or run code, and it is not guaranteed exhaustive semantic search. Without the browser Connector, the website can prefill native search; the user starts AI there. See the [discovery client protocol](MacHelper-Protocol.md#extension-discovery-machelper-63).
+
 ## Catalogs and complete source download
 
-The marketplace serves a JSON catalog over HTTPS. Each entry contains display metadata plus every source file's relative path, download URL, SHA-256, and optional size. List the manifest, scripts, prompts, schema, README, and license; distributing only an executable is not the source format.
+The marketplace serves a JSON catalog over HTTPS. Each entry contains display metadata plus every source file's relative path, download URL, SHA-256, and optional size. List the manifest, scripts, prompts, schema, `discovery.json`, README, and license; distributing only an executable is not the source format.
 
 **Add Catalog…** reads metadata without downloading or running packages. First enablement downloads the complete declared inventory into a staging directory, validates every file and the manifest identity/version, and atomically installs the source. Failed downloads leave no partial installed tool. Existing local source is always preserved; automatic upstream replacement is not part of enablement.
 

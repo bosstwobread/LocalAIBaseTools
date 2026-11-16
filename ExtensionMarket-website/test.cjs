@@ -14,13 +14,15 @@ const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 const clone = value => JSON.parse(JSON.stringify(value));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function page({ base = 'https://market.example/extension-market/', data = clone(catalog), failFirst = false, languages = ['en-US'], storedLanguage = null, storageDisabled = false } = {}) {
+async function page({ base = 'https://market.example/extension-market/', data = clone(catalog), failFirst = false, languages = ['en-US'], storedLanguage = null, storageDisabled = false, bridge = null } = {}) {
   const dom = new JSDOM(html, { url: base, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
   Object.defineProperty(window.navigator, 'languages', { value: languages });
   if (storedLanguage) window.localStorage.setItem('localaibasetools.website.language', storedLanguage);
   if (storageDisabled) Object.defineProperty(window, 'localStorage', { get() { throw new Error('Storage disabled fixture'); } });
   const requests = [];
+  window.TextEncoder = global.TextEncoder;
+  if(bridge) window.chrome={runtime:{sendMessage:bridge,lastError:null}};
   window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   window.HTMLDialogElement.prototype.close = function () {
     this.removeAttribute('open');
@@ -51,7 +53,7 @@ test('search, direct DOM reset click, category and platform filters stay consist
   const view = await page();
   try {
     const count = () => view.document.querySelectorAll('.extension-card').length;
-    assert.equal(count(), 2);
+    assert.equal(count(), catalog.extensions.length);
     input(view, '#search', 'upwork');
     assert.equal(count(), 1);
     assert.match(view.document.querySelector('.card-heading').textContent, /Upwork/);
@@ -62,15 +64,15 @@ test('search, direct DOM reset click, category and platform filters stay consist
     assert.equal(view.document.querySelector('#search').value, '');
     assert.equal(view.document.querySelector('#category').value, 'all');
     assert.equal(view.document.querySelector('#platform').value, 'all');
-    assert.equal(count(), 2);
+    assert.equal(count(), catalog.extensions.length);
     input(view, '#category', 'Translation', 'change');
     assert.equal(count(), 1);
     input(view, '#platform', 'Chrome', 'change');
     assert.equal(count(), 0);
     view.document.querySelector('#clear-filters').click();
-    assert.equal(count(), 2);
+    assert.equal(count(), catalog.extensions.length);
     input(view, '#platform', 'Edge', 'change');
-    assert.equal(count(), 1);
+    assert.equal(count(), catalog.extensions.filter(tool=>tool.platforms.includes('Edge')).length);
   } finally { view.close(); }
 });
 
@@ -89,7 +91,7 @@ test('details links, accessible tab controls, custom install URL and close resto
     assert.equal(view.document.querySelector('#overview-panel').hidden, true);
     assert.equal(view.document.querySelector('#install-tab').getAttribute('aria-selected'), 'true');
     assert.equal(view.document.activeElement, view.document.querySelector('#install-tab'));
-    const open = view.document.querySelector('a[href^="machelper:"]');
+    const open = view.document.querySelector('#install-panel a[href^="machelper:"]');
     const install = new URL(open.href);
     assert.equal(install.host, 'install');
     assert.equal(install.searchParams.get('extension'), 'com.localaibasetools.translation');
@@ -108,7 +110,7 @@ test('details links, accessible tab controls, custom install URL and close resto
 test('browser installation opens on the correct tab and links the actual ZIP', async () => {
   const view = await page();
   try {
-    [...view.document.querySelectorAll('.card-install')].find(node => node.textContent.includes('Get extension')).click();
+    [...view.document.querySelectorAll('.extension-card')].find(node => node.querySelector('h3').textContent.includes('Upwork')).querySelector('.card-install').click();
     await until(() => view.document.querySelector('#tool-dialog').open);
     assert.match(view.window.location.hash, /messagehelper-upwork/);
     assert.equal(view.document.querySelector('#install-panel').hidden, false);
@@ -126,7 +128,7 @@ test('fetch failure shows a retry state and a successful retry recovers the cata
     assert.equal(view.document.querySelector('#catalog-error').hidden, false);
     assert.equal(view.document.querySelector('#extension-grid').hidden, true);
     view.document.querySelector('#retry-catalog').click();
-    await until(() => view.document.querySelectorAll('.extension-card').length === 2);
+    await until(() => view.document.querySelectorAll('.extension-card').length === catalog.extensions.length);
     assert.equal(view.document.querySelector('#catalog-error').hidden, true);
     assert.equal(view.requests.length, 2);
     assert.ok(view.requests.every(url => url === 'https://market.example/extension-market/data/extensions.json'));
@@ -278,7 +280,7 @@ test('switching language updates marketing, filters, metadata and an open instal
     input(view, '#category', 'Translation', 'change');
     view.document.querySelector('.card-install').click();
     await until(() => view.document.querySelector('#tool-dialog').open);
-    const catalogURL = view.document.querySelector('a[href^="machelper:"]').href;
+    const catalogURL = view.document.querySelector('#install-panel a[href^="machelper:"]').href;
     input(view, '#site-language', 'zh-Hans', 'change');
     assert.equal(view.document.documentElement.lang, 'zh-Hans');
     assert.equal(view.document.querySelector('#site-language').getAttribute('aria-label'), '网站语言');
@@ -290,7 +292,7 @@ test('switching language updates marketing, filters, metadata and an open instal
     assert.equal(view.document.querySelector('#install-tab').textContent, '安装');
     assert.match(view.document.querySelector('.card-summary').textContent, /可编辑/);
     assert.match(view.document.querySelector('#install-panel').textContent, /审核/);
-    assert.equal(view.document.querySelector('a[href^="machelper:"]').href, catalogURL);
+    assert.equal(view.document.querySelector('#install-panel a[href^="machelper:"]').href, catalogURL);
     assert.equal(view.document.querySelector('#dialog-title').textContent, 'Translation');
     assert.equal(view.window.localStorage.getItem('localaibasetools.website.language'), 'zh-Hans');
     assert.equal(view.requests.length, 1);
@@ -359,10 +361,11 @@ test('every supported locale renders the main site, first-party details and inst
       for (const tool of catalog.extensions) {
         view.window.location.hash = `#extension/${tool.slug}`;
         await until(() => view.document.querySelector('#dialog-title')?.textContent === tool.name);
-        assert.equal(view.document.querySelector('.detail-description').textContent, tr(tool.description));
-        assert.ok([...view.document.querySelectorAll('#overview-panel .detail-list li')].some(node => node.textContent === tr(tool.features[0])));
+        const tt=message=>tool.translations?.[code]?.[message] || tr(message);
+        assert.equal(view.document.querySelector('.detail-description').textContent, tt(tool.description));
+        assert.ok([...view.document.querySelectorAll('#overview-panel .detail-list li')].some(node => node.textContent === tt(tool.features[0])));
         view.document.querySelector('#install-tab').click();
-        assert.ok([...view.document.querySelectorAll('.install-steps li')].some(node => node.textContent === tr(tool.installSteps[0])));
+        assert.ok([...view.document.querySelectorAll('.install-steps li')].some(node => node.textContent === tt(tool.installSteps[0])));
         assert.doesNotMatch(view.document.querySelector('#install-panel').textContent, /\{(?:name|count|total|architecture|minimumOS)\}/);
         view.document.querySelector('.dialog-close').click();
       }
@@ -379,7 +382,7 @@ test('localized errors, unknown tool text and untrusted metadata remain safe tex
     assert.equal(view.document.querySelector('#catalog-error').hidden, false);
     assert.equal(view.document.querySelector('#result-count').textContent, '工具集合無法使用');
     view.document.querySelector('#retry-catalog').click();
-    await until(() => view.document.querySelectorAll('.extension-card').length === 2);
+    await until(() => view.document.querySelectorAll('.extension-card').length === catalog.extensions.length);
     view.window.location.hash = `#extension/${tool.slug}`;
     await until(() => view.document.querySelector('#tool-dialog').open);
     assert.equal(view.document.querySelector('.detail-description').textContent, tool.description);
@@ -415,7 +418,7 @@ test('authored interface copy and first-party catalog text have translations in 
       keys.add(Function(`return ${match[1]}`)().trim());
     }
     for (const tool of catalog.extensions) {
-      for (const value of [tool.summary, tool.description, tool.category, ...tool.features, ...tool.installSteps, ...tool.screenshots.flatMap(shot => [shot.alt, shot.caption])]) keys.add(value);
+      for (const value of [tool.category, ...tool.screenshots.flatMap(shot => [shot.alt, shot.caption])]) keys.add(value);
     }
     const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', 'Translation/', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
     const translations = {};
@@ -423,6 +426,107 @@ test('authored interface copy and first-party catalog text have translations in 
     require('node:vm').runInNewContext(localesScript, { window: translations });
     for (const [locale, table] of Object.entries(translations.MARKET_TRANSLATIONS)) {
       for (const key of keys) if (!unchanged.has(key)) assert.ok(Object.hasOwn(table, key), `${locale}: missing ${key}`);
+      for(const tool of catalog.extensions) {
+        for(const key of [tool.summary,tool.description,...tool.features,...tool.installSteps,...tool.limitations,...tool.exampleQueries]) assert.ok(Object.hasOwn(tool.translations?.[locale] || {},key), `${locale}: missing owned ${tool.id}: ${key}`);
+      }
     }
   } finally { dom.window.close(); }
+});
+
+test('description search is explicit, uses the connector, and renders only real tool IDs as safe suggestions', async () => {
+  const calls=[];let complete;
+  const view=await page({bridge:(id,message,callback)=>{
+    calls.push({id,message});
+    if(message.action==='status')callback({ok:true,compatible:true,version:'6.3.0'});
+    if(message.action==='search')complete=callback;
+  }});
+  try {
+    view.document.querySelector('#description-mode').click();await delay(0);
+    input(view,'#need-query','Help me understand words while reading.');
+    assert.equal(calls.filter(call=>call.message.action==='search').length,0,'Typing must not spend AI usage');
+    view.document.querySelector('.example-query').click();
+    assert.equal(calls.filter(call=>call.message.action==='search').length,0,'Examples only fill the input');
+    view.document.querySelector('#find-with-ai').click();
+    assert.equal(calls.at(-1).id,'kkmffpbghoojlnldpdolonpjmkhdenkh');
+    const request=calls.at(-1).message;
+    assert.equal(request.type,'machelper.discovery'); assert.equal(request.action,'search');
+    assert.match(request.requestId,/^[A-Za-z0-9_-]{1,80}$/);
+    assert.equal(view.document.querySelector('#cancel-ai-search').hidden,false);
+    complete({ok:true,search:{model:'fixture-model',stale:true,matches:[
+      {id:'invented.tool',fit:'good',reason:'Made up'},
+      {id:'com.localaibasetools.translation',fit:'good',reason:'<img id="discovery-injection" src=x onerror=alert(1)>'},
+      {id:'com.localaibasetools.translation',fit:'good',reason:'Duplicate'}
+    ]}});await delay(0);
+    assert.equal(view.document.querySelectorAll('.extension-card').length,1);
+    assert.equal(view.document.querySelector('.discovery-match strong').textContent,'Good fit');
+    assert.match(view.document.querySelector('.discovery-match p').textContent,/<img/);
+    assert.equal(view.document.querySelector('#discovery-injection'),null);
+    assert.match(view.document.querySelector('#discovery-model').textContent,/fixture-model.*cached/);
+    assert.equal(view.window.location.hash,'','Search must not install or open a tool');
+  }finally{view.close();}
+});
+
+test('cancel stops the current bridge request and ignores its late response; no-match and query edits recover', async()=>{
+  const calls=[];const searches=[];
+  const view=await page({bridge:(id,message,callback)=>{
+    calls.push(message);
+    if(message.action==='status')callback({ok:true,compatible:true});
+    if(message.action==='search')searches.push(callback);
+    if(message.action==='cancel')callback({ok:true,cancelled:true});
+  }});
+  try{
+    view.document.querySelector('#description-mode').click();await delay(0);
+    input(view,'#need-query','record my voice');view.document.querySelector('#find-with-ai').click();
+    const request=calls.find(call=>call.action==='search');
+    view.document.querySelector('#cancel-ai-search').click();
+    assert.equal(calls.at(-1).action,'cancel');assert.equal(calls.at(-1).requestId,request.requestId);
+    searches[0]({ok:true,search:{matches:[{id:catalog.extensions[0].id,fit:'good',reason:'Late'}]}});await delay(0);
+    assert.equal(view.document.querySelector('.discovery-match'),null);
+    assert.match(view.document.querySelector('#discovery-status').textContent,/cancelled/);
+    view.document.querySelector('#find-with-ai').click();
+    searches[1]({ok:true,search:{matches:[],noMatchReason:'No current tool records audio.'}});await delay(0);
+    assert.equal(view.document.querySelectorAll('.extension-card').length,0);
+    assert.match(view.document.querySelector('#no-match-reason').textContent,/records audio/);
+    input(view,'#need-query','translate a word');
+    assert.equal(view.document.querySelector('#no-match-reason').textContent,'');
+    assert.equal(view.document.querySelectorAll('.extension-card').length,catalog.extensions.length);
+  }finally{view.close();}
+});
+
+test('missing connector has a safe MacHelper prefill fallback and keyword search needs no AI',async()=>{
+  const view=await page({storedLanguage:'zh-Hans'});
+  try{
+    input(view,'#search','Explain a selected word');
+    assert.equal(view.document.querySelectorAll('.extension-card').length,1);
+    view.document.querySelector('#description-mode').click();await delay(0);
+    input(view,'#need-query','A & B? 翻译');
+    const link=new URL(view.document.querySelector('#open-search-in-machelper').href);
+    assert.equal(link.protocol,'machelper:');assert.equal(link.host,'search');
+    assert.equal(link.searchParams.get('query'),'A & B? 翻译');assert.equal(link.searchParams.get('language'),'zh-Hans');
+    assert.equal(view.document.querySelector('#connector-help').hidden,false);
+    view.document.querySelector('#find-with-ai').click();await delay(0);
+    assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
+    assert.match(view.document.querySelector('#discovery-status').textContent,/MacHelper/);
+    assert.equal(view.window.location.hash,'');
+    input(view,'#need-query','x'.repeat(2001));view.document.querySelector('#find-with-ai').click();await delay(0);
+    assert.match(view.document.querySelector('#discovery-status').textContent,/2,000/);
+  }finally{view.close();}
+});
+
+test('native search fallback stays disabled for blank, overlong, or NUL-containing needs',async()=>{
+  const view=await page();
+  try{
+    view.document.querySelector('#description-mode').click();await delay(0);
+    const link=view.document.querySelector('#open-search-in-machelper');
+    for(const query of ['', '  \n ', 'a'.repeat(2001),'word\0private']){
+      input(view,'#need-query',query);
+      assert.equal(link.hasAttribute('href'),false);
+      assert.equal(link.getAttribute('aria-disabled'),'true');
+      assert.equal(link.tabIndex,-1);
+    }
+    input(view,'#need-query','Explain a selected word');
+    assert.equal(link.getAttribute('aria-disabled'),'false');
+    assert.equal(new URL(link.href).searchParams.get('query'),'Explain a selected word');
+    assert.equal(link.tabIndex,0);
+  }finally{view.close();}
 });

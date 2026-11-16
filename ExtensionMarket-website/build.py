@@ -15,6 +15,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
+from discovery import read_descriptor, write_discovery_index
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -89,7 +90,7 @@ def validate_source_files(manifest, files):
     if manifest["runtime"] == "native":
         resource_suffixes.add(".swift")
     resources = {name: data for name, data in files.items()
-                 if not name.lower().startswith("readme") and Path(name).suffix.lower() in resource_suffixes}
+                 if name != "discovery.json" and not name.lower().startswith("readme") and Path(name).suffix.lower() in resource_suffixes}
     if sum(map(len, resources.values())) > 96 * 1024:
         raise ValueError("The source runtime text resources exceed 96 KiB.")
     path = manifest.get("localizations")
@@ -200,7 +201,7 @@ def updated_at(folder):
     return datetime.fromtimestamp(max(p.stat().st_mtime for p in folder.rglob("*") if p.is_file()), timezone.utc).date().isoformat()
 
 
-def build(output, app, without_app=False):
+def build(output, app, without_app=False, allow_legacy_discovery=False):
     config = json.loads((HERE / "marketplace.config.json").read_text())
     base = config["baseUrl"]
     parsed = urlsplit(base)
@@ -219,6 +220,8 @@ def build(output, app, without_app=False):
         shutil.copytree(HERE / "assets", stage / "assets")
         shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")
         copy_public_documents(stage)
+        discovery_index, _ = write_discovery_index(ROOT, stage, config, allow_legacy_discovery)
+        discovery_by_id = {item["id"]: item for item in discovery_index["extensions"]}
         catalog = {"schemaVersion": 1, "extensions": []}
         tools = []
         known = config.get("tools", {})
@@ -250,6 +253,10 @@ def build(output, app, without_app=False):
                 platforms = ["macOS", "Chrome", "Edge"]
             else:
                 raise ValueError("An extension directory has no supported manifest: " + folder.name)
+            discovery = read_descriptor(folder, {"summary": summary}, allow_legacy_discovery)
+            if kind == "browser":
+                identifier = discovery.get("identifier", identifier)
+            platforms = discovery["platforms"]
             version = manifest["version"]
             if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
                 raise ValueError("The source version must be a safe semantic version: " + folder.name)
@@ -281,23 +288,27 @@ def build(output, app, without_app=False):
                 complete = dict(files)
                 complete.setdefault("LICENSE", (ROOT / "LICENSE").read_bytes())
                 complete.setdefault("README.md", ("# " + name + "\n\n" + summary + "\n\n" +
-                    "\n".join(str(i + 1) + ". " + step for i, step in enumerate(metadata.get("installSteps", []))) +
+                    "\n".join(str(i + 1) + ". " + step for i, step in enumerate(discovery.get("installSteps", []))) +
                     "\n\nComplete source: " + config["sourceUrl"] + "/tree/main/Extensions/" + folder.name + "\n").encode())
                 write_source_zip(stage / package_name, folder.name, complete)
             item = {
                 "id": identifier, "slug": slug, "name": name, "version": version,
-                "summary": summary, "description": metadata.get("description", summary),
+                "summary": summary, "description": discovery["description"],
                 "category": metadata.get("category", "Productivity"), "platforms": platforms,
                 "kind": kind, "runtime": runtime,
                 "icon": metadata.get("icon", "assets/mac-helper.png"),
-                "screenshots": metadata.get("screenshots", []), "features": metadata.get("features", []),
-                "permissions": permissions, "installSteps": metadata.get("installSteps", []),
+                "screenshots": metadata.get("screenshots", []), "features": discovery["capabilities"],
+                "keywords": discovery["keywords"], "exampleQueries": discovery["exampleQueries"],
+                "limitations": discovery["limitations"], "translations": discovery["translations"],
+                "permissions": permissions, "installSteps": discovery.get("installSteps", []),
                 "sourceUrl": config["sourceUrl"] + "/tree/main/Extensions/" + quote(folder.name),
                 "packageUrl": package_name, "packageSha256": digest((stage / package_name).read_bytes()),
                 "packageSize": (stage / package_name).stat().st_size,
                 "catalogUrl": "catalog.json" if kind == "mac-source" else None,
                 "license": "MIT", "author": "LocalAIBaseTools contributors", "updatedAt": updated_at(folder),
             }
+            if item["id"] not in discovery_by_id:
+                raise ValueError("Published tool is missing from discovery metadata.")
             tools.append(item)
         mac = dict(config["macHelper"])
         mac.update({"sourceUrl": config["sourceUrl"], "marketplaceUrl": base,
