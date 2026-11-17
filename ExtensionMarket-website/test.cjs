@@ -465,6 +465,25 @@ async function finished(view) {
   await until(()=>!view.document.querySelector('#find-with-ai').disabled);
 }
 
+test('the normal description form exposes only its accessible text box and Find with AI action',async()=>{
+  const view=await page();
+  try{
+    view.document.querySelector('#description-mode').click();
+    const form=view.document.querySelector('#description-search');
+    const visibleControls=[...form.querySelectorAll('input,textarea,button,a')].filter(node=>!node.closest('[hidden]'));
+    assert.deepEqual(visibleControls.map(node=>node.id),['need-query','find-with-ai']);
+    const label=form.querySelector('label[for="need-query"]');
+    assert.equal(label.classList.contains('sr-only'),true,'Keep an accessible name without another visible heading.');
+    assert.ok(label.textContent.trim());
+    for(const selector of ['#discovery-examples','.example-query','.discovery-note','#discovery-model','#no-match-reason','#connect-machelper']){
+      assert.equal(form.querySelector(selector),null,selector);
+    }
+    assert.equal(form.querySelector('#discovery-status').textContent,'');
+    assert.equal(form.querySelector('#local-connection-help').hidden,true);
+    assert.equal(view.localRequests.length,0);
+  }finally{view.close();}
+});
+
 test('one Find with AI click connects and searches once with captured input while other interactions never contact MacHelper', async () => {
   let complete, releaseStatus;
   const normal=localService(()=>new Promise(resolve=>{complete=resolve;}));
@@ -475,15 +494,13 @@ test('one Find with AI click connects and searches once with captured input whil
     assert.equal(view.document.querySelector('#local-connection-help').hidden,true);
     view.document.querySelector('#description-mode').click();
     input(view,'#need-query','Help me understand words while reading.');
-    view.document.querySelector('.example-query').click();
     input(view,'#site-language','es','change');input(view,'#site-language','en','change');
-    assert.equal(view.localRequests.length,0,'Modes, typing, examples, languages and demos must not contact MacHelper.');
+    assert.equal(view.localRequests.length,0,'Modes, typing, languages and demos must not contact MacHelper.');
     assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
     const query='Explain this word.\nKeep this second sentence.';
     find(view,query);
     await until(()=>releaseStatus);
     assert.equal(view.document.querySelector('#need-query').disabled,true);
-    assert.equal(view.document.querySelector('.example-query').disabled,true);
     assert.equal(view.document.querySelector('#cancel-ai-search').hidden,false);
     assert.match(view.document.querySelector('#discovery-status').textContent,/Connecting/);
     view.document.querySelector('#find-with-ai').dispatchEvent(new view.window.Event('click'));
@@ -512,7 +529,10 @@ test('one Find with AI click connects and searches once with captured input whil
     assert.equal(view.document.querySelectorAll('.extension-card').length,1);
     assert.match(view.document.querySelector('.discovery-match p').textContent,/<img/);
     assert.equal(view.document.querySelector('#discovery-injection'),null);
-    assert.match(view.document.querySelector('#discovery-model').textContent,/fixture-model/);
+    assert.equal(view.document.querySelector('#discovery-status').textContent,'');
+    assert.equal(view.document.querySelector('#discovery-model'),null);
+    assert.equal(view.document.body.textContent.includes('fixture-model'),false);
+    assert.equal(view.document.body.textContent.includes('AI suggestions'),false);
     assert.equal(view.window.location.hash,'','Search must not install or open a tool.');
     assert.equal(view.window.localStorage.length,1);
     assert.equal(view.window.localStorage.getItem('localaibasetools.website.language'),'es');
@@ -583,7 +603,23 @@ test('blank, overlong and NUL needs never connect or infer',async()=>{
     }
     find(view,'Explain a selected word');await finished(view);
     assert.equal(view.localRequests.filter(call=>call.path==='/v1/search').length,1);
-    assert.equal(view.document.querySelector('#no-match-reason').textContent,'No matching tool.');
+    assert.equal(view.document.querySelector('#discovery-status').textContent,'No matching tool.');
+  }finally{view.close();}
+});
+
+test('empty-result explanations use one safe conditional status and remain unchanged when the interface language changes',async()=>{
+  const reason='<img id="empty-reason-injection" src=x onerror=alert(1)> No current tool matches.';
+  const view=await page({service:localService(()=>({ok:true,search:{matches:[],noMatchReason:reason}}))});
+  try{
+    view.document.querySelector('#description-mode').click();find(view);await finished(view);
+    assert.equal(view.document.querySelector('#discovery-status').textContent,reason);
+    assert.equal(view.document.querySelector('#empty-reason-injection'),null);
+    assert.equal(view.document.querySelector('#no-match-reason'),null);
+    input(view,'#site-language','es','change');
+    assert.equal(view.document.querySelector('#discovery-status').textContent,reason,'Provider output is not an interface translation.');
+    input(view,'#need-query','A different need');
+    assert.equal(view.document.querySelector('#discovery-status').textContent,'');
+    assert.equal(view.document.querySelectorAll('.extension-card').length,catalog.extensions.length);
   }finally{view.close();}
 });
 
@@ -655,7 +691,7 @@ test('cancel during inference aborts only the owned search, ignores late respons
     searches[1]({ok:true,search:{matches:[],noMatchReason:'No current tool records audio.'}});await finished(view);
     assert.equal(view.document.querySelectorAll('.extension-card').length,0);
     input(view,'#need-query','translate a word');
-    assert.equal(view.document.querySelector('#no-match-reason').textContent,'');
+    assert.equal(view.document.querySelector('#discovery-status').textContent,'');
     assert.equal(view.document.querySelectorAll('.extension-card').length,catalog.extensions.length);
   }finally{view.close();}
 });
@@ -701,9 +737,8 @@ test('malformed handshakes never start inference and offer retry without a Conne
   }finally{badVersion.close();}
 });
 
-test('one-click connection instructions and recovery messages are translated in all interface languages',async()=>{
+test('minimal search and conditional recovery messages follow every interface language',async()=>{
   const messages=[
-    'Find with AI connects to MacHelper automatically. No browser extension is needed.',
     'Install or open MacHelper, then try Find with AI again.',
     'Allow local or loopback network access for this website in your browser’s site settings, then try Find with AI again.',
     'Update MacHelper to version 6.5 or later, then try Find with AI again.',
@@ -716,10 +751,10 @@ test('one-click connection instructions and recovery messages are translated in 
     const view=await page({storedLanguage:code});
     try{
       view.document.querySelector('#description-mode').click();
-      const note=[...view.document.querySelectorAll('.discovery-note')].find(node=>node.textContent===view.window.MarketI18n.t(messages[0]));
-      assert.ok(note,`${code}: connection explanation`);
+      assert.equal(view.document.querySelector('#discovery-status').textContent,'',`${code}: normal search has no explanatory footer`);
+      assert.equal(view.document.querySelectorAll('#description-search .discovery-note').length,0);
       find(view);await finished(view);
-      assert.equal(view.document.querySelector('#discovery-status').textContent,view.window.MarketI18n.t(messages[1]));
+      assert.equal(view.document.querySelector('#discovery-status').textContent,view.window.MarketI18n.t(messages[0]));
       assert.equal(view.document.querySelector('#local-connection-help').hidden,false);
       assert.equal(view.document.querySelector('#connect-machelper'),null);
     }finally{view.close();}

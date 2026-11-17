@@ -213,6 +213,12 @@ reason; a no-match result explains when the catalog has no suitable tool.
 Descriptions are untrusted data, and reasons are displayed as plain text. Only
 real current catalog IDs can become result cards. Search never installs a tool.
 
+The description form shows only the need text box and **Find with AI**. Progress,
+**Cancel search**, errors, and connection-recovery actions appear when relevant;
+successful searches use the normal result cards. Example queries remain public
+search metadata, while model/revision/cache fields remain in the response
+contract without adding static form text or a success-status header.
+
 MacHelper’s local service bundles an initial lightweight discovery snapshot,
 refreshes its metadata cache from the public manifest/index, and keeps the last
 valid snapshot when an update is unavailable. Only descriptions are cached for discovery. Full tool

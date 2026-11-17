@@ -500,16 +500,12 @@
 .discovery-modes button { font:inherit; border:1px solid var(--line,#d8d6cf); background:transparent; border-radius:999px; padding:.6rem 1.1rem; cursor:pointer; }
 .discovery-modes button[aria-pressed="true"] { color:#fff; background:#252b27; border-color:#252b27; }
 .description-search { background:#ebece5; border:1px solid #d8dbd1; border-radius:20px; padding:1.4rem; margin-block-end:1rem; }
-.description-search label { display:block; font-weight:600; margin-block-end:.6rem; }
 .description-search textarea { width:100%; resize:vertical; min-height:6rem; max-height:20rem; border:1px solid #b8bdb2; border-radius:12px; background:#fffef8; padding:.85rem; font:inherit; color:inherit; box-sizing:border-box; }
-.discovery-examples { display:flex; gap:.5rem; flex-wrap:wrap; margin-block:.75rem; }
-.example-query { font:inherit; font-size:.8rem; text-align:start; border:1px solid #c7cdbf; padding:.4rem .65rem; border-radius:8px; background:transparent; color:#434d41; cursor:pointer; }
-.discovery-note,.local-connection-help { font-size:.84rem; color:#646d62; line-height:1.6; }
+.local-connection-help { font-size:.84rem; color:#646d62; line-height:1.6; }
 .discovery-actions { display:flex; gap:.8rem; flex-wrap:wrap; align-items:center; margin-block:.9rem; }
 .local-connection-help { padding:.8rem 1rem; background:#f9f8f0; border-radius:12px; }
-.local-connection-help p { margin:.4rem 0; }
 .discovery-status { font-weight:600; line-height:1.5; }
-.discovery-status:empty,.discovery-note:empty { display:none; }
+.discovery-status:empty { display:none; }
 .discovery-match { border-inline-start:3px solid #326844; padding-inline-start:.7rem; margin-block:.9rem; font-size:.9rem; }
 .discovery-match strong { color:#326844; }
 .discovery-match p { margin-block:.3rem; line-height:1.5; }

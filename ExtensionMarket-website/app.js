@@ -34,7 +34,7 @@
     return { ...tool, runtime: tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'native' : 'javascript') : 'browser', summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), keywords: strings(tool.keywords), exampleQueries: strings(tool.exampleQueries), limitations: strings(tool.limitations), translations: tool.translations && typeof tool.translations === 'object' ? tool.translations : {}, screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
   }
   const LOCAL_SERVICE = 'http://127.0.0.1:43827';
-  const discovery = { mode: 'keywords', running: null, token: null, expiresAt: 0, showConnectionHelp: false, matches: null, message: '', model: '', stale: false };
+  const discovery = { mode: 'keywords', running: null, token: null, expiresAt: 0, showConnectionHelp: false, matches: null, message: '', emptyReason: '' };
   const toolText = (tool, text) => tool.translations?.[i18n?.locale || 'en']?.[text] || t(text);
   const queryValue = () => $('#need-query').value.trim();
   const validQuery = value => Boolean(value) && !value.includes('\0') && value.length <= 2000 && new TextEncoder().encode(value).length <= 8000;
@@ -100,15 +100,9 @@
     $('#cancel-ai-search').hidden = !discovery.running;
     $('#local-connection-help').hidden = !discovery.showConnectionHelp;
     $('#need-query').disabled = Boolean(discovery.running);
-    $('#discovery-status').textContent = t(discovery.message);
+    $('#discovery-status').textContent = discovery.message ? t(discovery.message) : discovery.emptyReason;
     $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running)));
-    $('#discovery-model').textContent = [discovery.model, discovery.stale && t('Using cached extension descriptions.')].filter(Boolean).join(' · ');
-    const examples = state.tools.flatMap(tool => tool.exampleQueries.slice(0,1).map(value => ({ tool, value }))).slice(0,3);
-    $('#discovery-examples').replaceChildren(...examples.map(({tool,value}) => {
-      const button = h('button', { type:'button', class:'example-query', disabled:discovery.running ? '' : null }, toolText(tool,value));
-      button.addEventListener('click', () => { $('#need-query').value=toolText(tool,value); updateNeed(); $('#need-query').focus(); });
-      return button;
-    }));
+
   }
   async function establishSession(pending) {
     requireCurrent(pending);
@@ -144,7 +138,7 @@
   }
   function updateNeed() {
     if (!discovery.running && discovery.matches !== null) {
-      discovery.matches=null; discovery.message=''; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
+      discovery.matches=null; discovery.message=''; discovery.emptyReason='';
       if(state.data) renderCards();
     }
     renderDiscovery();
@@ -172,13 +166,14 @@
     if(discovery.running || !state.data) return;
     const query=queryValue();
     if(!validQuery(query)) {
+      discovery.emptyReason='';
       discovery.message='Describe your need in 1–2,000 characters.'; renderDiscovery(); return;
     }
     // Capture the intended data once. Interface changes while connecting must
     // not change the query or answer language sent for this explicit click.
     const id=window.crypto?.randomUUID?.() || `search_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const pending={ id, query, language:i18n?.locale || 'en', token:null, controller:new AbortController(), timeout:null, searchSent:false };
-    discovery.running=pending; discovery.matches=null; discovery.model=''; discovery.stale=false; discovery.showConnectionHelp=false; $('#no-match-reason').textContent='';
+    discovery.running=pending; discovery.matches=null; discovery.emptyReason=''; discovery.showConnectionHelp=false;
     renderDiscovery();renderCards();
     try {
       if (!connected()) await establishSession(pending);
@@ -197,10 +192,8 @@
       if(!result || !Array.isArray(result.matches) || result.matches.length > 5) throw localError('search_failed');
       const known=new Set(state.tools.map(tool=>tool.id)), seen=new Set();
       discovery.matches=result.matches.filter(match => match && known.has(match.id) && !seen.has(match.id) && ['good','partial'].includes(match.fit) && typeof match.reason==='string' && match.reason.length <= 4000 && seen.add(match.id));
-      discovery.model=typeof result.model==='string' ? result.model.slice(0,200) : '';
-      discovery.stale=result.stale===true;
-      discovery.message=discovery.matches.length ? 'AI suggestions — review each tool before installing.' : 'No matching extensions found. Try describing your need differently.';
-      $('#no-match-reason').textContent=!discovery.matches.length && typeof result.noMatchReason==='string' ? result.noMatchReason.slice(0,4000) : '';
+      discovery.emptyReason=!discovery.matches.length && typeof result.noMatchReason==='string' ? result.noMatchReason.slice(0,4000) : '';
+      discovery.message=discovery.matches.length || discovery.emptyReason ? '' : 'No matching extensions found. Try describing your need differently.';
     } catch (error) {
       if(discovery.running!==pending) return;
       if (['unauthorized','unavailable','permission','incompatible','timeout'].includes(error.code)) {
@@ -288,8 +281,8 @@
         h('div', { class: 'card-bottom' }, h('div', { class: 'platform-labels', 'aria-label': t("Platforms") }, tool.platforms.map(label => h('span', {}, label))), h('div', { class: 'card-links' }, textLink(t("Details"), details, { 'aria-label': t('Details for {name}', { name: tool.name }) }), install))));
   }
   function resetFilters() {
-    cancelDiscovery(false); discovery.matches=null; discovery.mode='keywords'; discovery.message=''; discovery.model=''; discovery.stale=false;
-    $('#need-query').value=''; $('#no-match-reason').textContent=''; renderDiscovery();
+    cancelDiscovery(false); discovery.matches=null; discovery.mode='keywords'; discovery.message=''; discovery.emptyReason='';
+    $('#need-query').value=''; renderDiscovery();
     $('#search').value = '';
     $('#category').value = 'all';
     $('#platform').value = 'all';
