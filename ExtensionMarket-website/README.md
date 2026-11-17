@@ -6,9 +6,9 @@ The website lists every current tool under `Extensions`, with search, category
 and platform filters, interface previews, details, source links, and complete
 source downloads. JavaScript and native Swift tools share the same catalog, install review, and editable package format. It is a static website served from its own Docker container.
 Keyword search reads only public metadata and does not call AI. The optional
-**Describe your need → Find with AI** action sends the request through the
-MacHelper Connector in Chrome or Edge to the visitor's MacHelper and configured
-AI. It never reads a selection, installs a tool, or runs extension source merely
+**Describe your need → Connect MacHelper → Find with AI** flow connects
+directly to the visitor’s running MacHelper 6.5 or later and configured AI. No
+browser extension is needed for website search. It never reads a selection, installs a tool, or runs extension source merely
 by searching. The AI connection may use a cloud provider, depending on settings.
 
 **Create & customize** is available from the main navigation and every source
@@ -40,6 +40,20 @@ with Chrome/Edge Developer mode installation instructions.
   escaped locale-specific SVGs under `assets/localized/<locale>/` and the
   generated `preview-locales.js` data for the HTML hero during the site build.
 - `assets/`: app/tool artwork and clearly labelled illustrative previews.
+- Translation uses one shared HTML/CSS demo in the homepage hero, catalog card,
+  spotlight, and overview dialog. Every placement automatically loops a
+  nine-second selection → click → contextual word meaning → full sentence
+  translation illustration. Only **hand** is selected in “Could you give me a
+  hand with this report?”; the result explains help rather than the body part.
+  There is no video, GIF, animation library, extra font, AI call, or per-cycle
+  JavaScript timer. A shared visibility observer starts each instance when at
+  least 20% visible and stops it offscreen, in hidden tabs, behind a dialog, or
+  in a hidden dialog tab. Stop holds the completed example until Replay;
+  reduced-motion visitors see the same completed example. Removed instances
+  are unobserved. Without IntersectionObserver, visible-page playback remains
+  automatic. The no-JavaScript hero displays the completed example. All
+  placements omit the progress bar and duration/example-content footer;
+  the accessible summary still identifies the illustration as an example.
 - `marketplace.config.json`: public URL and visual display metadata (categories, artwork, and screenshots).
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
@@ -100,10 +114,20 @@ metadata translations to that tool's `discovery.json`. `i18n.js` supplies shared
 fallback and placeholder interpolation. Tool metadata falls back to its original
 source text when an extension does not provide the requested language.
 Preview copy belongs in `preview-locales.json`, outside MacHelper source.
+The `demo.*` entries localize the demo's captions, controls, accessible summary,
+and synthetic content in all 13 languages. The floating panel reflects the
+actual Translation title, result, shared settings, and completion-only Copy
+control; it has no target-language selector. Arabic, Hindi, and Russian demo
+versions explain the English example in English, with localized captions, because
+those three languages are not target choices in the current extension settings.
+The example Copy/close/icon controls are illustrations and cannot affect a
+visitor's clipboard, apps, settings, or drafts. The title is always Translation;
+all instances share the same nine-second CSS loop and localized text catalog.
 The build generates image variants from SVG text templates instead of editing
 generated files. HTML hero nodes use explicit `data-preview-key` values even
-inside decorative `aria-hidden` containers; dynamic cards and dialogs select
-locale-specific preview URLs. Keep product names, model IDs, code, actual user
+inside decorative `aria-hidden` containers; cloned Translation demos get unique
+accessible IDs and localize every authored node on creation and language changes.
+Other tools continue selecting locale-specific SVG preview URLs. Keep product names, model IDs, code, actual user
 text, and AI answers unchanged. When adding artwork with visible text, supply
 all supported locales and verify that long translations and Arabic fit.
 The frontend checks exercise all 13 languages, language detection/persistence,
@@ -189,7 +213,7 @@ reason; a no-match result explains when the catalog has no suitable tool.
 Descriptions are untrusted data, and reasons are displayed as plain text. Only
 real current catalog IDs can become result cards. Search never installs a tool.
 
-MacHelper's local browser service bundles an initial lightweight discovery snapshot,
+MacHelper’s local service bundles an initial lightweight discovery snapshot,
 refreshes its metadata cache from the public manifest/index, and keeps the last
 valid snapshot when an update is unavailable. Only descriptions are cached for discovery. Full tool
 source is downloaded after the separate installation review. Index revisions
@@ -198,19 +222,43 @@ Update checks do not consume AI usage. Finding with AI sends the user's request
 and relevant public metadata to their configured provider. It uses no marketplace
 AI account, API key, or hosted AI service. Provider availability and limits apply.
 
-The browser bridge uses the shared **MacHelper Connector**, extension ID
-`kkmffpbghoojlnldpdolonpjmkhdenkh`, with MacHelper 6.3 or later. Its permission is
-limited to the official marketplace origin. It has no access to other tabs or
-selections. Visitors install the complete source ZIP through the browser's Load
-unpacked flow and separately review that browser permission. **Cancel search**
-disconnects the current native AI request and ignores late responses; leaving the
-page also cancels it. Search requests stay in memory, not browser local storage.
+MacHelper automatically starts a discovery-only HTTP service at
+`http://127.0.0.1:43827` when its app starts. Choose **Connect MacHelper** from
+the website to check it and create a 30-minute session; this does not run AI.
+Chrome/Edge may ask for permission to access the local/loopback connection.
+**Find with AI** is a separate explicit action. The service accepts only the
+exact HTTPS marketplace Origin and loopback Host, validates bounded requests,
+and requires the session’s Bearer token for search/cancel. Its API exposes no
+arbitrary AI prompt, settings, files, shell command, or installation operation.
+Queries, results, and tokens stay in memory, not browser local storage or URLs.
+See the [HTTP protocol](../docs/MacHelper-Protocol.md#website-local-discovery-machelper-65).
 
-Search is available on the website. MacHelper provides the shared AI connection
-and browser service; it has no search screen or search-prefill URL. Without the
-connector, keyword filtering still works and the description-search panel links
-to Connector and MacHelper setup. AI searches stay on this page after setup. The
-website does not expose a localhost HTTP server or add a CORS exception.
+**Cancel search** cancels the owned request and ignores late responses; leaving
+the page also abandons its search. An expired/evicted session, app restart, or **AI Connection → Restart
+Connection** requires connecting again. If the service is unavailable, **Open MacHelper** uses
+`machelper://open` to launch/focus the app without AI; **Get MacHelper** offers
+the download. Denied local access needs approval in browser site settings before
+reconnecting. Keyword filtering always remains available.
+
+Chrome or Edge can be installed before or after MacHelper. Reinstalling a browser
+or creating a new profile requires no browser extension or native-host setup for
+this search service; local-access approval and a fresh session may be needed.
+MacHelper must be running, while its settings window can stay closed. Search and
+its results remain on the website. The former Connector is retired from current
+listings; previously published ZIPs remain available as immutable historical
+downloads. MessageHelper-Upwork still requires its own browser extension.
+
+The production service rejects localhost preview origins. Automated frontend
+tests mock the local HTTP API; manual previews can use keyword filtering. Do not
+weaken the origin check or ask users to disable browser security for testing.
+The website’s Nginx Content Security Policy allows only same-origin connections
+and `http://127.0.0.1:43827` for this local service; deploy that exact
+`connect-src` rule with the client. No local-access request is made during page
+load, language changes, query edits, or preview playback. Local-service tests
+cover real loopback framing and mocked inference separately from any
+usage-consuming live provider test. On a Mac with MacHelper running,
+`python3 scripts/test-marketplace-service.py` checks the connection without AI;
+add `--live` for one synthetic public ranking request using provider usage.
 
 A standalone seed build (metadata only, with no app or source downloads) is:
 

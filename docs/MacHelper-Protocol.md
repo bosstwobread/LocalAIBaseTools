@@ -1,8 +1,8 @@
 # MacHelper client protocol
 
-MacHelper is implemented by the Swift package in `MacHelper`. This document describes its framed AI host protocol for browser native messaging and standalone local clients. The unified schema-2 extension system runs editable JavaScript or native Swift source in independent workers. Those extensions use `MacHelper.ai.transform` or `MacHelperNativeInput.transform`; MacHelper validates the capability and invokes this AI host on their behalf. Extension authors should use the [source API](Source-Extensions.md) rather than implement this transport.
+MacHelper is implemented by the Swift package in `MacHelper`. This document describes its framed AI host protocol for browser native messaging and standalone local clients, plus its separate local HTTP protocol for website discovery. The unified schema-2 extension system runs editable JavaScript or native Swift source in independent workers. Those extensions use `MacHelper.ai.transform` or `MacHelperNativeInput.transform`; MacHelper validates the capability and invokes this AI host on their behalf. Extension authors should use the [source API](Source-Extensions.md) rather than implement this transport.
 
-Browser extensions use native messaging; standalone local clients can launch the installed host directly without importing MacHelper's private Swift implementation. The old schema-1 SDK's executable context is a legacy verification/migration interface and is not loaded by the normal app. MacHelper itself has no HTTP listener.
+Browser extensions use native messaging; standalone local clients can launch the installed host directly without importing MacHelper's private Swift implementation. The old schema-1 SDK's executable context is a legacy verification/migration interface and is not loaded by the normal app. MacHelper 6.5 also runs a narrow loopback HTTP service for extension-free website discovery, documented separately below; native messaging remains the transport for MessageHelper-Upwork and local text clients.
 
 Installed executable: `~/Library/Application Support/LocalAIBaseTools/MacHelper/mac-helper-host`.
 Browser host name: `com.localaibasetools.mac_helper`.
@@ -30,7 +30,7 @@ When `systemPrompt` is supplied, `text` is opaque extension-prepared data and ma
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"6.4.0","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.5.0","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -38,7 +38,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"6.4.0","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.5.0","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.
@@ -53,7 +53,7 @@ Do not auto-send, auto-paste, collect entire documents, or log private content. 
 
 ## Extension discovery (MacHelper 6.3)
 
-Discovery searches public descriptions using the provider/model already saved in **AI Connection**. It returns recommendations only: no source download, installation, execution, permission approval, arbitrary AI prompt, or provider override is part of this action.
+This native action remains available for compatible local clients, including historical Connector versions. The current website uses the separate local HTTP service below. Discovery searches public descriptions using the provider/model already saved in **AI Connection**. It returns recommendations only: no source download, installation, execution, permission approval, arbitrary AI prompt, or provider override is part of this action.
 
 ```json
 {"id":"discovery-example","action":"searchExtensions","text":"Translate selected words in Mac apps","interfaceLanguage":"en"}
@@ -65,7 +65,7 @@ Discovery searches public descriptions using the provider/model already saved in
 {
   "id": "discovery-example",
   "ok": true,
-  "version": "6.4.0",
+  "version": "6.5.0",
   "search": {
     "revision": "<64 lowercase hexadecimal characters>",
     "updatedAt": "2026-11-17T00:00:00Z",
@@ -82,29 +82,30 @@ The model may return at most five distinct IDs from the actual candidate set, ea
 
 The host refreshes a fixed configured `discovery-manifest.json` and verifies its adjacent index against revision, timestamp, byte size, and SHA-256. The index is at most 16 MiB/10,000 entries; cache or bundled seeds can be returned with `stale:true` if refresh fails. No index/source URL can be supplied by a browser request or AI result. Ranking uses bounded public metadata, with query expansion and a local lexical shortlist when there are more than 40 entries; it is not guaranteed exhaustive semantic search. Query and metadata remain untrusted, and provider tools are disabled. Full [descriptor/index details](Source-Extensions.md#public-discovery-metadata-machelper-63) are separate from the source installation catalog.
 
-### Official website Connector
+## Website local discovery (MacHelper 6.5)
 
-The shared Chrome/Edge **MacHelper Connector** is `kkmffpbghoojlnldpdolonpjmkhdenkh`, version 1.0.1. Both browser installers authorize it alongside the existing Upwork extension while preserving previously approved IDs and compatibility host names. They install public discovery configuration/index/manifest and the fixed `DiscoveryPrompts/rank.txt` and `expand.txt` resources beside the host, with private file permissions; they never copy user AI settings or query history. The extension itself needs only `nativeMessaging`. Its manifest permits external connections only from `https://local-ai-extension.nelson007.com/*`; the bridge additionally verifies the exact HTTPS origin, credential-free sender URL, top-level frame, and tab identity. Other extensions, opaque origins, and child frames cannot call it.
+The running MacHelper app automatically serves `http://127.0.0.1:43827`. It binds only IPv4 loopback, not a LAN interface. This is a discovery-only interface: status, session creation, bounded search, and cancellation. It cannot read files/settings, accept arbitrary prompts/provider overrides, perform general text transformations, install tools, or execute code. Shared **AI Connection** settings select the provider/model. Native Messaging registration and browser extensions are unnecessary for website search.
 
-The website sends messages to that fixed ID:
+The sole production browser origin is `https://local-ai-extension.nelson007.com`, with no alternate domain, wildcard, null origin, or local development origin. Requests must supply that exact `Origin` and the exact loopback `Host` including port. Except for CORS `OPTIONS`, they must include `X-MacHelper-Client: extension-market`. JSON POSTs use `Content-Type: application/json`. The listener validates headers, method/path, request size, and allowed fields before processing; malformed, oversized, or unsupported requests fail closed. HTTP/1.1 headers are limited to 8 KiB, JSON bodies to 16 KiB, and responses to 256 KiB. It accepts one request per connection with an explicit POST Content-Length, rejects duplicate/ambiguous headers, transfer encoding, upgrades, and pipelining, and closes after its response. At most 16 connections and 16 sessions are held; initial request receipt times out after 10 seconds and a search after 240 seconds. There is no proxy to an arbitrary URL. Automated tests use isolated listeners/mocked inference rather than weakening the production origin check. Origin checks and session tokens constrain browser access; they are not an authentication boundary against other processes already running as the same macOS user.
 
-```js
-chrome.runtime.sendMessage("kkmffpbghoojlnldpdolonpjmkhdenkh", {
-  type: "machelper.discovery", action: "status"
-}, callback);
-// Explicit user search; requestId is 1–80 ASCII letters/digits/_/-.
-chrome.runtime.sendMessage("kkmffpbghoojlnldpdolonpjmkhdenkh", {
-  type: "machelper.discovery", action: "search", requestId: "request_123",
-  query: "Translate selected text in Mac apps", language: "en"
-}, callback);
-chrome.runtime.sendMessage("kkmffpbghoojlnldpdolonpjmkhdenkh", {
-  type: "machelper.discovery", action: "cancel", requestId: "request_123"
-}, callback);
-```
+The browser initiates its first local request only after an explicit **Connect MacHelper** action. The browser may ask for local/loopback network permission. Status and session creation do not call the AI provider. Loading a page, editing a query, changing language, and playing preview demonstrations must not make local requests or trigger that permission prompt.
 
-These are the only bridge actions; extra request fields are rejected. Status pings the host without AI and returns `{ok:true, version, connectorVersion, compatible}`. Search requires MacHelper 6.3+, maps to native `{id:"discovery-<requestId>", action:"searchExtensions", text:query, interfaceLanguage:language}`, and returns `{ok:true, version, search}` using the envelope above. Errors use `{ok:false,error}`. Cancellation returns `{ok:true,cancelled}` and disconnects only the matching request's port from the same originating document. One search runs per tab; concurrent status checks are independent. Native fields are whitelisted before returning to the website. The bridge does not persist queries/results and cannot expose general native-host actions, files, settings, shell commands, or automatic installation. See the [Connector source guide](../Extensions/MacHelper-Connector/README.md) for browser loading, timeouts, and reload behavior.
+| Request | Authentication and body | Success response |
+| --- | --- | --- |
+| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.5.0",protocolVersion:1}` |
+| `POST /v1/session` | Client/Origin/Host headers; `{}` | `{ok:true,token:"<opaque random token>",expiresIn:1800}` |
+| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.5.0",search:<discovery result>}` |
+| `POST /v1/cancel` | `Authorization: Bearer <token>`; `{requestId}` | `{ok:true,cancelled:<boolean>}` |
 
-Tool search is provided by the website. Without the Connector, ordinary keyword search remains available and the website offers MacHelper/Connector setup links for AI search. Marketplace installation links remain supported separately.
+`requestId` is 1–80 ASCII letters, digits, `_`, or `-`. Search `query` has the native discovery bounds above: nonblank, no NUL, at most 2,000 UTF-16 units and 8,000 UTF-8 bytes. `language` uses the supported interface codes above. Additional fields are rejected. The `search` object follows the revision/model/matches contract above; results are terminal, rather than streamed. Only an explicit **Find with AI** action may start ranking.
+
+Session tokens are random, bounded to 16, kept only in the app and page memory, and expire after a fixed 1,800 seconds. Creating a session at capacity evicts the least recently used inactive session; the active search’s owner is retained so it can cancel. An evicted tab receives an unauthorized response and must reconnect. Using a session updates its recency without extending its expiry. Expiry prevents a new search; an expired token belonging to the active search is retained only so its owner can cancel that ongoing operation. Never store them in URLs, cookies, browser local storage, logs, or files. Search/cancel need the session’s Bearer token. Cancellation can affect only the matching request owned by that token; another session cannot cancel it. Aborting/disconnecting a search cancels its owned inference. Quitting/restarting MacHelper or choosing **AI Connection → Restart Connection** invalidates every session. A failed/expired session requires **Connect MacHelper** again; it must not silently authorize a new AI request.
+
+Error responses use `{ok:false,code:"<machine-readable code>",error:"<readable message>"}` with an appropriate non-2xx status. Invalid/unauthorized requests use 4xx; a busy search uses HTTP 429. Clients must handle unavailable service, denied browser local access, timeout/cancellation, expired sessions, and provider errors separately from a valid empty-match result. Do not interpret browser network failure as permission to fall back to a cloud AI backend or another provider. Keyword filtering remains usable without the local connection.
+
+**Open MacHelper** uses the exact `machelper://open` URL to launch/focus the installed app, with no search query or AI action. It is separate from reviewed `machelper://install` source-package links. Chrome/Edge may be installed before or after MacHelper; no per-browser/profile installation is required for this service. A new profile or browser reinstall may require local-access approval and a fresh session, while the MacHelper app and shared provider settings remain in place. MessageHelper-Upwork continues to require its own browser extension and Native Messaging host. The native **Website connection** status and **Restart Connection** control manage the loopback listener, not browser installation or AI settings.
+
+With MacHelper running, `python3 scripts/test-marketplace-service.py` checks the installed HTTP service without inference. Its optional `--live` flag ranks one synthetic public need using the saved provider and consumes usage. Swift socket tests and website mocked-HTTP tests separately cover session expiry/eviction, cancellation, malformed requests, and unavailable service; the compatibility `scripts/test-discovery.py` still checks framed native requests.
 
 ## Unified extension worker boundary
 

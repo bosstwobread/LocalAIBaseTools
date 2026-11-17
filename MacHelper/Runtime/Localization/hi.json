@@ -241,5 +241,12 @@
   "Validating source…": "स्रोत की जाँच हो रही है…",
   "Version %@": "संस्करण %@",
   "Working…": "प्रक्रिया जारी है…",
-  "Working… · %@": "प्रक्रिया जारी है… · %@"
+  "Working… · %@": "प्रक्रिया जारी है… · %@",
+  "Website connection": "वेबसाइट कनेक्शन",
+  "Ready — no browser extension needed.": "तैयार — ब्राउज़र एक्सटेंशन की ज़रूरत नहीं है।",
+  "Starting website connection…": "वेबसाइट कनेक्शन शुरू हो रहा है…",
+  "Website connection is stopped.": "वेबसाइट कनेक्शन बंद है।",
+  "Website connection could not start. Quit other copies of MacHelper and try again.": "कनेक्शन शुरू नहीं हो सका। MacHelper की दूसरी प्रतियाँ बंद करके फिर कोशिश करें।",
+  "Restart Connection": "कनेक्शन फिर शुरू करें",
+  "Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access.": "Extension Market में अपनी ज़रूरत बताएँ से कनेक्ट करें। नया या दोबारा इंस्टॉल किया गया ब्राउज़र स्थानीय पहुँच की अनुमति माँग सकता है।"
 }

@@ -33,21 +33,58 @@
     if (tool.kind === 'mac-source' && tool.runtime !== undefined && !['javascript', 'native'].includes(tool.runtime)) return null;
     return { ...tool, runtime: tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'native' : 'javascript') : 'browser', summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), keywords: strings(tool.keywords), exampleQueries: strings(tool.exampleQueries), limitations: strings(tool.limitations), translations: tool.translations && typeof tool.translations === 'object' ? tool.translations : {}, screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
   }
-  const CONNECTOR_ID = 'kkmffpbghoojlnldpdolonpjmkhdenkh';
-  const discovery = { mode: 'keywords', running: null, matches: null, message: '', model: '', stale: false, available: false };
+  const LOCAL_SERVICE = 'http://127.0.0.1:43827';
+  const discovery = { mode: 'keywords', running: null, connecting: null, token: null, expiresAt: 0, connectedBefore: false, matches: null, message: '', model: '', stale: false };
   const toolText = (tool, text) => tool.translations?.[i18n?.locale || 'en']?.[text] || t(text);
   const queryValue = () => $('#need-query').value.replace(/\s+/g, ' ').trim();
   const validQuery = value => Boolean(value) && !value.includes('\0') && value.length <= 2000 && new TextEncoder().encode(value).length <= 8000;
-  function connectorMessage(message) {
-    return new Promise((resolve, reject) => {
-      if (!window.chrome?.runtime?.sendMessage) { reject(new Error('connector')); return; }
-      try {
-        window.chrome.runtime.sendMessage(CONNECTOR_ID, { type: 'machelper.discovery', ...message }, response => {
-          if (window.chrome.runtime.lastError || !response?.ok) reject(new Error('connector'));
-          else resolve(response);
-        });
-      } catch { reject(new Error('connector')); }
-    });
+  const connected = () => Boolean(discovery.token) && Date.now() < discovery.expiresAt;
+  const connectionMessage = code => ({
+    permission: 'Allow local or loopback network access for this website in your browser’s site settings, then reconnect.',
+    incompatible: 'Update MacHelper to version 6.5 or later, then reconnect.',
+    unauthorized: 'Connection expired. Reconnect MacHelper, then try again.',
+    timeout: 'Connection timed out. Check that MacHelper is running, then reconnect.'
+  })[code] || 'Could not reach MacHelper. Open the app and try Connect again.';
+  function localError(code) { const error = new Error(code); error.code = code; return error; }
+  async function localPermission() {
+    // Permission names differ between browser versions. The explicit fetch is
+    // authoritative when a browser cannot report its local-access permission.
+    for (const name of ['loopback-network', 'local-network-access']) {
+      try { const result = await navigator.permissions.query({ name }); return result.state; }
+      catch { /* Older browsers expose neither name. */ }
+    }
+    return 'unknown';
+  }
+  async function localRequest(path, { body, token, signal, timeout = 10000, keepalive = false } = {}) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeout);
+    try {
+      const headers = { 'X-MacHelper-Client': 'extension-market' };
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(`${LOCAL_SERVICE}${path}`, {
+        method: body === undefined ? 'GET' : 'POST', headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        cache: 'no-store', credentials: 'omit', mode: 'cors', redirect: 'error', referrerPolicy: 'no-referrer',
+        signal: controller.signal, keepalive
+      });
+      const result = await response.json();
+      if (!response.ok || result?.ok !== true) throw localError(typeof result?.code === 'string' ? result.code : 'search_failed');
+      return result;
+    } catch (error) {
+      if (timedOut) throw localError('timeout');
+      if (signal?.aborted) throw localError('cancelled');
+      if (error?.code) throw error;
+      if (await localPermission() === 'denied') throw localError('permission');
+      throw localError('unavailable');
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    }
   }
   function renderDiscovery() {
     const isAI = discovery.mode === 'description';
@@ -56,12 +93,14 @@
     $('#description-search').hidden = !isAI;
     $('#filters').classList.toggle('description-mode',isAI);
     $('#search').closest('label').hidden = isAI;
-    $('#find-with-ai').disabled = Boolean(discovery.running) || !state.data;
+    $('#find-with-ai').disabled = Boolean(discovery.running) || Boolean(discovery.connecting) || !connected() || !state.data;
     $('#cancel-ai-search').hidden = !discovery.running;
+    $('#connect-machelper').disabled = Boolean(discovery.connecting) || Boolean(discovery.running);
+    $('#connect-machelper').textContent = t(discovery.connecting ? 'Connecting to MacHelper…' : discovery.connectedBefore ? 'Reconnect MacHelper' : 'Connect MacHelper');
+    $('#connection-status').textContent = t(discovery.connecting ? 'Connecting to MacHelper…' : connected() ? 'MacHelper connected.' : 'Connect MacHelper to use AI search.');
     $('#need-query').disabled = Boolean(discovery.running);
     $('#discovery-status').textContent = t(discovery.message);
-    $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running)));
-    $('#connector-help').hidden = discovery.available;
+    $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running) || Boolean(discovery.connecting)));
     $('#discovery-model').textContent = [discovery.model, discovery.stale && t('Using cached extension descriptions.')].filter(Boolean).join(' · ');
     const examples = state.tools.flatMap(tool => tool.exampleQueries.slice(0,1).map(value => ({ tool, value }))).slice(0,3);
     $('#discovery-examples').replaceChildren(...examples.map(({tool,value}) => {
@@ -70,6 +109,28 @@
       return button;
     }));
   }
+  async function connectMacHelper() {
+    if (discovery.connecting || discovery.running) return;
+    const pending = new AbortController();
+    discovery.connecting = pending; discovery.token = null; discovery.expiresAt = 0;
+    discovery.message = ''; renderDiscovery();
+    try {
+      if (await localPermission() === 'denied') throw localError('permission');
+      const status = await localRequest('/v1/status', { signal: pending.signal, timeout: 30000 });
+      const version = typeof status.version === 'string' && status.version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+      if (status.protocolVersion !== 1 || !version || version[0] !== status.version || Number(version[1]) < 6 || (Number(version[1]) === 6 && Number(version[2]) < 5)) throw localError('incompatible');
+      const session = await localRequest('/v1/session', { body: {}, signal: pending.signal });
+      if (typeof session.token !== 'string' || session.token.length !== 64 || !/^[a-f0-9]{64}$/.test(session.token) || !Number.isInteger(session.expiresIn) || session.expiresIn < 1 || session.expiresIn > 1800) throw localError('unavailable');
+      if (discovery.connecting !== pending) return;
+      discovery.token = session.token; discovery.expiresAt = Date.now() + session.expiresIn * 1000; discovery.connectedBefore = true;
+      discovery.message = 'MacHelper connected.';
+    } catch (error) {
+      if (discovery.connecting !== pending) return;
+      discovery.message = connectionMessage(error.code);
+    } finally {
+      if (discovery.connecting === pending) { discovery.connecting = null; renderDiscovery(); }
+    }
+  }
   function updateNeed() {
     if (!discovery.running && discovery.matches !== null) {
       discovery.matches=null; discovery.message=''; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
@@ -77,53 +138,51 @@
     }
     renderDiscovery();
   }
-  async function chooseSearchMode(mode) {
+  function chooseSearchMode(mode) {
     if (mode !== discovery.mode) cancelDiscovery(false);
     discovery.mode=mode;
     renderDiscovery();
     if (state.data) renderCards();
-    if (mode === 'description') {
-      try { const result=await connectorMessage({action:'status'}); discovery.available=result.compatible === true; }
-      catch { discovery.available=false; }
-      renderDiscovery();
-    }
   }
   function cancelDiscovery(showMessage = true) {
     const pending=discovery.running;
     discovery.running=null;
     if(pending) {
       clearTimeout(pending.timeout);
-      connectorMessage({action:'cancel',requestId:pending.id}).catch(()=>{});
+      pending.controller.abort();
+      localRequest('/v1/cancel', { body: { requestId: pending.id }, token: pending.token, timeout: 5000, keepalive: true }).catch(()=>{});
       if(showMessage) discovery.message='Search cancelled.';
     }
     renderDiscovery();
   }
   async function searchWithAI() {
-    if(discovery.running || !state.data) return;
+    if(discovery.running || discovery.connecting || !state.data) return;
     const query=queryValue();
     if(!validQuery(query)) {
       discovery.message='Describe your need in 1–2,000 characters.'; renderDiscovery(); return;
     }
+    if (!connected()) { discovery.token = null; discovery.expiresAt = 0; discovery.message = connectionMessage('unauthorized'); renderDiscovery(); return; }
     const id=window.crypto?.randomUUID?.() || `search_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const pending={ id, timeout:null };
+    const pending={ id, token: discovery.token, controller: new AbortController(), timeout:null };
     discovery.running=pending; discovery.matches=null; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
     discovery.message='Finding extensions with your AI…';
     pending.timeout=setTimeout(()=>{ if(discovery.running===pending) { cancelDiscovery(false); discovery.message='Search timed out. Please try again.';renderDiscovery(); } },180000);
     renderDiscovery();renderCards();
     try {
-      const response=await connectorMessage({action:'search',requestId:id,query,language:i18n?.locale || 'en'});
+      const response=await localRequest('/v1/search', { body: { requestId:id, query, language:i18n?.locale || 'en' }, token:pending.token, signal:pending.controller.signal, timeout:185000 });
       if(discovery.running!==pending) return;
       const result=response.search;
-      if(!result || !Array.isArray(result.matches) || result.matches.length > 100) throw new Error('invalid');
+      if(!result || !Array.isArray(result.matches) || result.matches.length > 5) throw localError('search_failed');
       const known=new Set(state.tools.map(tool=>tool.id)), seen=new Set();
       discovery.matches=result.matches.filter(match => match && known.has(match.id) && !seen.has(match.id) && ['good','partial'].includes(match.fit) && typeof match.reason==='string' && match.reason.length <= 4000 && seen.add(match.id));
-      discovery.available=true; discovery.model=typeof result.model==='string' ? result.model.slice(0,200) : '';
+      discovery.model=typeof result.model==='string' ? result.model.slice(0,200) : '';
       discovery.stale=result.stale===true;
       discovery.message=discovery.matches.length ? 'AI suggestions — review each tool before installing.' : 'No matching extensions found. Try describing your need differently.';
       $('#no-match-reason').textContent=!discovery.matches.length && typeof result.noMatchReason==='string' ? result.noMatchReason.slice(0,4000) : '';
-    } catch {
+    } catch (error) {
       if(discovery.running!==pending) return;
-      discovery.available=false; discovery.message='Could not connect to MacHelper. Check the connector and AI connection settings in MacHelper.';
+      if (['unauthorized', 'unavailable', 'permission', 'incompatible'].includes(error.code)) { discovery.token = null; discovery.expiresAt = 0; discovery.message = connectionMessage(error.code); }
+      else discovery.message = error.code === 'busy' ? 'MacHelper is busy. Wait for its current search to finish, then try again.' : 'Search failed. Check AI Connection in MacHelper and try again.';
     } finally {
       if(discovery.running===pending) { clearTimeout(pending.timeout); discovery.running=null; renderDiscovery();renderCards(); }
     }
@@ -182,6 +241,8 @@
       return (!query || searchable.includes(query)) && (category === 'all' || tool.category === category) && (platform === 'all' || tool.platforms.includes(platform));
     });
     $('#extension-grid').replaceChildren(...filtered.map(tool=>card(tool, discovery.mode === 'description' ? discovery.matches?.find(match=>match.id===tool.id) : null)));
+    translationDemos.prune();
+    translationDemos.refresh();
     $('#catalog-empty').hidden = filtered.length !== 0;
     $('#result-count').textContent = filtered.length === state.tools.length ? t('Extensions: {count}', { count: filtered.length }) : t('Extensions: {count} / {total}', { count: filtered.length, total: state.tools.length });
     $('#clear-filters').hidden = !query && category === 'all' && platform === 'all';
@@ -189,7 +250,9 @@
   function card(tool, match = null) {
     const details = `#extension/${encodeURIComponent(tool.slug)}`;
     const shot = tool.screenshots[0];
-    const visual = h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) }, image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('span', { class: 'preview-label' }, t("Interface preview")));
+    const visual = tool.id === 'com.localaibasetools.translation'
+      ? h('div', { class: 'card-visual' }, translationDemos.create('card'))
+      : h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) }, image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('span', { class: 'preview-label' }, t("Interface preview")));
     const install = h('button', { type: 'button', class: 'card-install', 'aria-label': t('Installation options for {name}', { name: tool.name }) }, tool.kind === 'mac-source' ? t("Add to MacHelper ↗") : t("Get extension ↗"));
     install.addEventListener('click', () => navigate(tool.slug, 'install'));
     return h('article', { class: 'extension-card' }, visual,
@@ -270,6 +333,7 @@
         installTab.tabIndex = isOverview ? -1 : 0;
         overview.hidden = !isOverview;
         installation.hidden = isOverview;
+        translationDemos.refresh();
         if (focus) (isOverview ? overviewTab : installTab).focus();
       };
       overviewTab.addEventListener('click', () => selectTab('overview'));
@@ -285,6 +349,8 @@
       selectTab(tab === 'install' ? 'install' : 'overview');
     }
     if (!dialog.open) { dialog.showModal(); document.body.classList.add('modal-open'); }
+    translationDemos.prune();
+    translationDemos.refresh();
     dialog.scrollTop = 0;
     close.focus({ preventScroll: true });
   }
@@ -292,7 +358,8 @@
     const main = h('div', {}, h('p', { class: 'detail-description' }, toolText(tool,tool.description)));
     if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, t("What it does")), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, toolText(tool,feature)))));
     if(tool.limitations.length) main.append(h('h3',{class:'detail-subheading'},t('Limitations')),h('ul',{class:'detail-list'},tool.limitations.map(value=>h('li',{},toolText(tool,value)))));
-    for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, t(shot.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('figcaption', {}, t(shot.caption) || t("Interface preview · Example content"))));
+    if (tool.id === 'com.localaibasetools.translation') main.append(translationDemos.create('detail'));
+    else for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, t(shot.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('figcaption', {}, t(shot.caption) || t("Interface preview · Example content"))));
     if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
     const facts = h('dl', {}, h('dt', {}, t("Platforms")), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, t("Package")), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("Editable native Swift source") : t("Editable JavaScript source")) : t("Browser extension ZIP")), h('dt', {}, t("Version")), h('dd', {}, tool.version || '—'));
     if (tool.updatedAt) {
@@ -377,12 +444,102 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { node.hidden = true; }, 3500);
   }
+  function setupTranslationDemos() {
+    const original = $('#translation-demo');
+    const template = original.cloneNode(true);
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const demos = new Map();
+    let sequence = 0;
+    function localize(demo) {
+      demo.querySelectorAll('[data-preview-key]').forEach(node => {
+        const text = i18n?.previewText(node.dataset.previewKey);
+        if (text) node.textContent = text;
+        node.lang = i18n?.locale || 'en';
+      });
+    }
+    function update(demo, entry) {
+      const insideDialog = demo.closest('dialog');
+      const playing = demo.isConnected && entry.visible && !entry.stopped && !document.hidden && !reducedMotion?.matches
+        && !demo.closest('[hidden]') && (!insideDialog || insideDialog.open) && (!dialog.open || insideDialog === dialog);
+      demo.classList.toggle('demo-playing', Boolean(playing));
+      const control = demo.querySelector('.demo-control');
+      const key = playing ? 'demo.stop' : 'demo.replay';
+      control.dataset.previewKey = key;
+      control.textContent = i18n?.previewText(key) || (playing ? 'Stop demo' : 'Replay demo');
+    }
+    const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
+      for (const item of entries) {
+        const entry = demos.get(item.target);
+        if (!entry) continue;
+        entry.visible = item.isIntersecting && item.intersectionRatio >= 0.2;
+        update(item.target, entry);
+      }
+    }, { threshold: [0, 0.2] }) : null;
+    function refresh() { for (const [demo, entry] of demos) update(demo, entry); }
+    function register(demo) {
+      const entry = { visible: !observer, stopped: false };
+      demos.set(demo, entry);
+      localize(demo);
+      const control = demo.querySelector('.demo-control');
+      control.hidden = false;
+      control.addEventListener('click', () => {
+        entry.stopped = demo.classList.contains('demo-playing');
+        update(demo, entry);
+      });
+      observer?.observe(demo);
+      update(demo, entry);
+      return demo;
+    }
+    function create(placement) {
+      const demo = template.cloneNode(true);
+      const id = `translation-demo-${++sequence}`;
+      demo.id = id;
+      demo.classList.add(`demo-${placement}`);
+      demo.querySelector('#demo-title').id = `${id}-title`;
+      demo.querySelector('#demo-summary').id = `${id}-summary`;
+      demo.setAttribute('aria-labelledby', `${id}-title`);
+      demo.setAttribute('aria-describedby', `${id}-summary`);
+      return register(demo);
+    }
+    function prune() {
+      for (const [demo] of demos) if (!demo.isConnected) {
+        observer?.unobserve(demo);
+        demo.classList.remove('demo-playing');
+        demos.delete(demo);
+      }
+    }
+    register(original);
+    $('#translation-spotlight').append(create('spotlight'));
+    refresh();
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('market-language-change', () => {
+      for (const [demo] of demos) localize(demo);
+      refresh();
+    });
+    reducedMotion?.addEventListener('change', refresh);
+    window.addEventListener('pagehide', () => {
+      for (const [demo] of demos) demo.classList.remove('demo-playing');
+      observer?.disconnect();
+    });
+    window.addEventListener('pageshow', () => {
+      for (const [demo] of demos) observer?.observe(demo);
+      refresh();
+    });
+    return { create, prune, refresh };
+  }
+  const translationDemos = setupTranslationDemos();
   $('#keyword-mode').addEventListener('click',()=>chooseSearchMode('keywords'));
   $('#description-mode').addEventListener('click',()=>chooseSearchMode('description'));
   $('#need-query').addEventListener('input',updateNeed);
+  $('#connect-machelper').addEventListener('click',connectMacHelper);
   $('#find-with-ai').addEventListener('click',searchWithAI);
   $('#cancel-ai-search').addEventListener('click',()=>cancelDiscovery());
-  window.addEventListener('pagehide',()=>cancelDiscovery(false));
+  window.addEventListener('pagehide',()=>{
+    cancelDiscovery(false);
+    discovery.connecting?.abort(); discovery.connecting=null;
+    discovery.token=null; discovery.expiresAt=0;
+  });
+  window.addEventListener('pageshow',renderDiscovery);
   $('#filters').addEventListener('submit', event => event.preventDefault());
   $('#search').addEventListener('input', () => { if (state.data) renderCards(); });
   $('#category').addEventListener('change', () => { if (state.data) renderCards(); });
@@ -393,6 +550,7 @@
   window.addEventListener('hashchange', route);
   dialog.addEventListener('close', () => {
     document.body.classList.remove('modal-open');
+    translationDemos.refresh();
     state.activeSlug = null;
     if (location.hash.startsWith('#extension/')) history.replaceState(null, '', '#browse');
     if (state.returnFocus?.isConnected) state.returnFocus.focus({ preventScroll: true });

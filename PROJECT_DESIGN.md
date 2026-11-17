@@ -10,17 +10,16 @@ The current products are:
 
 | Component | Current version | What it does |
 | --- | --- | --- |
-| MacHelper | 6.4.0 (build 640) | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, the website’s AI discovery service, and local AI transports. |
-| Translation | 4.5.1 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
+| MacHelper | 6.5.0 (build 650) | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, the website’s AI discovery service, and local AI transports. |
+| Translation | 4.5.2 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
 | MessageHelper — Upwork | 1.4.0 | Chrome/Edge extension that translates messages and previews polished drafts on supported Upwork pages. |
-| MacHelper Connector | 1.0.1 | Narrow Chrome/Edge bridge from the official marketplace to MacHelper AI discovery. |
 | Extension Market | Static website | Keyword/description search, tool details, illustrated previews, source downloads, and reviewed installation links into MacHelper. |
 
 The public marketplace is [local-ai-extension.nelson007.com](https://local-ai-extension.nelson007.com/). Version numbers above are a snapshot; the manifests and release configuration remain the source of truth.
 
 The website and MacHelper expose 13 interface languages: English, both Chinese scripts, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi, Russian, and Italian. The website detects browser preferences and stores explicit choices locally; MacHelper has a separate persistent General preference with a System language option. Arabic uses right-to-left layout. Native catalogs live in `MacHelper/Runtime/Localization`; website catalogs are owned by the website. UI changes require matching catalog keys and format parameters. Extension-specific labels come from an optional manifest-declared localization resource, not host-specific settings code. Changing interface language refreshes presentation without restarting source workers, changing the translation target, or rewriting prompts. Technical guides and diagnostics can retain their original language.
 
-Visible text embedded in artwork is part of localization. Website preview strings live in `ExtensionMarket-website/preview-locales.json`. The build generates escaped SVG variants under `assets/localized/<locale>/` and the `preview-locales.js` data used by the HTML hero illustration. Static previews, tool cards, and detail dialogs select the current locale's artwork; captions and accessible labels change with it. Synthetic demo output follows the preview language, while a foreign source sentence or English polishing sample remains appropriate to the example. No image translation is requested from AI, and real user content is never rewritten. App and extension artwork should use their own text resources or locale-specific assets when they contain interface text.
+Visible text embedded in artwork is part of localization. Website preview strings live in `ExtensionMarket-website/preview-locales.json`. The build generates escaped SVG variants under `assets/localized/<locale>/` and the `preview-locales.js` data used by HTML demonstrations. Translation reuses one HTML/CSS contextual-word demonstration in the hero, catalog card, spotlight, and detail dialog; visibility and reduced-motion preferences govern playback, and all authored captions, controls, accessible text, and synthetic results use that preview catalog. Other tools select locale-specific SVG previews. Synthetic output demonstrates a supported target language while a foreign source sentence or English polishing sample remains appropriate to the example. Preview localization/playback makes no local connection or AI request, and real user content is never rewritten. App and extension artwork should use their own text resources or locale-specific assets when they contain interface text.
 
 “Local AI connection” describes where the integration runs. ChatGPT requests still use an online account and remote inference. Ollama and LM Studio can run inference on the user's Mac. The project does not guarantee free or unlimited provider usage.
 
@@ -29,8 +28,8 @@ Visible text embedded in artwork is part of localization. Website preview string
 | Location | Installed or running there | Responsibility |
 | --- | --- | --- |
 | Linux server | Nginx marketplace container; Caddy reverse proxy | Serve public pages, catalog metadata, source files, ZIP packages, and the MacHelper download over HTTPS. |
-| User's Mac | MacHelper.app, source workers, on-demand AI host | Manage settings and permissions, read supported selections, display panels, and contact the configured provider. |
-| Chrome or Edge on that Mac | MessageHelper-Upwork; optional MacHelper Connector | Add Upwork controls, or connect official marketplace discovery to the same on-demand native host. |
+| User's Mac | MacHelper.app with local website service, source workers, on-demand AI host | Manage settings and permissions, serve bounded website search on loopback, read supported selections, display panels, and contact the configured provider. |
+| Browser on that Mac | Official marketplace page; MessageHelper-Upwork in Chrome/Edge when used | Connect the marketplace directly to MacHelper’s local search service; the separate Upwork extension adds page controls. |
 | Provider environment | Bundled Codex app-server, or Ollama/LM Studio loopback server | Discover available models and perform inference under the user's chosen provider. |
 
 There is no central AI backend in the marketplace. Selected text, message drafts, and model answers are not sent to the marketplace by the application. Installing the website on Linux does not install the macOS app or configure a user's AI account.
@@ -38,7 +37,7 @@ There is no central AI backend in the marketplace. Selected text, message drafts
 ```mermaid
 flowchart TD
     Market["HTTPS marketplace: pages, public discovery index, complete tool source"]
-    Connector["Chrome / Edge: MacHelper Connector"]
+    LocalService["Inside MacHelper: 127.0.0.1:43827 discovery service"]
     App["MacHelper app: Dock, menu bar, settings, and capabilities"]
     Worker["Translation JavaScript worker"]
     Native["Native Swift source worker"]
@@ -52,21 +51,23 @@ flowchart TD
     App <-->|"Framed IPC and capability calls"| Native
     App -->|"Explicit AI action"| Host
     Browser <-->|"Native Messaging"| Host
-    Market <-->|"Official-origin discovery messages"| Connector
-    Connector <-->|"Discovery-only Native Messaging"| Host
+    Market <-->|"Official-origin HTTP + short-lived session"| LocalService
+    App -->|"Starts and stops"| LocalService
+    LocalService -->|"Explicit bounded AI search"| ChatGPT
+    LocalService -->|"Explicit bounded AI search"| Local
     App -->|"Public discovery metadata only"| Market
     Host -->|"Selected provider"| ChatGPT
     Host -->|"Selected provider"| Local
 ```
 
-MacHelper is a persistent application with a Dock icon and menu-bar shortcut. Clicking its Dock icon opens Settings; closing Settings keeps the app and enabled tools running. Login startup does not open a settings window. `mac-helper-host` is an executable launched when needed, rather than a permanent HTTP daemon. Source extensions' AI capability calls launch the embedded host as a child process. Chrome/Edge launches its registered host copy when the extension connects. Both use shared configuration; the browser does not need an already-open MacHelper settings window.
+MacHelper is a persistent application with a Dock icon and menu-bar shortcut. Clicking its Dock icon opens Settings; closing Settings keeps the app and enabled tools running. Login startup does not open a settings window. `mac-helper-host` is an executable launched when needed, rather than a permanent HTTP daemon. Source extensions' AI capability calls launch the embedded host as a child process. Chrome/Edge launches its registered host copy when MessageHelper-Upwork connects. Both use shared configuration. Separately, the running MacHelper app starts its loopback-only website service; website AI search needs that app running, while its settings window may stay closed.
 
 ## 3. Repository structure and ownership
 
 | Path | Responsibility and when to change it |
 | --- | --- |
 | `MacHelper/App/` | AppKit Dock/menu-bar interface, AI/Extensions/General settings, login registration, permission review, source lifecycle, and marketplace URL handling. Change shared application behavior here. |
-| `MacHelper/Runtime/` | Provider clients, model discovery, preferences, framing, browser registration, source-package infrastructure, native source builds, batch-action planning, and the legacy bundle registry. |
+| `MacHelper/Runtime/` | Provider clients, model discovery, preferences, framing, browser registration, the loopback website service, source-package infrastructure, native source builds, batch-action planning, and the legacy bundle registry. |
 | `MacHelper/Runtime/SourcePackages/` | Manifest/catalog validation, complete downloads, safe paths, hashes, editable installation, and source-change watching. |
 | `MacHelper/Capabilities/` | Shared Accessibility selection reading, sentence context, panel placement, cancellation, and the native AI client. Changes here affect tools that use those capabilities. |
 | `MacHelper/Host/` | `mac-helper-host` entry point for browser and native AI requests. |
@@ -77,9 +78,9 @@ MacHelper is a persistent application with a Dock icon and menu-bar shortcut. Cl
 | `MacHelper/Tests/` | Swift runtime and capability tests. |
 | `Extensions/Translation/` | Translation's manifest, JavaScript, settings schema, prompts, documentation, and license. Most translation wording/behavior changes belong here. |
 | `Extensions/MessageHelper-Upwork/` | Independent Manifest V3 browser extension, page integration, popup, and safe test page. |
-| `Extensions/MacHelper-Connector/` | Discovery-only Manifest V3 marketplace bridge, fixed public identity, and browser-native tests. |
 | `Extensions/*/discovery.json` | Tool-owned searchable descriptions, capabilities, examples, keywords, limitations, platforms, and translated display text. |
-| `MacHelper/Runtime/Discovery*` | Headless website AI service: verified public metadata cache/seed, keyword retrieval, and bounded AI ranking. |
+| `MacHelper/Runtime/Discovery*` | Verified public metadata cache/seed, keyword retrieval, and bounded AI ranking. |
+| `MacHelper/Runtime/MarketplaceLocalService*` | Loopback HTTP parsing/listener, official-origin checks, short-lived sessions, and website search/cancel routing. |
 | `catalog/extensions.json` | Source catalog with complete file inventory, sizes, hashes, and download locations. Regenerate after changing published tool files. |
 | `ExtensionMarket-website/` | Static website, visual metadata, package builder/verifier, Docker configuration, and deployment automation. |
 | `ExtensionMarket-website/historical-packages/` | Immutable files and ZIPs required by previously published source-package URLs. |
@@ -187,9 +188,9 @@ These are per-user locations; `~` means the current user's home directory.
 | `~/Library/Application Support/LocalAIBaseTools/Extensions/<id>.macsource/` | Complete editable installed tool source. |
 | Chrome/Edge `NativeMessagingHosts` folders under `~/Library/Application Support/` | Browser registrations pointing to the host. |
 
-MacHelper registers login startup through `SMAppService` on its first explicit launch from the installed location. macOS may require approval. A later user disablement is respected, and closing Settings keeps the app running with Dock and menu-bar access. Selection access requires Accessibility approval specifically for MacHelper.
+MacHelper registers login startup through `SMAppService` on its first explicit launch from the installed location. macOS may require approval. A later user disablement is respected, and closing Settings keeps the app running with Dock and menu-bar access. Selection access requires Accessibility approval specifically for MacHelper. The **AI Connection → Website connection** status shows whether the loopback search service is ready; **Restart Connection** restarts that service without changing provider preferences and invalidates its old website sessions.
 
-The installed app registers browser support with exact allowed extension IDs. The canonical host name is `com.localaibasetools.mac_helper`; `com.messagehelper.gpt` is a compatibility alias. Both run the same host. Browser clients can launch it on demand; a constantly running network service is unnecessary.
+The installed app registers Native Messaging support with exact allowed extension IDs for browser tools such as MessageHelper-Upwork. The canonical host name is `com.localaibasetools.mac_helper`; `com.messagehelper.gpt` is a compatibility alias. Both run the same on-demand executable. Website discovery uses a separate loopback listener inside MacHelper, started automatically with the app. No browser-specific registration or installed search extension is needed for that website connection.
 
 ## 10. Marketplace and release design
 
@@ -204,7 +205,7 @@ The website is plain HTML/CSS/JavaScript served by Nginx. There is no production
 - `downloads/MacHelper-macOS-arm64.zip`, built on macOS before server publication.
 - Static pages, artwork, and illustrated previews.
 
-The website's `machelper://install` link opens the native app. MacHelper fetches metadata, presents permissions for review, and downloads the complete source only after installation is approved. The browser cannot silently install the app or grant Accessibility permission. Existing tool installations open settings without overwriting local changes or forcing enablement.
+The website’s `machelper://open` link launches/focuses MacHelper without inference. Its separate `machelper://install` link opens the native app for source installation. MacHelper fetches metadata, presents permissions for review, and downloads the complete source only after installation is approved. The browser cannot silently install the app or grant Accessibility permission. Existing tool installations open settings without overwriting local changes or forcing enablement.
 
 Source packages use complete file inventories with sizes and SHA-256 hashes. Downloads stage and validate before atomic activation. These checks establish consistency with the chosen HTTPS catalog; they are not publisher signatures or a guarantee that a tool is safe. Previously published package URLs are immutable and retained for older app catalogs.
 
@@ -212,15 +213,17 @@ Current production uses a dedicated Docker container behind the existing Caddy p
 
 The Mac app needs a macOS build/signing environment with Swift 6 or later command-line tools and Python 3. The published Apple Silicon download is a developer preview and is not notarized. Linux builds the static website container, not the Mac application. The public [website README](ExtensionMarket-website/README.md) and [deployment guide](ExtensionMarket-website/DEPLOYMENT.md) describe the supported packaging and Docker update workflow. Private machine-specific deployment notes are not distributed.
 
-### Description-based discovery (MacHelper 6.3)
+### Description-based discovery (metadata 6.3; extension-free website service 6.5)
 
 Every newly authored/published tool owns root `discovery.json`; JavaScript, native Swift, and browser packages use the same public descriptor. The website publisher validates schema 1, rejects unknown fields, derives identity/version from the manifest, and combines descriptors into a source-free index. It is required for marketplace publication, while existing installed tools remain runnable without it. Extension-owned translation maps support the same 13 interface languages without moving descriptions into MacHelper source. See [the exact descriptor contract](docs/Source-Extensions.md#public-discovery-metadata-machelper-63).
 
 A small revision manifest names a fixed adjacent index and includes its SHA-256, byte size, timestamp, and content revision. MacHelper checks the manifest first, downloads changed index bytes, validates the pair, and stores it privately. The index is limited to 16 MiB and 10,000 entries. A last verified cache or bundled seed remains available with a stale indication after a network failure; invalid downloads never replace it. Public metadata updates do not require app releases or downloading tool source. The website serves its own static description data for keyword search; there is no server AI gateway.
 
-The website offers **Keywords** and **Describe your need**. Keyword filtering needs no inference. Explicit **Find with AI** calls MacHelper’s headless browser service using shared AI Connection settings. For at most 40 tools, a bounded ranking payload is sent directly. Larger indexes first use AI to expand the user's query into at most eight search terms; local lexical retrieval selects up to 40 candidates, then ranking receives at most 160,000 bytes of candidate records. Descriptions are shortened to 1,200 characters, capabilities to the first eight, and the complete selected record must fit before it is added. This does not guarantee exhaustive global semantic matching. AI returns at most five distinct known candidate IDs, reasons, and `good`/`partial` fits; invented/duplicate IDs and malformed output are rejected. Query and metadata are untrusted, with inference tools disabled. Viewing results never installs or executes a tool.
+The website offers **Keywords** and **Describe your need**. Keyword filtering needs no inference. After **Connect MacHelper** establishes a session, explicit **Find with AI** calls MacHelper’s local service using shared AI Connection settings. Connecting alone does not run inference. For at most 40 tools, a bounded ranking payload is sent directly. Larger indexes first use AI to expand the user's query into at most eight search terms; local lexical retrieval selects up to 40 candidates, then ranking receives at most 160,000 bytes of candidate records. Descriptions are shortened to 1,200 characters, capabilities to the first eight, and the complete selected record must fit before it is added. This does not guarantee exhaustive global semantic matching. AI returns at most five distinct known candidate IDs, reasons, and `good`/`partial` fits; invented/duplicate IDs and malformed output are rejected. Query and metadata are untrusted, with inference tools disabled. Viewing results never installs or executes a tool.
 
-Chrome/Edge website AI search uses Connector ID `kkmffpbghoojlnldpdolonpjmkhdenkh`. Its only browser permission is native messaging, and external messages must come from the exact HTTPS marketplace origin in a top-level tab. Its public protocol permits only status, bounded discovery search, and cancellation; it cannot expose general AI, settings, files, shell commands, or installation. The native endpoint reads the installed public index location rather than any URL supplied by the website. Without the Connector, website keyword search remains available and setup links explain how to enable AI search. Browser AI search uses saved model settings and returns model/revision/stale information. The [client protocol](docs/MacHelper-Protocol.md) defines both message envelopes.
+Website AI search connects to `http://127.0.0.1:43827` inside the running MacHelper 6.5 app. Only the exact origin `https://local-ai-extension.nelson007.com` is accepted, with strict Host/CORS/request checks. The service exposes status, short-lived session creation, bounded search, and owner-scoped cancellation. A session token is random, memory-only, expires after 30 minutes, and is required for search/cancel; it cannot authorize general AI prompts, settings, files, shell commands, or installation. The endpoint reads the configured public index rather than a URL supplied by the website. Website results include model/revision/stale information. The [client protocol](docs/MacHelper-Protocol.md#website-local-discovery-machelper-65) defines the HTTP request and response contract.
+
+Local connection starts from an explicit website action so a browser can request local/loopback network permission with clear context. Page loads, language changes, and demonstrations do not initiate it. Users can install Chrome or Edge before or after MacHelper, or reinstall a browser: website search uses no browser extension/profile registration. A new profile or clean reinstall may need local-access approval and a new session. Closing Settings leaves the listener running; quitting MacHelper stops it and invalidates sessions. Reopening the app and reconnecting recovers the connection. Keyword search remains available when MacHelper is unavailable or local access is denied. The former Connector is removed from current tool listings and source; immutable published ZIPs remain available for older consumers. Its Native Messaging search action remains a compatibility interface, rather than the current website transport.
 
 ## 11. Data handling and trust boundaries
 
@@ -228,7 +231,7 @@ Selected text, drafts, downloaded code, and AI answers are data. The default ext
 
 Application settings and source caches do not store selected text, complete AI request payloads, or generated answers. Source caches include tool code, resources, and static prompt templates. Normal marketplace HTTP access logging may still occur. Provider-side retention or diagnostic records are outside this project's control; an ephemeral request does not guarantee zero records everywhere. ChatGPT account credentials remain with its installed provider, and Linux deployment does not require model credentials.
 
-Use explicit permission review and least-privilege capabilities for new source tools. MessageHelper browser permissions remain restricted to supported Upwork routes, local extension storage, and Native Messaging. The Connector requests only Native Messaging and restricts external senders to the official marketplace. No wildcard native-messaging allowlist is used. Production documentation and artifacts must exclude private environment files, credentials, and real client conversations.
+Use explicit permission review and least-privilege capabilities for new source tools. MessageHelper browser permissions remain restricted to supported Upwork routes, local extension storage, and Native Messaging. The website’s local service binds only to IPv4 loopback, verifies the exact official HTTPS Origin and Host, uses bounded requests and expiring sessions, and accepts only discovery actions. It stores no queries, results, or session tokens on disk. No wildcard native-messaging allowlist is used. Production documentation and artifacts must exclude private environment files, credentials, and real client conversations.
 
 ## 12. Verification and change guidance
 
@@ -239,7 +242,7 @@ Use explicit permission review and least-privilege capabilities for new source t
 | Browser controls | `npm test` and the extension's safe test page; verify Apply/Undo with disabled Send and zero-submit sentinels. |
 | Install/startup/browser registration | Python installer tests and an isolated installation check; preserve existing settings and unrelated registrations. |
 | Marketplace/packages/deployment | Website build/verification and deployment tests; verify source inventories, download metadata, HTTPS health, and rollback prerequisites. |
-| Public discovery/search | Descriptor/index validation, mocked AI ranking/ID checks, connector origin/cancel tests, `scripts/test-discovery.py` for host framing, and website UI tests; live AI remains separate. |
+| Public discovery/search | Descriptor/index validation, mocked AI ranking/ID checks, local-service origin/host/session/cancel/socket tests, `scripts/test-discovery.py` for compatibility host framing, `scripts/test-marketplace-service.py` for the running HTTP service, and website HTTP/UI tests; live AI remains separate. |
 
 Live AI checks are separate because they consume the configured account's usage. They use synthetic public sentences and never send Upwork messages. Documentation-only changes need link/command/configuration checks rather than a complete application rebuild. Exact commands are in [README.md](README.md), the [AI extension guide](AI_EXTENSION_GUIDE.md), and the public website documentation.
 

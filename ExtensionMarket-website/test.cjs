@@ -15,31 +15,43 @@ const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 const clone = value => JSON.parse(JSON.stringify(value));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function page({ base = 'https://market.example/extension-market/', data = clone(catalog), failFirst = false, languages = ['en-US'], storedLanguage = null, storageDisabled = false, bridge = null } = {}) {
+async function page({ base = 'https://market.example/extension-market/', data = clone(catalog), failFirst = false, languages = ['en-US'], storedLanguage = null, storageDisabled = false, service = null, beforeApp = null } = {}) {
   const dom = new JSDOM(html, { url: base, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
   Object.defineProperty(window.navigator, 'languages', { value: languages });
   if (storedLanguage) window.localStorage.setItem('localaibasetools.website.language', storedLanguage);
   if (storageDisabled) Object.defineProperty(window, 'localStorage', { get() { throw new Error('Storage disabled fixture'); } });
-  const requests = [];
+  const requests = [], localRequests = [];
   window.TextEncoder = global.TextEncoder;
-  if(bridge) window.chrome={runtime:{sendMessage:bridge,lastError:null}};
   window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   window.HTMLDialogElement.prototype.close = function () {
     this.removeAttribute('open');
     this.dispatchEvent(new window.Event('close'));
   };
-  window.fetch = async input => {
+  window.fetch = async (input, options = {}) => {
     requests.push(String(input));
+    if (String(input).startsWith('http://127.0.0.1:43827/')) {
+      const call = { path: new URL(input).pathname, options, body: options.body ? JSON.parse(options.body) : undefined };
+      localRequests.push(call);
+      if (!service) throw new TypeError('Local service unavailable fixture');
+      const reply = await new Promise((resolve, reject) => {
+        const abort = () => reject(new window.DOMException('Aborted fixture', 'AbortError'));
+        if (options.signal?.aborted) { abort(); return; }
+        options.signal?.addEventListener('abort', abort, { once:true });
+        Promise.resolve().then(()=>service(call)).then(resolve,reject).finally(()=>options.signal?.removeEventListener('abort',abort));
+      });
+      return { ok: (reply.status || 200) < 400, status: reply.status || 200, json: async () => clone(reply.body || reply) };
+    }
     if (failFirst && requests.length === 1) throw new Error('Offline fixture');
     return { ok: true, json: async () => data };
   };
   window.eval(localesScript);
   window.MARKET_PREVIEW_TRANSLATIONS = clone(previewCatalogs);
   window.eval(i18nScript);
+  beforeApp?.(window);
   window.eval(script);
   await delay(0);
-  return { dom, window, document: window.document, requests, close: () => window.close() };
+  return { dom, window, document: window.document, requests, localRequests, close: () => window.close() };
 }
 function input(view, selector, value, type = 'input') {
   const element = view.document.querySelector(selector);
@@ -436,58 +448,90 @@ test('authored interface copy and first-party catalog text have translations in 
   } finally { dom.window.close(); }
 });
 
-test('description search is explicit, uses the connector, and renders only real tool IDs as safe suggestions', async () => {
-  const calls=[];let complete;
-  const view=await page({bridge:(id,message,callback)=>{
-    calls.push({id,message});
-    if(message.action==='status')callback({ok:true,compatible:true,version:'6.3.0'});
-    if(message.action==='search')complete=callback;
-  }});
+const fixtureToken = 'a'.repeat(64);
+function localService(handler = () => ({ok:true,search:{matches:[],noMatchReason:'No matching tool.'}})) {
+  return call => {
+    if (call.path === '/v1/status') return {ok:true,version:'6.5.0',protocolVersion:1};
+    if (call.path === '/v1/session') return {ok:true,token:fixtureToken,expiresIn:1800};
+    if (call.path === '/v1/cancel') return {ok:true,cancelled:true};
+    return handler(call);
+  };
+}
+async function connect(view) {
+  view.document.querySelector('#connect-machelper').click();
+  await until(()=>/connected\.|已连接/.test(view.document.querySelector('#connection-status').textContent));
+}
+
+test('extension-free search connects explicitly and sends only authenticated bounded search requests', async () => {
+  let complete;
+  const view = await page({service:localService(call=>new Promise(resolve=>{complete=resolve;}))});
   try {
-    view.document.querySelector('#description-mode').click();await delay(0);
+    assert.equal(view.localRequests.length,0,'Page load must not contact a local service.');
+    view.document.querySelector('#description-mode').click();
     input(view,'#need-query','Help me understand words while reading.');
-    assert.equal(calls.filter(call=>call.message.action==='search').length,0,'Typing must not spend AI usage');
     view.document.querySelector('.example-query').click();
-    assert.equal(calls.filter(call=>call.message.action==='search').length,0,'Examples only fill the input');
+    input(view,'#site-language','es','change');
+    input(view,'#site-language','en','change');
+    assert.equal(view.localRequests.length,0,'Choosing modes, typing, examples and languages must not contact MacHelper.');
+    assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
+    await connect(view);
+    assert.deepEqual(view.localRequests.map(call=>call.path),['/v1/status','/v1/session']);
+    assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
+    assert.equal(view.document.querySelector('#connect-machelper').textContent,'Reconnect MacHelper');
+    for (const call of view.localRequests) {
+      assert.equal(call.options.headers['X-MacHelper-Client'],'extension-market');
+      assert.equal(call.options.credentials,'omit');
+      assert.equal(call.options.referrerPolicy,'no-referrer');
+      assert.equal(call.options.cache,'no-store');
+      assert.equal(call.options.headers.Authorization,undefined);
+    }
     view.document.querySelector('#find-with-ai').click();
-    assert.equal(calls.at(-1).id,'kkmffpbghoojlnldpdolonpjmkhdenkh');
-    const request=calls.at(-1).message;
-    assert.equal(request.type,'machelper.discovery'); assert.equal(request.action,'search');
-    assert.match(request.requestId,/^[A-Za-z0-9_-]{1,80}$/);
+    await until(()=>typeof complete==='function');
+    const call=view.localRequests.at(-1);
+    assert.equal(call.path,'/v1/search');
+    assert.equal(call.options.headers.Authorization,`Bearer ${fixtureToken}`);
+    assert.equal(call.options.headers['Content-Type'],'application/json');
+    assert.deepEqual(Object.keys(call.body).sort(),['language','query','requestId']);
+    assert.match(call.body.requestId,/^[A-Za-z0-9_-]{1,80}$/);
     assert.equal(view.document.querySelector('#cancel-ai-search').hidden,false);
     complete({ok:true,search:{model:'fixture-model',stale:true,matches:[
       {id:'invented.tool',fit:'good',reason:'Made up'},
       {id:'com.localaibasetools.translation',fit:'good',reason:'<img id="discovery-injection" src=x onerror=alert(1)>'},
       {id:'com.localaibasetools.translation',fit:'good',reason:'Duplicate'}
-    ]}});await delay(0);
+    ]}});
+    await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
     assert.equal(view.document.querySelectorAll('.extension-card').length,1);
     assert.equal(view.document.querySelector('.discovery-match strong').textContent,'Good fit');
     assert.match(view.document.querySelector('.discovery-match p').textContent,/<img/);
     assert.equal(view.document.querySelector('#discovery-injection'),null);
     assert.match(view.document.querySelector('#discovery-model').textContent,/fixture-model.*cached/);
     assert.equal(view.window.location.hash,'','Search must not install or open a tool');
+    assert.equal(view.window.localStorage.length,1,'Only the interface language may be persisted.');
+    assert.equal(view.window.localStorage.getItem('localaibasetools.website.language'),'en');
   }finally{view.close();}
 });
 
-test('cancel stops the current bridge request and ignores its late response; no-match and query edits recover', async()=>{
-  const calls=[];const searches=[];
-  const view=await page({bridge:(id,message,callback)=>{
-    calls.push(message);
-    if(message.action==='status')callback({ok:true,compatible:true});
-    if(message.action==='search')searches.push(callback);
-    if(message.action==='cancel')callback({ok:true,cancelled:true});
-  }});
+test('cancel aborts the owned request, ignores late results, and supports another explicit search', async()=>{
+  const searches=[];
+  const view=await page({service:localService(call=>new Promise(resolve=>searches.push(resolve)))});
   try{
-    view.document.querySelector('#description-mode').click();await delay(0);
+    view.document.querySelector('#description-mode').click();
+    await connect(view);
     input(view,'#need-query','record my voice');view.document.querySelector('#find-with-ai').click();
-    const request=calls.find(call=>call.action==='search');
+    await until(()=>searches.length===1);
+    const request=view.localRequests.find(call=>call.path==='/v1/search');
     view.document.querySelector('#cancel-ai-search').click();
-    assert.equal(calls.at(-1).action,'cancel');assert.equal(calls.at(-1).requestId,request.requestId);
+    const cancel=view.localRequests.at(-1);
+    assert.equal(cancel.path,'/v1/cancel');assert.equal(cancel.body.requestId,request.body.requestId);
+    assert.equal(cancel.options.headers.Authorization,request.options.headers.Authorization);
+    assert.equal(request.options.signal.aborted,true);
     searches[0]({ok:true,search:{matches:[{id:catalog.extensions[0].id,fit:'good',reason:'Late'}]}});await delay(0);
     assert.equal(view.document.querySelector('.discovery-match'),null);
     assert.match(view.document.querySelector('#discovery-status').textContent,/cancelled/);
     view.document.querySelector('#find-with-ai').click();
-    searches[1]({ok:true,search:{matches:[],noMatchReason:'No current tool records audio.'}});await delay(0);
+    await until(()=>searches.length===2);
+    searches[1]({ok:true,search:{matches:[],noMatchReason:'No current tool records audio.'}});
+    await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
     assert.equal(view.document.querySelectorAll('.extension-card').length,0);
     assert.match(view.document.querySelector('#no-match-reason').textContent,/records audio/);
     input(view,'#need-query','translate a word');
@@ -496,57 +540,173 @@ test('cancel stops the current bridge request and ignores its late response; no-
   }finally{view.close();}
 });
 
-test('missing connector offers setup links while keyword search stays available on the website',async()=>{
+test('missing local service gives app setup guidance without extension installation while keyword search remains available',async()=>{
   const view=await page({storedLanguage:'zh-Hans'});
   try{
     input(view,'#search','Explain a selected word');
     assert.equal(view.document.querySelectorAll('.extension-card').length,1);
-    view.document.querySelector('#description-mode').click();await delay(0);
+    view.document.querySelector('#description-mode').click();
     input(view,'#need-query','A & B? 翻译');
-    const help=view.document.querySelector('#connector-help');
-    assert.equal(help.hidden,false);
-    assert.ok(help.querySelector('a[href="#extension/machelper-connector"]'));
+    const help=view.document.querySelector('#local-connection-help');
+    assert.ok(help.querySelector('a[href="machelper://open"]'));
     assert.ok(help.querySelector('a[href="#get-machelper"]'));
-    assert.equal(view.document.querySelector('#open-search-in-machelper'),null);
+    assert.equal(view.document.querySelector('a[href="#extension/machelper-connector"]'),null);
     assert.equal(view.document.querySelector('a[href^="machelper://search"]'),null);
-    view.document.querySelector('#find-with-ai').click();await delay(0);
-    assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
+    assert.equal(view.localRequests.length,0);
+    view.document.querySelector('#connect-machelper').click();
+    await until(()=>!view.document.querySelector('#connect-machelper').disabled);
+    assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
     assert.match(view.document.querySelector('#discovery-status').textContent,/MacHelper/);
     assert.equal(view.window.location.hash,'');
-    input(view,'#need-query','x'.repeat(2001));view.document.querySelector('#find-with-ai').click();await delay(0);
-    assert.match(view.document.querySelector('#discovery-status').textContent,/2,000/);
+    assert.equal(view.localRequests.length,1);
   }finally{view.close();}
 });
 
-test('website-only AI search rejects blank, overlong, and NUL-containing needs without invoking the bridge',async()=>{
-  const requests=[];
-  const view=await page({bridge:(_id,message,callback)=>{
-    requests.push(message);
-    callback(message.action==='status'?{ok:true,compatible:true}:{ok:true,search:{matches:[],noMatchReason:'No matching tool.'}});
-  }});
+test('invalid needs never start AI and a valid need is passed unchanged after connecting',async()=>{
+  const view=await page({service:localService()});
   try{
-    view.document.querySelector('#description-mode').click();await delay(0);
+    view.document.querySelector('#description-mode').click();
+    await connect(view);
     for(const query of ['', '  \n ', 'a'.repeat(2001),'word\0private']){
       input(view,'#need-query',query);
       view.document.querySelector('#find-with-ai').click();await delay(0);
       assert.match(view.document.querySelector('#discovery-status').textContent,/1–2,000/);
-      assert.equal(requests.filter(request=>request.action==='search').length,0);
-      assert.equal(view.document.querySelector('a[href^="machelper://search"]'),null);
+      assert.equal(view.localRequests.filter(call=>call.path==='/v1/search').length,0);
     }
     input(view,'#need-query','Explain a selected word');
-    view.document.querySelector('#find-with-ai').click();await delay(0);
-    assert.equal(requests.filter(request=>request.action==='search').length,1);
-    assert.equal(requests.find(request=>request.action==='search').query,'Explain a selected word');
+    view.document.querySelector('#find-with-ai').click();
+    await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
+    const searches=view.localRequests.filter(call=>call.path==='/v1/search');
+    assert.equal(searches.length,1);
+    assert.equal(searches[0].body.query,'Explain a selected word');
     assert.equal(view.document.querySelector('#no-match-reason').textContent,'No matching tool.');
+  }finally{view.close();}
+});
+
+test('permission denial, incompatible host and connection timeout have actionable recovery without invoking AI',async()=>{
+  for (const scenario of ['permission','version','timeout']) {
+    let fireTimeout;
+    const view=await page({
+      service:scenario==='timeout' ? ()=>new Promise(()=>{}) : ()=>({ok:true,version:'6.4.0',protocolVersion:1}),
+      beforeApp:window=>{
+        if(scenario==='permission')Object.defineProperty(window.navigator,'permissions',{value:{query:async()=>({state:'denied'})}});
+        if(scenario==='timeout'){
+          const original=window.setTimeout.bind(window);
+          window.setTimeout=(callback,ms,...args)=>{if(ms===30000){fireTimeout=callback;return original(()=>{},100000);}return original(callback,ms,...args);};
+        }
+      }
+    });
+    try {
+      view.document.querySelector('#description-mode').click();
+      view.document.querySelector('#connect-machelper').click();
+      if(scenario==='timeout'){await until(()=>fireTimeout);fireTimeout();}
+      await until(()=>!view.document.querySelector('#connect-machelper').disabled);
+      assert.match(view.document.querySelector('#discovery-status').textContent,scenario==='permission'?/site settings/:scenario==='version'?/version 6.5/:/timed out/);
+      assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
+      assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false);
+      if(scenario==='permission')assert.equal(view.localRequests.length,0);
+    } finally{view.close();}
+  }
+});
+
+test('expired sessions and app restarts require reconnect and never silently repeat AI; busy and provider failures retain the session',async()=>{
+  let searches=0, failure='unauthorized';
+  const view=await page({service:localService(()=>{searches++;return {status:failure==='busy'?429:failure==='search_failed'?502:401,body:{ok:false,code:failure,error:'Fixture diagnostic'}};})});
+  try {
+    view.document.querySelector('#description-mode').click();await connect(view);
+    input(view,'#need-query','translate a selected word');
+    for (const code of ['unauthorized','busy','search_failed']) {
+      failure=code;
+      if(code==='busy')await connect(view);
+      view.document.querySelector('#find-with-ai').click();
+      await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
+      assert.equal(searches,['unauthorized','busy','search_failed'].indexOf(code)+1);
+      assert.match(view.document.querySelector('#discovery-status').textContent,code==='unauthorized'?/expired/:code==='busy'?/busy/:/AI Connection/);
+      assert.equal(view.document.querySelector('#find-with-ai').disabled,code==='unauthorized');
+    }
+    const before=view.localRequests.length;
+    view.window.dispatchEvent(new view.window.Event('pagehide'));
+    view.window.dispatchEvent(new view.window.Event('pageshow'));
+    assert.equal(view.document.querySelector('#find-with-ai').disabled,true,'A page restored after navigation must reconnect.');
+    assert.equal(view.localRequests.length,before);
+  }finally{view.close();}
+});
+
+test('memory-only connection expires locally and a newly installed browser can create a fresh session',async()=>{
+  let now=1700000000000, sessions=0, searches=0;
+  const service=call=>{
+    if(call.path==='/v1/session')return {ok:true,token:String(++sessions).repeat(64),expiresIn:1800};
+    if(call.path==='/v1/search'){searches++;return {ok:true,search:{matches:[],noMatchReason:'No matching tool.'}};}
+    return {ok:true,version:'6.5.0',protocolVersion:1};
+  };
+  const first=await page({service,beforeApp:window=>{window.Date.now=()=>now;}});
+  try{
+    first.document.querySelector('#description-mode').click();await connect(first);
+    input(first,'#need-query','translate a selected word');
+    now+=1800001;
+    first.document.querySelector('#find-with-ai').click();
+    assert.equal(searches,0,'An expired browser session must never invoke inference.');
+    assert.match(first.document.querySelector('#discovery-status').textContent,/expired/);
+    assert.equal(first.document.querySelector('#find-with-ai').disabled,true);
+    await connect(first);
+    first.document.querySelector('#find-with-ai').click();
+    await until(()=>first.document.querySelector('#cancel-ai-search').hidden);
+    assert.equal(searches,1);
+    assert.equal(sessions,2);
+    assert.equal(first.window.localStorage.length,0,'Tokens and searches must stay out of browser storage.');
+  }finally{first.close();}
+  const fresh=await page({service});
+  try{
+    assert.equal(fresh.localRequests.length,0);
+    fresh.document.querySelector('#description-mode').click();
+    assert.equal(fresh.document.querySelector('#find-with-ai').disabled,true);
+    await connect(fresh);
+    assert.equal(sessions,3,'A fresh browser/profile needs only a new local session, without browser registration or an extension.');
+    assert.equal(fresh.document.querySelector('#find-with-ai').disabled,false);
+    assert.equal(fresh.window.localStorage.length,0);
+  }finally{fresh.close();}
+});
+
+test('malformed handshakes never enable search and hiding a page aborts an unfinished connection',async()=>{
+  for(const reply of [{ok:true,token:'unsafe',expiresIn:1800},{ok:true,token:fixtureToken+'\n',expiresIn:1800},{ok:true,token:fixtureToken,expiresIn:0},{ok:true,token:fixtureToken,expiresIn:1801}]){
+    const view=await page({service:call=>call.path==='/v1/status'?{ok:true,version:'6.5.0',protocolVersion:1}:reply});
+    try{
+      view.document.querySelector('#description-mode').click();
+      view.document.querySelector('#connect-machelper').click();
+      await until(()=>!view.document.querySelector('#connect-machelper').disabled);
+      assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
+      assert.match(view.document.querySelector('#discovery-status').textContent,/Could not reach/);
+      assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false);
+    }finally{view.close();}
+  }
+  const badVersion=await page({service:()=>({ok:true,version:'6.5.0\n',protocolVersion:1})});
+  try{
+    badVersion.document.querySelector('#description-mode').click();
+    badVersion.document.querySelector('#connect-machelper').click();
+    await until(()=>!badVersion.document.querySelector('#connect-machelper').disabled);
+    assert.equal(badVersion.document.querySelector('#find-with-ai').disabled,true);
+    assert.match(badVersion.document.querySelector('#discovery-status').textContent,/version 6.5/);
+    assert.deepEqual(badVersion.localRequests.map(call=>call.path),['/v1/status']);
+  }finally{badVersion.close();}
+  let resolveStatus;
+  const view=await page({service:()=>new Promise(resolve=>{resolveStatus=resolve;})});
+  try{
+    view.document.querySelector('#description-mode').click();
+    view.document.querySelector('#connect-machelper').click();
+    await until(()=>resolveStatus);
+    const status=view.localRequests[0];
+    view.window.dispatchEvent(new view.window.Event('pagehide'));
+    assert.equal(status.options.signal.aborted,true);
+    resolveStatus({ok:true,version:'6.5.0',protocolVersion:1});await delay(0);
+    view.window.dispatchEvent(new view.window.Event('pageshow'));
+    assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
+    assert.equal(view.localRequests.length,1,'A closed document must not finish creating a browser session.');
   }finally{view.close();}
 });
 
 test('illustration copy and every preview location follow all interface languages without AI or changing a query', async () => {
   let inferenceCalls = 0;
-  const view = await page({ bridge: (_id, message, callback) => {
-    if (message.action === 'search') inferenceCalls++;
-    callback({ok:true, version:'6.3.1', connectorVersion:'1.0.0', compatible:true});
-  }});
+  const view = await page({ service: localService(() => { inferenceCalls++; return {ok:true,search:{matches:[],noMatchReason:'No match'}}; }) });
   try {
     view.document.querySelector('#description-mode').click();
     const draft = 'Keep this request exactly as I typed it.';
@@ -558,7 +718,7 @@ test('illustration copy and every preview location follow all interface language
       for (const element of view.document.querySelectorAll('[data-preview-key]')) {
         assert.equal(element.textContent, previewCatalogs[code][element.dataset.previewKey], `${code}: decorative illustration copy`);
       }
-      assert.equal(view.document.querySelector('.preview-popover strong').textContent, previewCatalogs[code]['hero.targetLanguage']);
+      assert.equal(view.document.querySelector('.preview-popover strong').textContent, previewCatalogs[code]['demo.panelTitle']);
       for (const image of view.document.querySelectorAll('img[src*="-preview.svg"]')) {
         assert.ok(image.src.includes(`/extension-market/assets/localized/${code}/`), `${code}: ${image.src}`);
         const prefix = image.src.endsWith('translation-preview.svg') ? 'translation' : 'messagehelper';
@@ -576,9 +736,9 @@ test('localized assets preserve mounted prefixes and never rewrite icons or exte
   data.extensions.find(tool => tool.slug === 'translation').screenshots[0].src = '/assets/translation-preview.svg';
   const view = await page({data, storedLanguage:'es'});
   try {
-    const image = view.document.querySelector('.extension-card a[href="#extension/translation"] img');
-    assert.equal(image.src, 'https://market.example/extension-market/assets/localized/es/translation-preview.svg');
+    assert.equal(view.document.querySelector('.extension-card img[src$="translation-preview.svg"]'), null);
     const api = view.window.MarketI18n;
+    assert.equal(api.previewSource('/assets/translation-preview.svg'), 'https://market.example/extension-market/assets/localized/es/translation-preview.svg');
     for (const source of ['assets/mac-helper.png', 'https://external.example/assets/translation-preview.svg', '//external.example/assets/translation-preview.svg', 'assets/third-party-preview.svg', 'assets/translation-preview.svg?other=1']) {
       assert.equal(api.previewSource(source), source);
     }
@@ -592,9 +752,9 @@ test('illustration translations remain text even when a catalog contains markup'
   const view = await page();
   try {
     const malicious = '<img id="preview-injection" src=x onerror=alert(1)> & synthetic';
-    view.window.MARKET_PREVIEW_TRANSLATIONS.es['hero.copy'] = malicious;
+    view.window.MARKET_PREVIEW_TRANSLATIONS.es['demo.copy'] = malicious;
     input(view, '#site-language', 'es', 'change');
-    assert.equal(view.document.querySelector('[data-preview-key="hero.copy"]').textContent, malicious);
+    assert.equal(view.document.querySelector('[data-preview-key="demo.copy"]').textContent, malicious);
     assert.equal(view.document.querySelector('#preview-injection'), null);
   } finally { view.close(); }
 });
@@ -604,7 +764,7 @@ test('decorative hero text cannot bypass translation coverage', () => {
   try {
     const {document, NodeFilter} = dom.window;
     const walker = document.createTreeWalker(document.querySelector('.hero-stage'), NodeFilter.SHOW_TEXT);
-    const symbols = new Set(['A', '文', '×', '↘']);
+    const symbols = new Set(['A', '文', '×', '↘', '01', '02', '03']);
     let node;
     while ((node = walker.nextNode())) {
       const value = node.textContent.trim();
@@ -613,4 +773,194 @@ test('decorative hero text cannot bypass translation coverage', () => {
       assert.ok(key && Object.hasOwn(previewCatalogs.en, key), `Unmapped illustration text: ${value}`);
     }
   } finally { dom.window.close(); }
+});
+
+function demoEnvironment({ reducedMotion = false } = {}) {
+  let window, observer, hidden = false;
+  const timers = new Map(), mediaListeners = new Set();
+  const media = {
+    matches: reducedMotion,
+    addEventListener(type, callback) { if (type === 'change') mediaListeners.add(callback); }
+  };
+  return {
+    install(browserWindow) {
+      window = browserWindow;
+      Object.defineProperty(window.document, 'hidden', { configurable: true, get: () => hidden });
+      window.matchMedia = query => {
+        assert.equal(query, '(prefers-reduced-motion: reduce)');
+        return media;
+      };
+      window.IntersectionObserver = class {
+        constructor(callback, options) { observer = { callback, options, targets: new Set(), disconnected: false }; }
+        observe(target) { observer.targets.add(target); }
+        unobserve(target) { observer.targets.delete(target); }
+        disconnect() { observer.targets.clear(); observer.disconnected = true; }
+      };
+      const setTimer = window.setTimeout.bind(window), clearTimer = window.clearTimeout.bind(window);
+      window.setTimeout = (callback, milliseconds, ...args) => {
+        const id = setTimer(() => { timers.delete(id); callback(...args); }, milliseconds);
+        timers.set(id, { milliseconds });
+        return id;
+      };
+      window.clearTimeout = id => { timers.delete(id); clearTimer(id); };
+    },
+    intersect(target, ratio) {
+      if (typeof target === 'string') target = window.document.querySelector(target);
+      assert.ok(observer.targets.has(target), 'The demo must be observed before receiving visibility changes.');
+      assert.ok(Array.from(observer.options.threshold).includes(0.2));
+      observer.callback([{ target, isIntersecting: ratio > 0, intersectionRatio: ratio }]);
+    },
+    visibility(isHidden) {
+      hidden = isHidden;
+      window.document.dispatchEvent(new window.Event('visibilitychange'));
+    },
+    motion(reduce) {
+      media.matches = reduce;
+      for (const listener of mediaListeners) listener({ matches: reduce });
+    },
+    observed(target) { return observer.targets.has(target); },
+    get pendingTimers() { return timers.size; },
+    get disconnected() { return observer.disconnected; }
+  };
+}
+
+test('all Translation showcases share the contextual-word demo, localized content and unique accessible identities', async () => {
+  const view = await page();
+  try {
+    const hero = view.document.querySelector('#translation-demo');
+    const card = [...view.document.querySelectorAll('.extension-card')].find(node => node.querySelector('.card-heading a')?.getAttribute('href') === '#extension/translation');
+    assert.ok(hero);
+    assert.ok(card.querySelector('.translation-demo'));
+    assert.equal(card.querySelector('.demo-control').closest('a'), null, 'A playback button must not be nested inside a navigation link.');
+    assert.ok(view.document.querySelector('#translation-spotlight .translation-demo'));
+    assert.equal(view.document.querySelectorAll('.translation-demo').length, 3);
+    view.window.location.hash = '#extension/translation';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    assert.ok(view.document.querySelector('#overview-panel .translation-demo'));
+    assert.equal(view.document.querySelectorAll('.translation-demo').length, 4);
+    assert.equal(view.document.querySelector('img[src$="translation-preview.svg"]'), null, 'No Translation showcase should retain the former static illustration.');
+    const ids = [...view.document.querySelectorAll('[id]')].map(node => node.id);
+    assert.equal(new Set(ids).size, ids.length, 'Cloning the demo must not duplicate IDs.');
+    for (const code of Object.keys(previewCatalogs)) {
+      input(view, '#site-language', code, 'change');
+      for (const demo of view.document.querySelectorAll('.translation-demo')) {
+        for (const element of demo.querySelectorAll('[data-preview-key]')) {
+          assert.equal(element.textContent, previewCatalogs[code][element.dataset.previewKey], `${code}: every cloned demo follows the language choice`);
+        }
+        assert.equal(demo.querySelector('[data-preview-key="demo.title"]').textContent, 'Translation');
+        const selectedWord = demo.querySelector('[data-preview-key="demo.word"]');
+        assert.equal(selectedWord.textContent, 'hand');
+        assert.ok(selectedWord.closest('mark'), 'Only the contextual word should be highlighted.');
+        assert.equal(['demo.sentenceBefore', 'demo.word', 'demo.sentenceAfter'].map(key => demo.querySelector(`[data-preview-key="${key}"]`).textContent).join(''), 'Could you give me a hand with this report?');
+        assert.ok(demo.querySelector('[data-preview-key="demo.meaning"]').textContent);
+        assert.ok(demo.querySelector('[data-preview-key="demo.sentenceTranslation"]').textContent);
+        for (const attribute of ['aria-labelledby', 'aria-describedby']) {
+          const target = view.document.getElementById(demo.getAttribute(attribute));
+          assert.ok(target && demo.contains(target), `${attribute} must resolve within the same demo`);
+        }
+      }
+    }
+    assert.match(previewCatalogs.en['demo.meaning'], /help/);
+    assert.notEqual(previewCatalogs.en['demo.meaningLabel'], previewCatalogs.en['demo.sentenceLabel']);
+    assert.equal(view.requests.length, 1, 'Reusing or localizing a demo requires no new requests.');
+  } finally { view.close(); }
+});
+
+test('visible Translation demos autoplay repeatedly, support manual stop and replay, and suspend outside the active view without requests or timers', async () => {
+  const environment = demoEnvironment();
+  const localCalls = [];
+  const view = await page({ beforeApp: environment.install, service: call => localCalls.push(call) });
+  try {
+    const demo = view.document.querySelector('#translation-demo');
+    const control = demo.querySelector('.demo-control');
+    const playing = () => demo.classList.contains('demo-playing');
+    assert.equal(control.hidden, false);
+    environment.intersect(demo, 0.19);
+    assert.equal(playing(), false);
+    environment.intersect(demo, 0.2);
+    assert.equal(playing(), true);
+    assert.equal(control.textContent, previewCatalogs.en['demo.stop']);
+    assert.equal(environment.pendingTimers, 0, 'CSS playback must not schedule JavaScript completion or loop timers.');
+    environment.intersect(demo, 0);
+    assert.equal(playing(), false);
+    environment.intersect(demo, 1);
+    assert.equal(playing(), true, 'Returning to a visible showcase should automatically resume playback.');
+
+    control.click();
+    assert.equal(playing(), false);
+    assert.equal(control.textContent, previewCatalogs.en['demo.replay']);
+    environment.intersect(demo, 0);
+    environment.intersect(demo, 1);
+    assert.equal(playing(), false, 'An explicit Stop must survive visibility changes.');
+    control.click();
+    assert.equal(playing(), true);
+
+    environment.visibility(true);
+    assert.equal(playing(), false);
+    environment.visibility(false);
+    assert.equal(playing(), true);
+    input(view, '#site-language', 'ar', 'change');
+    assert.equal(view.document.documentElement.dir, 'rtl');
+    assert.equal(control.textContent, previewCatalogs.ar['demo.stop']);
+    assert.equal(demo.querySelector('[data-preview-key="demo.meaning"]').textContent, previewCatalogs.ar['demo.meaning']);
+
+    const oldCard = view.document.querySelector('.extension-card .translation-demo');
+    assert.equal(environment.observed(oldCard), true);
+    input(view, '#search', 'no-match-for-cleanup');
+    assert.equal(oldCard.isConnected, false);
+    assert.equal(environment.observed(oldCard), false, 'Filtered-out demos must be unobserved.');
+    input(view, '#search', '');
+    const newCard = view.document.querySelector('.extension-card .translation-demo');
+    assert.ok(newCard && newCard !== oldCard);
+    assert.equal(environment.observed(newCard), true);
+    environment.intersect(newCard, 1);
+    assert.equal(newCard.classList.contains('demo-playing'), true);
+
+    view.window.location.hash = '#extension/translation';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    assert.equal(playing(), false, 'Background showcases should suspend while a modal is open.');
+    assert.equal(newCard.classList.contains('demo-playing'), false);
+    const detail = view.document.querySelector('#overview-panel .translation-demo');
+    environment.intersect(detail, 1);
+    assert.equal(detail.classList.contains('demo-playing'), true);
+    view.document.querySelector('#install-tab').click();
+    assert.equal(detail.classList.contains('demo-playing'), false, 'A hidden overview tab must not keep animating.');
+    view.document.querySelector('#overview-tab').click();
+    assert.equal(detail.classList.contains('demo-playing'), true);
+    view.document.querySelector('#tool-dialog').close();
+    assert.equal(playing(), true);
+    assert.equal(detail.classList.contains('demo-playing'), false);
+    view.window.dispatchEvent(new view.window.Event('pagehide'));
+    assert.equal(playing(), false);
+    assert.equal(environment.disconnected, true);
+    view.window.dispatchEvent(new view.window.Event('pageshow'));
+    assert.equal(environment.observed(demo), true, 'A page restored from the back/forward cache must observe its demos again.');
+    environment.intersect(demo, 1);
+    assert.equal(playing(), true);
+    assert.equal(environment.pendingTimers, 0);
+    assert.equal(view.requests.length, 1);
+    assert.deepEqual(localCalls, [], 'Playing or translating demo copy must not call MacHelper or AI.');
+  } finally { view.close(); }
+});
+
+test('every Translation demo respects reduced motion and resumes visible autoplay only when motion is allowed', async () => {
+  const environment = demoEnvironment({ reducedMotion: true });
+  const view = await page({ beforeApp: environment.install });
+  try {
+    const demos = [...view.document.querySelectorAll('.translation-demo')];
+    assert.equal(demos.length, 3);
+    for (const demo of demos) {
+      environment.intersect(demo, 1);
+      demo.querySelector('.demo-control').click();
+      assert.equal(demo.classList.contains('demo-playing'), false);
+      assert.equal(demo.querySelector('[data-preview-key="demo.meaning"]').textContent, previewCatalogs.en['demo.meaning']);
+    }
+    assert.equal(environment.pendingTimers, 0);
+    environment.motion(false);
+    for (const demo of demos) assert.equal(demo.classList.contains('demo-playing'), true);
+    environment.motion(true);
+    for (const demo of demos) assert.equal(demo.classList.contains('demo-playing'), false);
+    assert.equal(environment.pendingTimers, 0);
+    assert.equal(view.requests.length, 1);
+  } finally { view.close(); }
 });

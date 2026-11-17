@@ -241,5 +241,12 @@
   "Validating source…": "소스 검증 중…",
   "Version %@": "버전 %@",
   "Working…": "처리 중…",
-  "Working… · %@": "처리 중… · %@"
+  "Working… · %@": "처리 중… · %@",
+  "Website connection": "웹사이트 연결",
+  "Ready — no browser extension needed.": "준비되었습니다. 브라우저 확장이 필요하지 않습니다.",
+  "Starting website connection…": "웹사이트 연결을 시작하는 중…",
+  "Website connection is stopped.": "웹사이트 연결이 중지되었습니다.",
+  "Website connection could not start. Quit other copies of MacHelper and try again.": "연결을 시작할 수 없습니다. 다른 MacHelper 인스턴스를 종료한 후 다시 시도하세요.",
+  "Restart Connection": "연결 다시 시작",
+  "Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access.": "Extension Market의 필요한 기능 설명에서 연결하세요. 새로 설치하거나 재설치한 브라우저에서 로컬 접근 권한을 요청할 수 있습니다."
 }

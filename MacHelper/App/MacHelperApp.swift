@@ -82,6 +82,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var browserSupportTask: Task<Void, Never>?
     private var browserSupportFailure: String?
     private var browserSupportMenuItems: [NSMenuItem] = []
+    private let websiteService = MarketplaceLocalService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         createMenus()
@@ -94,6 +95,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
         general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
+        bindWebsiteConnectionControls()
         createWindow()
         startupTask = Task { [weak self] in
             guard let self else { return }
@@ -103,6 +105,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             self.processMarketplaceRequests()
         }
         startBrowserSupportBootstrap()
+        startWebsiteConnection()
         // The first Apple open event carries the login launch reason. Do not
         // open a window here: a login launch must remain in the background.
         if CommandLine.arguments.contains("--settings") { showSettings(tab: 1) }
@@ -132,6 +135,12 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return }
         let development = Bundle.main.object(forInfoDictionaryKey: MarketplaceConfiguration.developmentKey) as? Bool == true
         for url in urls.prefix(8) {
+            if url.absoluteString == "machelper://open" {
+                if websiteService.state == .stopped { startWebsiteConnection() }
+                pendingSettingsTab = sourceManager == nil ? 0 : nil
+                if sourceManager != nil { showSettings(tab: 0) }
+                continue
+            }
             do {
                 let request = try MarketplaceInstallRequest(url: url, allowLocalDevelopment: development)
                 guard marketplaceRequests.count < 8 else { break }
@@ -144,6 +153,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminating = true
         browserSupportTask?.cancel()
+        websiteService.stop()
         marketplaceTask?.cancel()
         marketplaceRequests.removeAll()
         startupTask?.cancel()
@@ -351,6 +361,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         ai = AISettingsViewController()
+        bindWebsiteConnectionControls()
         general = GeneralSettingsViewController(login: login)
         general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
         createMenus()
@@ -430,6 +441,21 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: L("OK"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    private func bindWebsiteConnectionControls() {
+        ai.websiteConnectionState = websiteService.state
+        ai.onRestartWebsiteConnection = { [weak self] in
+            guard let self else { return }
+            self.websiteService.stop()
+            self.startWebsiteConnection()
+        }
+        websiteService.onStateChange = { [weak self] state in self?.ai.websiteConnectionState = state }
+    }
+
+    private func startWebsiteConnection() {
+        do { try websiteService.start() }
+        catch { ai.websiteConnectionState = .failed(error.localizedDescription) }
     }
 
     private func startBrowserSupportBootstrap() {

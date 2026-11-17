@@ -17,6 +17,11 @@ final class AISettingsViewController: NSViewController {
     private var modelIDs = [""]
     private var settings = HelperSettings()
     private var isLoading = false
+    private let websiteStatus = NSTextField(wrappingLabelWithString: "")
+    var onRestartWebsiteConnection: (() -> Void)?
+    var websiteConnectionState: MarketplaceLocalService.State = .stopped {
+        didSet { if isViewLoaded { updateWebsiteConnectionStatus() } }
+    }
 
     var hasPendingChanges: Bool {
         guard isViewLoaded else { return false }
@@ -131,7 +136,35 @@ final class AISettingsViewController: NSViewController {
         let buttons = NSStackView(views: [testButton, saveButton])
         buttons.spacing = 12
         container.addArrangedSubview(buttons)
+
+        let websiteTitle = NSTextField(labelWithString: L("Website connection"))
+        websiteTitle.font = .systemFont(ofSize: 16, weight: .semibold)
+        container.addArrangedSubview(websiteTitle)
+        websiteStatus.font = .systemFont(ofSize: 12)
+        container.addArrangedSubview(websiteStatus)
+        websiteStatus.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        updateWebsiteConnectionStatus()
+        let websiteNote = NSTextField(wrappingLabelWithString: L("Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access."))
+        websiteNote.font = .systemFont(ofSize: 12)
+        websiteNote.textColor = .secondaryLabelColor
+        container.addArrangedSubview(websiteNote)
+        websiteNote.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        container.addArrangedSubview(NSButton(title: L("Restart Connection"), target: self, action: #selector(restartWebsiteConnection(_:))))
     }
+
+    private func updateWebsiteConnectionStatus() {
+        websiteStatus.textColor = .secondaryLabelColor
+        switch websiteConnectionState {
+        case .ready: websiteStatus.stringValue = L("Ready — no browser extension needed.")
+        case .starting: websiteStatus.stringValue = L("Starting website connection…")
+        case .stopped: websiteStatus.stringValue = L("Website connection is stopped.")
+        case .failed:
+            websiteStatus.stringValue = L("Website connection could not start. Quit other copies of MacHelper and try again.")
+            websiteStatus.textColor = .systemRed
+        }
+    }
+
+    @objc private func restartWebsiteConnection(_ sender: Any?) { onRestartWebsiteConnection?() }
 
     @discardableResult
     private func addRow(label: String, control: NSView, in container: NSStackView) -> NSStackView {

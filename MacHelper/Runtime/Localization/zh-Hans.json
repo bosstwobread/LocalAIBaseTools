@@ -241,5 +241,12 @@
   "Validating source…": "正在验证源码…",
   "Version %@": "版本 %@",
   "Working…": "处理中…",
-  "Working… · %@": "处理中… · %@"
+  "Working… · %@": "处理中… · %@",
+  "Website connection": "网站连接",
+  "Ready — no browser extension needed.": "已就绪，无需浏览器扩展。",
+  "Starting website connection…": "正在启动网站连接…",
+  "Website connection is stopped.": "网站连接已停止。",
+  "Website connection could not start. Quit other copies of MacHelper and try again.": "无法启动网站连接。请退出其他 MacHelper 实例后重试。",
+  "Restart Connection": "重启连接",
+  "Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access.": "在扩展市场的“描述你的需求”中连接。新安装或重新安装的浏览器可能会要求你允许本地访问。"
 }

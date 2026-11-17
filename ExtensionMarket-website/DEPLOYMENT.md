@@ -87,7 +87,7 @@ language preferences stay in browser local storage. The technical authoring guid
 continues to be served in English with its original code and prompts intact.
 
 
-## Discovery metadata and browser bridge
+## Discovery metadata and local app connection
 
 Publish `discovery-index.json` and `discovery-manifest.json` from the same
 verified build as `data/extensions.json` and the source ZIPs. These lightweight
@@ -98,12 +98,37 @@ A failed update keeps the last valid app snapshot/cache. Do not hand-edit the
 index, manifest, or generated website data; edit each tool's `discovery.json`
 and rebuild. Previously published versioned source files remain immutable.
 
-The optional website AI search uses a user-installed MacHelper Connector and
-native messaging on the user's own Mac. No AI backend, API credential,
-localhost listener, or new server container is deployed. The connector permits
-only `https://local-ai-extension.nelson007.com/*`, so local previews use keyword
-filtering or a mocked bridge for automated tests. MacHelper has no search screen
-or native search-prefill link. Do not widen
-that production permission for preview convenience. Searches never install or
-execute the matched tools. The existing deployment per-file checksum gate covers
-the discovery files and connector source download as ordinary public assets.
+The optional website AI search connects directly to the running MacHelper 6.5
+app on the visitor’s Mac at `http://127.0.0.1:43827`. No AI backend, provider
+credential, or additional server container is deployed. That listener runs only
+on the user’s IPv4 loopback interface; the marketplace server continues to serve
+static HTTPS assets. Do not expose its port through Docker, Caddy, a LAN
+interface, or a public firewall rule. The shipped Nginx Content Security Policy
+permits `connect-src 'self' http://127.0.0.1:43827`; publish that exact rule with
+the new client so browser CSP does not block the connection before local-access
+approval. This requires no new Caddy route or exposed server port.
+
+The website starts local requests only after **Connect MacHelper**. Browser
+local/loopback network approval may be required; connecting checks status and
+creates an expiring in-memory session without inference. **Find with AI** sends
+a separate bounded request with that session’s Bearer token. The local service
+accepts only `https://local-ai-extension.nelson007.com`, with strict Origin,
+Host, CORS, method/header/body validation and no generic AI/files/settings API.
+A browser installed after MacHelper or reinstalled later can connect without
+installing a search extension; local approval/session setup may repeat.
+
+Local previews use keyword filtering or a mocked local HTTP API for automated
+tests. Do not widen the production origin check, add wildcard CORS, or disable
+browser local-access protections for preview convenience. **Open MacHelper**
+uses `machelper://open` without starting AI. MacHelper has no search screen or
+native search-prefill link. Searching never installs or executes matched tools.
+The existing deployment per-file checksum gate covers the public discovery
+files, current source packages, and immutable historical Connector ZIPs as
+ordinary static assets. The former Connector is no longer a current listing.
+
+On a Mac with the installed MacHelper running,
+`python3 scripts/test-marketplace-service.py` checks the HTTP connection and
+request rejection without using AI. Add `--live` for a synthetic public ranking
+check that uses the saved provider and consumes its usage. These client checks
+run on the Mac, independently of the static Linux container; keep browser and
+local-service verification separate from server rollout health checks.

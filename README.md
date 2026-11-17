@@ -1,6 +1,6 @@
 # LocalAIBaseTools
 
-**MacHelper** is one macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. **Translation** is an editable JavaScript source extension: enabling it installs all its source files on your Mac, and saving changes while enabled reloads its worker without restarting MacHelper. **MessageHelper — Upwork** remains a Chrome/Edge extension using the same AI connection. The **Extension Market** searches public extension descriptions with keywords; **MacHelper Connector** adds website AI search using your configured connection. Current release: MacHelper **6.4.0** (build **640**), Translation **4.5.1**, MessageHelper — Upwork **1.4.0**, Connector **1.0.1**.
+**MacHelper** is one macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. **Translation** is an editable JavaScript source extension: enabling it installs all its source files on your Mac, and saving changes while enabled reloads its worker without restarting MacHelper. **MessageHelper — Upwork** remains a Chrome/Edge extension using the same AI connection. The **Extension Market** searches public extension descriptions with keywords or uses MacHelper’s built-in local service for explicit AI matching. Website search needs no browser extension. Current release: MacHelper **6.5.0** (build **650**), Translation **4.5.2**, MessageHelper — Upwork **1.4.0**.
 
 Before making changes, read the short [development checklist](DEVELOPMENT.md). Check it again before finishing so related functionality, documentation, and website content stay consistent.
 
@@ -11,7 +11,7 @@ LocalAIBaseTools/
 ├── MacHelper/
 │   ├── App/                      Dock/menu-bar app, AI/Extensions/General settings, login startup
 │   ├── Assets/                   App icon artwork and native macOS icon resource
-│   ├── Runtime/                  AI providers, public discovery index/search, source validation/download/watchers
+│   ├── Runtime/                  AI providers, local website service, public discovery index/search, source validation/download/watchers
 │   ├── Capabilities/             Shared selection detection, floating panels, and AI client
 │   ├── ScriptWorker/             Independent JavaScriptCore process for each source generation
 │   ├── Host/                     Browser/native-client stdin/stdout executable
@@ -20,8 +20,7 @@ LocalAIBaseTools/
 │   └── Tests/                    Runtime, source packages/workers, and native capabilities
 ├── Extensions/
 │   ├── Translation/              Editable JS, manifest, schema, prompts, README, and license
-│   ├── MessageHelper-Upwork/     Independent Chrome/Edge extension
-│   └── MacHelper-Connector/      Marketplace-only browser bridge for local AI discovery
+│   └── MessageHelper-Upwork/     Independent Chrome/Edge extension
 ├── catalog/extensions.json       Source catalog metadata and complete SHA-256 file inventory
 ├── ExtensionMarket-website/      Searchable tool marketplace, source packages, Docker deployment
 ├── examples/NativeGreeting/      Independent native Swift source-worker example
@@ -30,7 +29,7 @@ LocalAIBaseTools/
 └── test/                         Browser and installer tests with synthetic fixtures
 ```
 
-JavaScript and native Swift source extensions share one Extensions interface. Their manifest runtime chooses execution and reload automatically. Source extensions use MacHelper's capability interface for selected text, nearby panels, shared AI, and schema-based settings. They can be authored outside this repository and installed without rebuilding MacHelper. JavaScript workers do not expose Node.js, shell, arbitrary file, or network APIs. Browser tools still need their browser component installed in Chrome or Edge.
+JavaScript and native Swift source extensions share one Extensions interface. Their manifest runtime chooses execution and reload automatically. Source extensions use MacHelper's capability interface for selected text, nearby panels, shared AI, and schema-based settings. They can be authored outside this repository and installed without rebuilding MacHelper. JavaScript workers do not expose Node.js, shell, arbitrary file, or network APIs. Browser tools such as MessageHelper-Upwork still need their browser component installed in Chrome or Edge. Marketplace search connects directly to MacHelper without a browser extension.
 
 ## Create or customize your own extension
 
@@ -42,7 +41,7 @@ Give your AI coding assistant [AI_EXTENSION_GUIDE.md](AI_EXTENSION_GUIDE.md), th
 
 - macOS 14 or later. Building MacHelper requires Swift 6 or later command-line tools and Python 3; the prebuilt developer release targets Apple Silicon. Native source extensions also require Apple's Swift command-line tools on the user's Mac, even with a prebuilt MacHelper.
 - A signed-in Codex/ChatGPT installation with its bundled Codex app-server, Ollama with a model downloaded, or LM Studio with a model loaded and its local server running.
-- Chrome/Edge for MessageHelper. Node.js/npm is needed for browser development tests.
+- Chrome/Edge for MessageHelper. Website AI search needs a running MacHelper 6.5 or later and browser approval for the website’s local connection when requested; no search extension is needed. Node.js/npm is needed for browser development tests.
 - Accessibility approval for **MacHelper** to read selected text in other apps.
 
 ChatGPT processes requests online using the existing sign-in. The helper runs locally; it is not an offline GPT model. Ollama and LM Studio use the service running on this Mac. Remote service addresses and redirects are rejected. There is no automatic fallback between providers.
@@ -66,7 +65,7 @@ Settings uses a left sidebar for **General**, **AI Connection**, and **Extension
 
 In the **Installed** list, check individual tools or use **Select All**, then choose **Reload**, **Edit Source**, **Enable**, or **Disable**. Reload applies only to selected enabled tools; disabled tools stay disabled. Edit Source opens every selected source folder in VS Code, or Finder when VS Code is unavailable. Enable/Disable skip tools already in the requested state. Checked tools stay selected across refreshes and detail-page navigation. A failed action or cancelled native approval does not stop the remaining tools; the list reports the result and marks errors on the affected tool.
 
-- **AI Connection**: provider, current model catalog, local address where relevant, Test Connection, and Save. Models are discovered dynamically; new advertised models can appear without an extension update while the provider protocol remains compatible. Retired selected models produce an error instead of silently choosing another. Ollama/LM Studio require a named model.
+- **AI Connection**: provider, current model catalog, local address where relevant, Test Connection, and Save. Models are discovered dynamically; new advertised models can appear without an extension update while the provider protocol remains compatible. Retired selected models produce an error instead of silently choosing another. Ollama/LM Studio require a named model. **Website connection** shows the local search service’s status; **Restart Connection** restarts it without changing AI settings. Reconnect on the website afterward because old sessions are invalidated.
 - **Extensions**: **Marketplace…** opens the tool website; source tools can also use **Install Source…**, **Add Catalog…**, **Edit Source**, and **Reload**. A selected tool's fields, labels, choices, and defaults are loaded from the settings schema declared in its own `extension.json`; MacHelper supplies the generic native controls. Installed disabled tools can be configured without starting their worker or enabling them. Marketplace installs show a native permissions review before downloading and enabling a complete source package. Existing local copies retain their edits, preferences, and enabled state. JavaScript and native Swift tools share this list and the same controls; no separate native management page is needed.
 - **General**: launch at login and the system Login Items shortcut. MacHelper registers itself through Apple's ServiceManagement API on its first explicit installed-app launch. It starts in the background with a Dock icon and menu-bar shortcut when you log in; closing Settings keeps enabled extensions running. Click the Dock icon to reopen Settings. A later user disablement is respected.
 
@@ -80,11 +79,11 @@ Website illustrations follow the selected language too: preview labels, buttons,
 
 MacHelper updates its interface without restarting workers. Finish unsaved prompt/AI settings edits and pending operations before switching. Interface language is separate from Translation's target language, AI provider, and model. Source prompts, user text, model IDs, and code stay unchanged. The technical AI guide and provider/system diagnostics may remain in their original language.
 
-Extensions own their translated descriptions and settings labels through an optional `localizations` JSON resource in the manifest. Translation 4.5.1 includes all 13 interface languages. Unknown or older tools retain their original labels until their source provides translations; existing editable installations are never overwritten automatically. See the [source contract](docs/Source-Extensions.md) for the format.
+Extensions own their translated descriptions and settings labels through an optional `localizations` JSON resource in the manifest. Translation 4.5.2 includes all 13 interface languages. Unknown or older tools retain their original labels until their source provides translations; existing editable installations are never overwritten automatically. See the [source contract](docs/Source-Extensions.md) for the format.
 
 ### Translation
 
-Open **MacHelper → Extensions → Translation**. Enable it, choose the target language, then use **Accessibility Settings…** to allow **MacHelper** in Privacy & Security. Translation 4.5.1 requires MacHelper 4.5 or later for translation and 6.2 or later for localized interface labels. Its **Translation prompt** and **Word lookup prompt** boxes show the actual source prompt files. Edit a prompt and save it to change the extension's behavior. Saved prompts are sent unchanged as provider instructions; input text, target language, and optional sentence context are separate data. MacHelper adds no translation/style instructions to these explicit-prompt requests. Permission granted to the old Translation app does not grant it to MacHelper.
+Open **MacHelper → Extensions → Translation**. Enable it, choose the target language, then use **Accessibility Settings…** to allow **MacHelper** in Privacy & Security. Translation 4.5.2 requires MacHelper 4.5 or later for translation and 6.2 or later for localized interface labels. Its **Translation prompt** and **Word lookup prompt** boxes show the actual source prompt files. Edit a prompt and save it to change the extension's behavior. Saved prompts are sent unchanged as provider instructions; input text, target language, and optional sentence context are separate data. MacHelper adds no translation/style instructions to these explicit-prompt requests. Permission granted to the old Translation app does not grant it to MacHelper.
 
 Select text in another app. A small icon appears above/below the selection according to the available screen space. Click it for a nearby translation panel that fills with text as the model responds. Drag its header to move it; streaming and completion keep your chosen position. The panel shows the actual model name; Copy becomes available after the completed answer is validated. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
 
@@ -110,11 +109,13 @@ To migrate the same tool between runtimes, keep its identifier/settings keys, re
 
 ### Finding extensions
 
-Open the [Extension Market](https://local-ai-extension.nelson007.com/). **Keywords** searches names, descriptions, capabilities, example queries, and keywords without AI. **Describe your need** accepts a task description; **Find with AI** explicitly uses the provider/model saved in MacHelper’s **AI Connection**, through the browser Connector. Search returns up to five suggested tools with a reason and a good/partial fit. Review the details and permissions before separately choosing installation. Search never installs or executes extension code.
+Open the [Extension Market](https://local-ai-extension.nelson007.com/). **Keywords** searches names, descriptions, capabilities, example queries, and keywords without AI. For **Describe your need**, keep MacHelper 6.5 or later running and choose **Connect MacHelper**. Approve the browser’s local connection prompt if it appears. Connecting checks the local service and creates a short-lived session; it does not call AI. Enter a task and choose **Find with AI** to use the provider/model saved in MacHelper’s **AI Connection**.
 
-For website AI requests, MacHelper’s browser service downloads a small revision manifest and a separate, verified public description index, caching it with a bundled seed for unavailable networks. Source code is downloaded only when installing a chosen tool. New or changed descriptions can be published without shipping a new MacHelper. With more than 40 indexed tools, AI expands the query into keywords, local retrieval selects up to 40 candidates, then AI ranks a bounded subset. This is useful discovery rather than guaranteed exhaustive semantic search of every tool. Results identify the model and whether cached metadata is stale.
+The website connects directly to MacHelper at `http://127.0.0.1:43827`. Only the official HTTPS marketplace origin is accepted. The service exposes status, session creation, bounded search, and cancellation; it does not expose arbitrary AI prompts, settings, files, or installation. Its session token stays in page memory and expires after 30 minutes. Reconnect after a session expires or MacHelper restarts. **Open MacHelper** uses `machelper://open` to launch/focus the app without starting AI. Keyword search remains available while MacHelper is unavailable.
 
-For AI search inside Chrome/Edge, install the complete [MacHelper Connector](Extensions/MacHelper-Connector/README.md) browser folder using **Load unpacked**, then choose **MacHelper → Install Browser Support…** from the Mac app’s menu. Its stable ID is `kkmffpbghoojlnldpdolonpjmkhdenkh`; installers authorize it alongside MessageHelper. The connector accepts only discovery requests from `https://local-ai-extension.nelson007.com/` and needs MacHelper 6.3 or later. It has no Upwork or page-reading permission. Without the Connector, keyword search remains available; the website provides setup links for MacHelper and the Connector before AI search can run. There is still one Mac app, plus a browser extension where browser integration is needed.
+MacHelper starts the local service when the app starts, including background login startup. Closing Settings keeps it available. Chrome or Edge can be installed before or after MacHelper; no browser-profile files or extension installation are needed for website search. A new profile or browser reinstall may require local-access approval and a new connection session, while the MacHelper installation and shared AI settings remain usable. If local access was denied, allow it in that browser’s site settings and connect again. The former MacHelper Connector is retired from current listings; existing published downloads remain available for compatibility.
+
+For website AI requests, MacHelper downloads a small revision manifest and a separate, verified public description index, caching it with a bundled seed for unavailable networks. Source code is downloaded only when installing a chosen tool. New or changed descriptions can be published without shipping a new MacHelper. With more than 40 indexed tools, AI expands the query into keywords, local retrieval selects up to 40 candidates, then AI ranks a bounded subset. This is useful discovery rather than guaranteed exhaustive semantic search of every tool. Results identify the model and whether cached metadata is stale. Search returns up to five suggested tools with a reason and a good/partial fit; it never installs or executes extension code. Review details and permissions before separately choosing installation.
 
 ### MessageHelper — Upwork
 
@@ -150,6 +151,7 @@ python3 scripts/test-source-extensions.py
 python3 scripts/test-native-extensions.py
 python3 scripts/test-extension-list.py
 python3 scripts/test-discovery.py
+python3 scripts/test-marketplace-service.py
 python3 scripts/test-source-extensions.py --live
 python3 scripts/test-native.py
 python3 scripts/test-native.py --catalog
@@ -161,7 +163,7 @@ The source-extension integration check uses temporary preferences/source folders
 
 The extension-list check drives the actual offscreen list controls with temporary tools. It verifies multi-selection, batch actions, selection persistence, partial failures, and cancelled native approval without opening a source editor or calling AI.
 
-The discovery script checks the framed host discovery contract with synthetic input; its optional live mode uses the saved provider and consumes usage. Connector tests use fake native ports and never access real browser registrations or AI.
+The discovery script checks the compatibility framed-host discovery contract with synthetic input; its optional live mode uses the saved provider and consumes usage. With MacHelper running, `python3 scripts/test-marketplace-service.py` checks the extension-free HTTP connection and rejects invalid/unauthorized requests without calling AI. Add `--live` to rank one synthetic public need through the saved provider; this consumes usage. Local-service tests use bounded HTTP/socket fixtures and mocked inference to check origin/host validation, session ownership, cancellation, and rejection of unrelated operations. Website tests mock the local HTTP API and verify that opening a page, changing language, and playing demonstrations make no connection or AI request.
 
 The optional live AI-host check (`scripts/test-native.py --live`) also uses synthetic text only. Add `--model MODEL_ID_FROM_CATALOG` to test an explicit model. Browser tests use synthetic messages/feedback and zero-send/zero-submit sentinels. Swift tests cover the providers, framing, source validation/downloads/watchers, JavaScript and native source workers/settings, selection lifecycle/geometry, preferences, and startup decisions. Native worker integration checks build outside the editable package, exercise invalid-build recovery and runtime migration, and use isolated extension state. Legacy SDK checks remain separate development fixtures.
 

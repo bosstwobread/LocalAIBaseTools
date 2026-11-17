@@ -241,5 +241,12 @@
   "Validating source…": "Validation du code…",
   "Version %@": "Version %@",
   "Working…": "Traitement…",
-  "Working… · %@": "Traitement… · %@"
+  "Working… · %@": "Traitement… · %@",
+  "Website connection": "Connexion au site web",
+  "Ready — no browser extension needed.": "Prêt ; aucune extension de navigateur nécessaire.",
+  "Starting website connection…": "Démarrage de la connexion au site web…",
+  "Website connection is stopped.": "La connexion au site web est arrêtée.",
+  "Website connection could not start. Quit other copies of MacHelper and try again.": "Impossible de démarrer la connexion. Quittez les autres instances de MacHelper et réessayez.",
+  "Restart Connection": "Redémarrer la connexion",
+  "Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access.": "Connectez-vous depuis Décrivez votre besoin dans Extension Market. Un navigateur nouveau ou réinstallé peut demander une autorisation d’accès local."
 }
