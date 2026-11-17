@@ -6,7 +6,7 @@ The website lists every current tool under `Extensions`, with search, category
 and platform filters, interface previews, details, source links, and complete
 source downloads. JavaScript and native Swift tools share the same catalog, install review, and editable package format. It is a static website served from its own Docker container.
 Keyword search reads only public metadata and does not call AI. The optional
-**Describe your need → Connect MacHelper → Find with AI** flow connects
+**Describe your need → Find with AI** flow connects
 directly to the visitor’s running MacHelper 6.5 or later and configured AI. No
 browser extension is needed for website search. It never reads a selection, installs a tool, or runs extension source merely
 by searching. The AI connection may use a cloud provider, depending on settings.
@@ -223,22 +223,34 @@ and relevant public metadata to their configured provider. It uses no marketplac
 AI account, API key, or hosted AI service. Provider availability and limits apply.
 
 MacHelper automatically starts a discovery-only HTTP service at
-`http://127.0.0.1:43827` when its app starts. Choose **Connect MacHelper** from
-the website to check it and create a 30-minute session; this does not run AI.
-Chrome/Edge may ask for permission to access the local/loopback connection.
-**Find with AI** is a separate explicit action. The service accepts only the
-exact HTTPS marketplace Origin and loopback Host, validates bounded requests,
-and requires the session’s Bearer token for search/cancel. Its API exposes no
-arbitrary AI prompt, settings, files, shell command, or installation operation.
-Queries, results, and tokens stay in memory, not browser local storage or URLs.
-See the [HTTP protocol](../docs/MacHelper-Protocol.md#website-local-discovery-machelper-65).
+`http://127.0.0.1:43827` when its app starts. Enter a need and choose **Find with
+AI**. That one click validates input, checks/creates the local connection when
+necessary, and searches using MacHelper’s saved AI settings. Blank, oversized,
+or otherwise invalid needs make no local request. Chrome/Edge may ask for
+permission to access the local/loopback connection during the first valid
+search. The status/session handshake itself does not run inference.
 
-**Cancel search** cancels the owned request and ignores late responses; leaving
-the page also abandons its search. An expired/evicted session, app restart, or **AI Connection → Restart
-Connection** requires connecting again. If the service is unavailable, **Open MacHelper** uses
-`machelper://open` to launch/focus the app without AI; **Get MacHelper** offers
-the download. Denied local access needs approval in browser site settings before
-reconnecting. Keyword filtering always remains available.
+There is no separate Connect/Reconnect control. A new page, expired/evicted
+session, app restart, or **AI Connection → Restart Connection** is handled by
+the next valid **Find with AI** action. If a search receives HTTP 401 before
+inference, it performs one new handshake and retries that search once. A second
+401, provider failure, busy response, network timeout, or other AI error ends
+the action without automatic inference retry. **Cancel search** cancels the
+owned request and ignores late responses; leaving the page abandons its search.
+
+The service accepts only the exact HTTPS marketplace Origin and loopback Host,
+validates bounded requests, and requires the session’s Bearer token for
+search/cancel. Its API exposes no arbitrary AI prompt, settings, files, shell
+command, or installation operation. Queries, results, and tokens stay in memory,
+not browser local storage or URLs. See the
+[HTTP protocol](../docs/MacHelper-Protocol.md#website-local-discovery-machelper-65).
+
+After a local connection error, **Open MacHelper** uses `machelper://open` to
+launch/focus the app without AI, and **Get MacHelper** offers the download. The
+website cannot distinguish an app that is closed from one that is missing by
+that error, and must not claim the app is uninstalled. Denied local access needs
+approval in browser site settings. Resolve the issue and choose **Find with AI**
+again. Keyword filtering always remains available.
 
 Chrome or Edge can be installed before or after MacHelper. Reinstalling a browser
 or creating a new profile requires no browser extension or native-host setup for

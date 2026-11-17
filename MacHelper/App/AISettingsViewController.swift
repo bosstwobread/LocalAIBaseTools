@@ -144,7 +144,7 @@ final class AISettingsViewController: NSViewController {
         container.addArrangedSubview(websiteStatus)
         websiteStatus.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
         updateWebsiteConnectionStatus()
-        let websiteNote = NSTextField(wrappingLabelWithString: L("Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access."))
+        let websiteNote = NSTextField(wrappingLabelWithString: L("Click Find with AI on the Extension Market. MacHelper connects automatically. A new or reinstalled browser may ask you to allow local access."))
         websiteNote.font = .systemFont(ofSize: 12)
         websiteNote.textColor = .secondaryLabelColor
         container.addArrangedSubview(websiteNote)

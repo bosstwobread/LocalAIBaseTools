@@ -8,7 +8,7 @@ import Security
 public final class MarketplaceLocalService {
     nonisolated public static let port: UInt16 = 43827
     nonisolated public static let origin = "https://local-ai-extension.nelson007.com"
-    nonisolated public static let version = "6.5.0"
+    nonisolated public static let version = "6.5.1"
     nonisolated public static let maximumResponseBytes = 256 * 1024
     public typealias Search = @MainActor (String, String) async throws -> DiscoverySearchResult
     public typealias Cancel = @MainActor () async -> Void

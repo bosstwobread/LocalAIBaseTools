@@ -457,68 +457,191 @@ function localService(handler = () => ({ok:true,search:{matches:[],noMatchReason
     return handler(call);
   };
 }
-async function connect(view) {
-  view.document.querySelector('#connect-machelper').click();
-  await until(()=>/connected\.|已连接/.test(view.document.querySelector('#connection-status').textContent));
+function find(view, query = 'Explain a selected word') {
+  input(view,'#need-query',query);
+  view.document.querySelector('#find-with-ai').click();
+}
+async function finished(view) {
+  await until(()=>!view.document.querySelector('#find-with-ai').disabled);
 }
 
-test('extension-free search connects explicitly and sends only authenticated bounded search requests', async () => {
-  let complete;
-  const view = await page({service:localService(call=>new Promise(resolve=>{complete=resolve;}))});
+test('one Find with AI click connects and searches once with captured input while other interactions never contact MacHelper', async () => {
+  let complete, releaseStatus;
+  const normal=localService(()=>new Promise(resolve=>{complete=resolve;}));
+  const view = await page({service:call=>call.path==='/v1/status'?new Promise(resolve=>{releaseStatus=resolve;}):normal(call)});
   try {
-    assert.equal(view.localRequests.length,0,'Page load must not contact a local service.');
+    assert.equal(view.localRequests.length,0);
+    assert.equal(view.document.querySelector('#connect-machelper'),null);
+    assert.equal(view.document.querySelector('#local-connection-help').hidden,true);
     view.document.querySelector('#description-mode').click();
     input(view,'#need-query','Help me understand words while reading.');
     view.document.querySelector('.example-query').click();
-    input(view,'#site-language','es','change');
-    input(view,'#site-language','en','change');
-    assert.equal(view.localRequests.length,0,'Choosing modes, typing, examples and languages must not contact MacHelper.');
-    assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
-    await connect(view);
-    assert.deepEqual(view.localRequests.map(call=>call.path),['/v1/status','/v1/session']);
+    input(view,'#site-language','es','change');input(view,'#site-language','en','change');
+    assert.equal(view.localRequests.length,0,'Modes, typing, examples, languages and demos must not contact MacHelper.');
     assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
-    assert.equal(view.document.querySelector('#connect-machelper').textContent,'Reconnect MacHelper');
-    for (const call of view.localRequests) {
-      assert.equal(call.options.headers['X-MacHelper-Client'],'extension-market');
-      assert.equal(call.options.credentials,'omit');
-      assert.equal(call.options.referrerPolicy,'no-referrer');
-      assert.equal(call.options.cache,'no-store');
-      assert.equal(call.options.headers.Authorization,undefined);
-    }
-    view.document.querySelector('#find-with-ai').click();
+    const query='Explain this word.\nKeep this second sentence.';
+    find(view,query);
+    await until(()=>releaseStatus);
+    assert.equal(view.document.querySelector('#need-query').disabled,true);
+    assert.equal(view.document.querySelector('.example-query').disabled,true);
+    assert.equal(view.document.querySelector('#cancel-ai-search').hidden,false);
+    assert.match(view.document.querySelector('#discovery-status').textContent,/Connecting/);
+    view.document.querySelector('#find-with-ai').dispatchEvent(new view.window.Event('click'));
+    input(view,'#need-query','Programmatic change while the field is disabled');
+    input(view,'#site-language','es','change');
+    assert.equal(view.localRequests.length,1);
+    releaseStatus({ok:true,version:'6.5.0',protocolVersion:1});
     await until(()=>typeof complete==='function');
+    assert.deepEqual(view.localRequests.map(call=>call.path),['/v1/status','/v1/session','/v1/search']);
     const call=view.localRequests.at(-1);
-    assert.equal(call.path,'/v1/search');
+    assert.equal(call.body.query,query);assert.equal(call.body.language,'en');
     assert.equal(call.options.headers.Authorization,`Bearer ${fixtureToken}`);
-    assert.equal(call.options.headers['Content-Type'],'application/json');
     assert.deepEqual(Object.keys(call.body).sort(),['language','query','requestId']);
     assert.match(call.body.requestId,/^[A-Za-z0-9_-]{1,80}$/);
-    assert.equal(view.document.querySelector('#cancel-ai-search').hidden,false);
+    for (const request of view.localRequests) {
+      assert.equal(request.options.headers['X-MacHelper-Client'],'extension-market');
+      assert.equal(request.options.credentials,'omit');assert.equal(request.options.referrerPolicy,'no-referrer');
+      assert.equal(request.options.cache,'no-store');assert.equal(request.options.redirect,'error');
+    }
     complete({ok:true,search:{model:'fixture-model',stale:true,matches:[
       {id:'invented.tool',fit:'good',reason:'Made up'},
       {id:'com.localaibasetools.translation',fit:'good',reason:'<img id="discovery-injection" src=x onerror=alert(1)>'},
       {id:'com.localaibasetools.translation',fit:'good',reason:'Duplicate'}
     ]}});
-    await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
+    await finished(view);
     assert.equal(view.document.querySelectorAll('.extension-card').length,1);
-    assert.equal(view.document.querySelector('.discovery-match strong').textContent,'Good fit');
     assert.match(view.document.querySelector('.discovery-match p').textContent,/<img/);
     assert.equal(view.document.querySelector('#discovery-injection'),null);
-    assert.match(view.document.querySelector('#discovery-model').textContent,/fixture-model.*cached/);
-    assert.equal(view.window.location.hash,'','Search must not install or open a tool');
-    assert.equal(view.window.localStorage.length,1,'Only the interface language may be persisted.');
-    assert.equal(view.window.localStorage.getItem('localaibasetools.website.language'),'en');
+    assert.match(view.document.querySelector('#discovery-model').textContent,/fixture-model/);
+    assert.equal(view.window.location.hash,'','Search must not install or open a tool.');
+    assert.equal(view.window.localStorage.length,1);
+    assert.equal(view.window.localStorage.getItem('localaibasetools.website.language'),'es');
   }finally{view.close();}
 });
 
-test('cancel aborts the owned request, ignores late results, and supports another explicit search', async()=>{
-  const searches=[];
-  const view=await page({service:localService(call=>new Promise(resolve=>searches.push(resolve)))});
+test('valid memory sessions are reused, expired sessions renew under the same click, and fresh browsers need no installation setup',async()=>{
+  let now=1700000000000,sessions=0,searches=0;
+  const service=call=>{
+    if(call.path==='/v1/session')return {ok:true,token:String(++sessions).repeat(64),expiresIn:1800};
+    if(call.path==='/v1/search'){searches++;return {ok:true,search:{matches:[],noMatchReason:'No matching tool.'}};}
+    return {ok:true,version:'6.5.0',protocolVersion:1};
+  };
+  const first=await page({service,beforeApp:window=>{window.Date.now=()=>now;}});
+  try{
+    first.document.querySelector('#description-mode').click();
+    find(first);await finished(first);
+    assert.equal(sessions,1);assert.equal(searches,1);
+    find(first);await finished(first);
+    assert.equal(sessions,1);assert.equal(searches,2);
+    assert.equal(first.localRequests.at(-1).path,'/v1/search');
+    now+=1800001;
+    find(first);await finished(first);
+    assert.equal(sessions,2);assert.equal(searches,3);
+    assert.deepEqual(first.localRequests.slice(-3).map(call=>call.path),['/v1/status','/v1/session','/v1/search']);
+    assert.equal(first.window.localStorage.length,0);
+  }finally{first.close();}
+  const fresh=await page({service});
+  try{
+    fresh.document.querySelector('#description-mode').click();assert.equal(fresh.localRequests.length,0);
+    find(fresh);await finished(fresh);
+    assert.equal(sessions,3);assert.equal(searches,4);
+    assert.equal(fresh.window.localStorage.length,0);
+  }finally{fresh.close();}
+});
+
+test('missing service shows accurate install-or-open help only after an explicit valid search and remains retryable',async()=>{
+  const view=await page();
+  try{
+    input(view,'#search','Explain a selected word');assert.equal(view.document.querySelectorAll('.extension-card').length,1);
+    view.document.querySelector('#description-mode').click();
+    const help=view.document.querySelector('#local-connection-help');
+    assert.equal(help.hidden,true);
+    assert.ok(help.querySelector('a[href="machelper://open"]'));
+    assert.ok(help.querySelector('a[href="#get-machelper"]'));
+    assert.equal(view.document.querySelector('a[href="#extension/machelper-connector"]'),null);
+    assert.equal(view.document.querySelector('a[href^="machelper://search"]'),null);
+    assert.equal(view.localRequests.length,0);
+    find(view,'A & B? 翻译');await finished(view);
+    assert.equal(help.hidden,false);
+    assert.match(view.document.querySelector('#discovery-status').textContent,/Install or open MacHelper/);
+    assert.equal(view.document.body.textContent.match(/Install or open MacHelper, then try Find with AI again\./g)?.length,1,'Recovery text should appear only once.');
+    assert.equal(view.window.location.hash,'');assert.equal(view.localRequests.length,1);
+    find(view,'A & B? 翻译');await finished(view);
+    assert.equal(view.localRequests.length,2,'A second explicit click retries connection without a separate control.');
+  }finally{view.close();}
+});
+
+test('blank, overlong and NUL needs never connect or infer',async()=>{
+  const view=await page({service:localService()});
   try{
     view.document.querySelector('#description-mode').click();
-    await connect(view);
-    input(view,'#need-query','record my voice');view.document.querySelector('#find-with-ai').click();
-    await until(()=>searches.length===1);
+    for(const query of ['', '  \n ', 'a'.repeat(2001),'word\0private']){
+      find(view,query);await delay(0);
+      assert.match(view.document.querySelector('#discovery-status').textContent,/1–2,000/);
+      assert.equal(view.localRequests.length,0);
+      assert.equal(view.document.querySelector('#local-connection-help').hidden,true);
+    }
+    find(view,'Explain a selected word');await finished(view);
+    assert.equal(view.localRequests.filter(call=>call.path==='/v1/search').length,1);
+    assert.equal(view.document.querySelector('#no-match-reason').textContent,'No matching tool.');
+  }finally{view.close();}
+});
+
+test('permission denial, incompatible host and connection timeout explain recovery without invoking AI',async()=>{
+  for (const scenario of ['permission','version','timeout']) {
+    let fireTimeout;
+    const view=await page({service:scenario==='timeout'?()=>new Promise(()=>{}):()=>({ok:true,version:'6.4.0',protocolVersion:1}),beforeApp:window=>{
+      if(scenario==='permission')Object.defineProperty(window.navigator,'permissions',{value:{query:async()=>({state:'denied'})}});
+      if(scenario==='timeout'){
+        const original=window.setTimeout.bind(window);
+        window.setTimeout=(callback,ms,...args)=>{if(ms===30000){fireTimeout=callback;return original(()=>{},100000);}return original(callback,ms,...args);};
+      }
+    }});
+    try{
+      view.document.querySelector('#description-mode').click();find(view);
+      if(scenario==='timeout'){await until(()=>fireTimeout);fireTimeout();}
+      await finished(view);
+      assert.match(view.document.querySelector('#discovery-status').textContent,scenario==='permission'?/site settings/:scenario==='version'?/version 6.5/:/timed out/);
+      assert.equal(view.document.querySelector('#local-connection-help').hidden,false);
+      assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false);
+      if(scenario==='permission')assert.equal(view.localRequests.length,0);
+    }finally{view.close();}
+  }
+});
+
+test('only a pre-inference HTTP401 renews and retries once, preserving request identity, query and language',async()=>{
+  for(const scenario of ['renewed','repeat401','code_without_401','provider_failure','busy','network_failure']){
+    let attempts=0,inference=0;
+    const service=localService(()=>{
+      attempts++;
+      if(scenario==='network_failure')throw new TypeError('Unreachable fixture');
+      if(scenario==='provider_failure'){inference++;return {status:502,body:{ok:false,code:'search_failed'}};}
+      if(scenario==='busy')return {status:429,body:{ok:false,code:'busy'}};
+      if(scenario==='code_without_401')return {status:502,body:{ok:false,code:'unauthorized'}};
+      if(attempts===1 || scenario==='repeat401')return {status:401,body:{ok:false,code:'unauthorized'}};
+      inference++;return {ok:true,search:{matches:[],noMatchReason:'No matching tool.'}};
+    });
+    const view=await page({service});
+    try{
+      view.document.querySelector('#description-mode').click();find(view);await finished(view);
+      const retried=['renewed','repeat401'].includes(scenario);
+      assert.equal(attempts,retried?2:1);
+      assert.equal(view.localRequests.filter(call=>call.path==='/v1/session').length,retried?2:1);
+      const requests=view.localRequests.filter(call=>call.path==='/v1/search');
+      if(retried)assert.deepEqual(requests[0].body,requests[1].body);
+      assert.equal(inference,['renewed','provider_failure'].includes(scenario)?1:0);
+      if(scenario==='repeat401')assert.match(view.document.querySelector('#discovery-status').textContent,/Could not renew/);
+      if(scenario==='provider_failure')assert.match(view.document.querySelector('#discovery-status').textContent,/AI Connection/);
+      if(scenario==='busy')assert.match(view.document.querySelector('#discovery-status').textContent,/busy/);
+    }finally{view.close();}
+  }
+});
+
+test('cancel during inference aborts only the owned search, ignores late responses and permits a later click',async()=>{
+  const searches=[];
+  const view=await page({service:localService(()=>new Promise(resolve=>searches.push(resolve)))});
+  try{
+    view.document.querySelector('#description-mode').click();find(view,'record my voice');await until(()=>searches.length===1);
     const request=view.localRequests.find(call=>call.path==='/v1/search');
     view.document.querySelector('#cancel-ai-search').click();
     const cancel=view.localRequests.at(-1);
@@ -528,180 +651,79 @@ test('cancel aborts the owned request, ignores late results, and supports anothe
     searches[0]({ok:true,search:{matches:[{id:catalog.extensions[0].id,fit:'good',reason:'Late'}]}});await delay(0);
     assert.equal(view.document.querySelector('.discovery-match'),null);
     assert.match(view.document.querySelector('#discovery-status').textContent,/cancelled/);
-    view.document.querySelector('#find-with-ai').click();
-    await until(()=>searches.length===2);
-    searches[1]({ok:true,search:{matches:[],noMatchReason:'No current tool records audio.'}});
-    await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
+    find(view);await until(()=>searches.length===2);
+    searches[1]({ok:true,search:{matches:[],noMatchReason:'No current tool records audio.'}});await finished(view);
     assert.equal(view.document.querySelectorAll('.extension-card').length,0);
-    assert.match(view.document.querySelector('#no-match-reason').textContent,/records audio/);
     input(view,'#need-query','translate a word');
     assert.equal(view.document.querySelector('#no-match-reason').textContent,'');
     assert.equal(view.document.querySelectorAll('.extension-card').length,catalog.extensions.length);
   }finally{view.close();}
 });
 
-test('missing local service gives app setup guidance without extension installation while keyword search remains available',async()=>{
-  const view=await page({storedLanguage:'zh-Hans'});
-  try{
-    input(view,'#search','Explain a selected word');
-    assert.equal(view.document.querySelectorAll('.extension-card').length,1);
-    view.document.querySelector('#description-mode').click();
-    input(view,'#need-query','A & B? 翻译');
-    const help=view.document.querySelector('#local-connection-help');
-    assert.ok(help.querySelector('a[href="machelper://open"]'));
-    assert.ok(help.querySelector('a[href="#get-machelper"]'));
-    assert.equal(view.document.querySelector('a[href="#extension/machelper-connector"]'),null);
-    assert.equal(view.document.querySelector('a[href^="machelper://search"]'),null);
-    assert.equal(view.localRequests.length,0);
-    view.document.querySelector('#connect-machelper').click();
-    await until(()=>!view.document.querySelector('#connect-machelper').disabled);
-    assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
-    assert.match(view.document.querySelector('#discovery-status').textContent,/MacHelper/);
-    assert.equal(view.window.location.hash,'');
-    assert.equal(view.localRequests.length,1);
-  }finally{view.close();}
-});
-
-test('invalid needs never start AI and a valid need is passed unchanged after connecting',async()=>{
-  const view=await page({service:localService()});
-  try{
-    view.document.querySelector('#description-mode').click();
-    await connect(view);
-    for(const query of ['', '  \n ', 'a'.repeat(2001),'word\0private']){
-      input(view,'#need-query',query);
-      view.document.querySelector('#find-with-ai').click();await delay(0);
-      assert.match(view.document.querySelector('#discovery-status').textContent,/1–2,000/);
-      assert.equal(view.localRequests.filter(call=>call.path==='/v1/search').length,0);
-    }
-    input(view,'#need-query','Explain a selected word');
-    view.document.querySelector('#find-with-ai').click();
-    await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
-    const searches=view.localRequests.filter(call=>call.path==='/v1/search');
-    assert.equal(searches.length,1);
-    assert.equal(searches[0].body.query,'Explain a selected word');
-    assert.equal(view.document.querySelector('#no-match-reason').textContent,'No matching tool.');
-  }finally{view.close();}
-});
-
-test('permission denial, incompatible host and connection timeout have actionable recovery without invoking AI',async()=>{
-  for (const scenario of ['permission','version','timeout']) {
-    let fireTimeout;
-    const view=await page({
-      service:scenario==='timeout' ? ()=>new Promise(()=>{}) : ()=>({ok:true,version:'6.4.0',protocolVersion:1}),
-      beforeApp:window=>{
-        if(scenario==='permission')Object.defineProperty(window.navigator,'permissions',{value:{query:async()=>({state:'denied'})}});
-        if(scenario==='timeout'){
-          const original=window.setTimeout.bind(window);
-          window.setTimeout=(callback,ms,...args)=>{if(ms===30000){fireTimeout=callback;return original(()=>{},100000);}return original(callback,ms,...args);};
-        }
-      }
-    });
-    try {
-      view.document.querySelector('#description-mode').click();
-      view.document.querySelector('#connect-machelper').click();
-      if(scenario==='timeout'){await until(()=>fireTimeout);fireTimeout();}
-      await until(()=>!view.document.querySelector('#connect-machelper').disabled);
-      assert.match(view.document.querySelector('#discovery-status').textContent,scenario==='permission'?/site settings/:scenario==='version'?/version 6.5/:/timed out/);
-      assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
-      assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false);
-      if(scenario==='permission')assert.equal(view.localRequests.length,0);
-    } finally{view.close();}
+test('cancel, mode change and page hide stop every unfinished handshake and prevent delayed inference',async()=>{
+  for(const phase of ['permission','status','session'])for(const action of ['cancel','mode','pagehide']){
+    let release;
+    const normal=localService();
+    const view=await page({service:call=>call.path===`/v1/${phase}`?new Promise(resolve=>{release=resolve;}):normal(call),beforeApp:window=>{
+      if(phase==='permission')Object.defineProperty(window.navigator,'permissions',{value:{query:()=>new Promise(resolve=>{release=()=>resolve({state:'prompt'});})}});
+    }});
+    try{
+      view.document.querySelector('#description-mode').click();find(view);await until(()=>release);
+      const pending=view.localRequests.at(-1);
+      if(action==='cancel')view.document.querySelector('#cancel-ai-search').click();
+      if(action==='mode')view.document.querySelector('#keyword-mode').click();
+      if(action==='pagehide')view.window.dispatchEvent(new view.window.Event('pagehide'));
+      if(pending)assert.equal(pending.options.signal.aborted,true);
+      release(phase==='session'?{ok:true,token:fixtureToken,expiresIn:1800}:{ok:true,version:'6.5.0',protocolVersion:1});await delay(0);
+      assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false,`${phase}/${action} must not start late AI.`);
+      assert.equal(view.localRequests.some(call=>call.path==='/v1/cancel'),false,'A handshake has no inference to cancel.');
+      if(action==='pagehide')view.window.dispatchEvent(new view.window.Event('pageshow'));
+      assert.equal(view.document.querySelector('#find-with-ai').disabled,false);
+    }finally{view.close();}
   }
 });
 
-test('expired sessions and app restarts require reconnect and never silently repeat AI; busy and provider failures retain the session',async()=>{
-  let searches=0, failure='unauthorized';
-  const view=await page({service:localService(()=>{searches++;return {status:failure==='busy'?429:failure==='search_failed'?502:401,body:{ok:false,code:failure,error:'Fixture diagnostic'}};})});
-  try {
-    view.document.querySelector('#description-mode').click();await connect(view);
-    input(view,'#need-query','translate a selected word');
-    for (const code of ['unauthorized','busy','search_failed']) {
-      failure=code;
-      if(code==='busy')await connect(view);
-      view.document.querySelector('#find-with-ai').click();
-      await until(()=>view.document.querySelector('#cancel-ai-search').hidden);
-      assert.equal(searches,['unauthorized','busy','search_failed'].indexOf(code)+1);
-      assert.match(view.document.querySelector('#discovery-status').textContent,code==='unauthorized'?/expired/:code==='busy'?/busy/:/AI Connection/);
-      assert.equal(view.document.querySelector('#find-with-ai').disabled,code==='unauthorized');
-    }
-    const before=view.localRequests.length;
-    view.window.dispatchEvent(new view.window.Event('pagehide'));
-    view.window.dispatchEvent(new view.window.Event('pageshow'));
-    assert.equal(view.document.querySelector('#find-with-ai').disabled,true,'A page restored after navigation must reconnect.');
-    assert.equal(view.localRequests.length,before);
-  }finally{view.close();}
-});
-
-test('memory-only connection expires locally and a newly installed browser can create a fresh session',async()=>{
-  let now=1700000000000, sessions=0, searches=0;
-  const service=call=>{
-    if(call.path==='/v1/session')return {ok:true,token:String(++sessions).repeat(64),expiresIn:1800};
-    if(call.path==='/v1/search'){searches++;return {ok:true,search:{matches:[],noMatchReason:'No matching tool.'}};}
-    return {ok:true,version:'6.5.0',protocolVersion:1};
-  };
-  const first=await page({service,beforeApp:window=>{window.Date.now=()=>now;}});
-  try{
-    first.document.querySelector('#description-mode').click();await connect(first);
-    input(first,'#need-query','translate a selected word');
-    now+=1800001;
-    first.document.querySelector('#find-with-ai').click();
-    assert.equal(searches,0,'An expired browser session must never invoke inference.');
-    assert.match(first.document.querySelector('#discovery-status').textContent,/expired/);
-    assert.equal(first.document.querySelector('#find-with-ai').disabled,true);
-    await connect(first);
-    first.document.querySelector('#find-with-ai').click();
-    await until(()=>first.document.querySelector('#cancel-ai-search').hidden);
-    assert.equal(searches,1);
-    assert.equal(sessions,2);
-    assert.equal(first.window.localStorage.length,0,'Tokens and searches must stay out of browser storage.');
-  }finally{first.close();}
-  const fresh=await page({service});
-  try{
-    assert.equal(fresh.localRequests.length,0);
-    fresh.document.querySelector('#description-mode').click();
-    assert.equal(fresh.document.querySelector('#find-with-ai').disabled,true);
-    await connect(fresh);
-    assert.equal(sessions,3,'A fresh browser/profile needs only a new local session, without browser registration or an extension.');
-    assert.equal(fresh.document.querySelector('#find-with-ai').disabled,false);
-    assert.equal(fresh.window.localStorage.length,0);
-  }finally{fresh.close();}
-});
-
-test('malformed handshakes never enable search and hiding a page aborts an unfinished connection',async()=>{
+test('malformed handshakes never start inference and offer retry without a Connect button',async()=>{
   for(const reply of [{ok:true,token:'unsafe',expiresIn:1800},{ok:true,token:fixtureToken+'\n',expiresIn:1800},{ok:true,token:fixtureToken,expiresIn:0},{ok:true,token:fixtureToken,expiresIn:1801}]){
     const view=await page({service:call=>call.path==='/v1/status'?{ok:true,version:'6.5.0',protocolVersion:1}:reply});
     try{
-      view.document.querySelector('#description-mode').click();
-      view.document.querySelector('#connect-machelper').click();
-      await until(()=>!view.document.querySelector('#connect-machelper').disabled);
-      assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
-      assert.match(view.document.querySelector('#discovery-status').textContent,/Could not reach/);
+      view.document.querySelector('#description-mode').click();find(view);await finished(view);
+      assert.match(view.document.querySelector('#discovery-status').textContent,/Install or open/);
+      assert.equal(view.document.querySelector('#local-connection-help').hidden,false);
       assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false);
     }finally{view.close();}
   }
   const badVersion=await page({service:()=>({ok:true,version:'6.5.0\n',protocolVersion:1})});
   try{
-    badVersion.document.querySelector('#description-mode').click();
-    badVersion.document.querySelector('#connect-machelper').click();
-    await until(()=>!badVersion.document.querySelector('#connect-machelper').disabled);
-    assert.equal(badVersion.document.querySelector('#find-with-ai').disabled,true);
+    badVersion.document.querySelector('#description-mode').click();find(badVersion);await finished(badVersion);
     assert.match(badVersion.document.querySelector('#discovery-status').textContent,/version 6.5/);
     assert.deepEqual(badVersion.localRequests.map(call=>call.path),['/v1/status']);
   }finally{badVersion.close();}
-  let resolveStatus;
-  const view=await page({service:()=>new Promise(resolve=>{resolveStatus=resolve;})});
-  try{
-    view.document.querySelector('#description-mode').click();
-    view.document.querySelector('#connect-machelper').click();
-    await until(()=>resolveStatus);
-    const status=view.localRequests[0];
-    view.window.dispatchEvent(new view.window.Event('pagehide'));
-    assert.equal(status.options.signal.aborted,true);
-    resolveStatus({ok:true,version:'6.5.0',protocolVersion:1});await delay(0);
-    view.window.dispatchEvent(new view.window.Event('pageshow'));
-    assert.equal(view.document.querySelector('#find-with-ai').disabled,true);
-    assert.equal(view.localRequests.length,1,'A closed document must not finish creating a browser session.');
-  }finally{view.close();}
+});
+
+test('one-click connection instructions and recovery messages are translated in all interface languages',async()=>{
+  const messages=[
+    'Find with AI connects to MacHelper automatically. No browser extension is needed.',
+    'Install or open MacHelper, then try Find with AI again.',
+    'Allow local or loopback network access for this website in your browser’s site settings, then try Find with AI again.',
+    'Update MacHelper to version 6.5 or later, then try Find with AI again.',
+    'Connection timed out. Check that MacHelper is running, then try Find with AI again.',
+    'Could not renew the MacHelper connection. Try Find with AI again.'
+  ];
+  const translations={};require('node:vm').runInNewContext(localesScript,{window:translations});
+  for(const code of Object.keys(previewCatalogs)){
+    if(code!=='en')for(const message of messages)assert.ok(Object.hasOwn(translations.MARKET_TRANSLATIONS[code],message),`${code}: ${message}`);
+    const view=await page({storedLanguage:code});
+    try{
+      view.document.querySelector('#description-mode').click();
+      const note=[...view.document.querySelectorAll('.discovery-note')].find(node=>node.textContent===view.window.MarketI18n.t(messages[0]));
+      assert.ok(note,`${code}: connection explanation`);
+      find(view);await finished(view);
+      assert.equal(view.document.querySelector('#discovery-status').textContent,view.window.MarketI18n.t(messages[1]));
+      assert.equal(view.document.querySelector('#local-connection-help').hidden,false);
+      assert.equal(view.document.querySelector('#connect-machelper'),null);
+    }finally{view.close();}
+  }
 });
 
 test('illustration copy and every preview location follow all interface languages without AI or changing a query', async () => {

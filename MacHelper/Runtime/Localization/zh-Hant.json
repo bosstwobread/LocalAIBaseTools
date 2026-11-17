@@ -248,5 +248,5 @@
   "Website connection is stopped.": "網站連線已停止。",
   "Website connection could not start. Quit other copies of MacHelper and try again.": "無法啟動網站連線。請結束其他 MacHelper 執行個體後重試。",
   "Restart Connection": "重新啟動連線",
-  "Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access.": "在擴充功能市場的「描述你的需求」中連線。新安裝或重新安裝的瀏覽器可能會要求你允許本機存取。"
+  "Click Find with AI on the Extension Market. MacHelper connects automatically. A new or reinstalled browser may ask you to allow local access.": "點擊擴充功能市場中的「使用 AI 尋找」。MacHelper 會自動連線。新安裝或重新安裝的瀏覽器可能會要求你允許本機存取。"
 }

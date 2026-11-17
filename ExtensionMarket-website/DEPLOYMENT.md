@@ -108,19 +108,25 @@ permits `connect-src 'self' http://127.0.0.1:43827`; publish that exact rule wit
 the new client so browser CSP does not block the connection before local-access
 approval. This requires no new Caddy route or exposed server port.
 
-The website starts local requests only after **Connect MacHelper**. Browser
-local/loopback network approval may be required; connecting checks status and
-creates an expiring in-memory session without inference. **Find with AI** sends
-a separate bounded request with that session’s Bearer token. The local service
-accepts only `https://local-ai-extension.nelson007.com`, with strict Origin,
+The website starts local requests only from a valid **Find with AI** click. It
+validates the need first, checks/creates an expiring in-memory session when
+necessary, and sends the bounded search with that session’s Bearer token.
+Invalid input, page load, query edits, language changes, and demos never contact
+the local service. Browser local/loopback network approval may appear on the
+first valid search; the status/session handshake itself does not use AI. There
+is no separate Connect/Reconnect control. An HTTP 401 rejection before inference
+permits one handshake/search retry; other AI/provider errors are not retried.
+The local service accepts only `https://local-ai-extension.nelson007.com`, with strict Origin,
 Host, CORS, method/header/body validation and no generic AI/files/settings API.
 A browser installed after MacHelper or reinstalled later can connect without
 installing a search extension; local approval/session setup may repeat.
 
 Local previews use keyword filtering or a mocked local HTTP API for automated
 tests. Do not widen the production origin check, add wildcard CORS, or disable
-browser local-access protections for preview convenience. **Open MacHelper**
-uses `machelper://open` without starting AI. MacHelper has no search screen or
+browser local-access protections for preview convenience. After a connection
+error, **Open MacHelper** uses `machelper://open` without starting AI, and
+**Get MacHelper** offers the download. An unreachable service cannot distinguish
+a closed app from a missing installation; do not report the app as uninstalled. MacHelper has no search screen or
 native search-prefill link. Searching never installs or executes matched tools.
 The existing deployment per-file checksum gate covers the public discovery
 files, current source packages, and immutable historical Connector ZIPs as

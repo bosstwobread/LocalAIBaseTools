@@ -34,18 +34,21 @@
     return { ...tool, runtime: tool.kind === 'mac-source' ? (tool.runtime === 'native' ? 'native' : 'javascript') : 'browser', summary: String(tool.summary || ''), description: String(tool.description || tool.summary || ''), category: String(tool.category || 'Other'), platforms: strings(tool.platforms), features: strings(tool.features), permissions: strings(tool.permissions), installSteps: strings(tool.installSteps), keywords: strings(tool.keywords), exampleQueries: strings(tool.exampleQueries), limitations: strings(tool.limitations), translations: tool.translations && typeof tool.translations === 'object' ? tool.translations : {}, screenshots: Array.isArray(tool.screenshots) ? tool.screenshots.filter(item => item && typeof item.src === 'string') : [] };
   }
   const LOCAL_SERVICE = 'http://127.0.0.1:43827';
-  const discovery = { mode: 'keywords', running: null, connecting: null, token: null, expiresAt: 0, connectedBefore: false, matches: null, message: '', model: '', stale: false };
+  const discovery = { mode: 'keywords', running: null, token: null, expiresAt: 0, showConnectionHelp: false, matches: null, message: '', model: '', stale: false };
   const toolText = (tool, text) => tool.translations?.[i18n?.locale || 'en']?.[text] || t(text);
-  const queryValue = () => $('#need-query').value.replace(/\s+/g, ' ').trim();
+  const queryValue = () => $('#need-query').value.trim();
   const validQuery = value => Boolean(value) && !value.includes('\0') && value.length <= 2000 && new TextEncoder().encode(value).length <= 8000;
   const connected = () => Boolean(discovery.token) && Date.now() < discovery.expiresAt;
   const connectionMessage = code => ({
-    permission: 'Allow local or loopback network access for this website in your browser’s site settings, then reconnect.',
-    incompatible: 'Update MacHelper to version 6.5 or later, then reconnect.',
-    unauthorized: 'Connection expired. Reconnect MacHelper, then try again.',
-    timeout: 'Connection timed out. Check that MacHelper is running, then reconnect.'
-  })[code] || 'Could not reach MacHelper. Open the app and try Connect again.';
-  function localError(code) { const error = new Error(code); error.code = code; return error; }
+    permission: 'Allow local or loopback network access for this website in your browser’s site settings, then try Find with AI again.',
+    incompatible: 'Update MacHelper to version 6.5 or later, then try Find with AI again.',
+    unauthorized: 'Could not renew the MacHelper connection. Try Find with AI again.',
+    timeout: 'Connection timed out. Check that MacHelper is running, then try Find with AI again.'
+  })[code] || 'Install or open MacHelper, then try Find with AI again.';
+  function localError(code, status) { const error = new Error(code); error.code = code; error.status = status; return error; }
+  function requireCurrent(pending) {
+    if (discovery.running !== pending || pending.controller.signal.aborted) throw localError('cancelled');
+  }
   async function localPermission() {
     // Permission names differ between browser versions. The explicit fetch is
     // authoritative when a browser cannot report its local-access permission.
@@ -73,7 +76,7 @@
         signal: controller.signal, keepalive
       });
       const result = await response.json();
-      if (!response.ok || result?.ok !== true) throw localError(typeof result?.code === 'string' ? result.code : 'search_failed');
+      if (!response.ok || result?.ok !== true) throw localError(typeof result?.code === 'string' ? result.code : 'search_failed', response.status);
       return result;
     } catch (error) {
       if (timedOut) throw localError('timeout');
@@ -93,14 +96,12 @@
     $('#description-search').hidden = !isAI;
     $('#filters').classList.toggle('description-mode',isAI);
     $('#search').closest('label').hidden = isAI;
-    $('#find-with-ai').disabled = Boolean(discovery.running) || Boolean(discovery.connecting) || !connected() || !state.data;
+    $('#find-with-ai').disabled = Boolean(discovery.running) || !state.data;
     $('#cancel-ai-search').hidden = !discovery.running;
-    $('#connect-machelper').disabled = Boolean(discovery.connecting) || Boolean(discovery.running);
-    $('#connect-machelper').textContent = t(discovery.connecting ? 'Connecting to MacHelper…' : discovery.connectedBefore ? 'Reconnect MacHelper' : 'Connect MacHelper');
-    $('#connection-status').textContent = t(discovery.connecting ? 'Connecting to MacHelper…' : connected() ? 'MacHelper connected.' : 'Connect MacHelper to use AI search.');
+    $('#local-connection-help').hidden = !discovery.showConnectionHelp;
     $('#need-query').disabled = Boolean(discovery.running);
     $('#discovery-status').textContent = t(discovery.message);
-    $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running) || Boolean(discovery.connecting)));
+    $('#discovery-status').setAttribute('aria-busy', String(Boolean(discovery.running)));
     $('#discovery-model').textContent = [discovery.model, discovery.stale && t('Using cached extension descriptions.')].filter(Boolean).join(' · ');
     const examples = state.tools.flatMap(tool => tool.exampleQueries.slice(0,1).map(value => ({ tool, value }))).slice(0,3);
     $('#discovery-examples').replaceChildren(...examples.map(({tool,value}) => {
@@ -109,27 +110,37 @@
       return button;
     }));
   }
-  async function connectMacHelper() {
-    if (discovery.connecting || discovery.running) return;
-    const pending = new AbortController();
-    discovery.connecting = pending; discovery.token = null; discovery.expiresAt = 0;
-    discovery.message = ''; renderDiscovery();
-    try {
-      if (await localPermission() === 'denied') throw localError('permission');
-      const status = await localRequest('/v1/status', { signal: pending.signal, timeout: 30000 });
-      const version = typeof status.version === 'string' && status.version.match(/^(\d+)\.(\d+)\.(\d+)$/);
-      if (status.protocolVersion !== 1 || !version || version[0] !== status.version || Number(version[1]) < 6 || (Number(version[1]) === 6 && Number(version[2]) < 5)) throw localError('incompatible');
-      const session = await localRequest('/v1/session', { body: {}, signal: pending.signal });
-      if (typeof session.token !== 'string' || session.token.length !== 64 || !/^[a-f0-9]{64}$/.test(session.token) || !Number.isInteger(session.expiresIn) || session.expiresIn < 1 || session.expiresIn > 1800) throw localError('unavailable');
-      if (discovery.connecting !== pending) return;
-      discovery.token = session.token; discovery.expiresAt = Date.now() + session.expiresIn * 1000; discovery.connectedBefore = true;
-      discovery.message = 'MacHelper connected.';
-    } catch (error) {
-      if (discovery.connecting !== pending) return;
-      discovery.message = connectionMessage(error.code);
-    } finally {
-      if (discovery.connecting === pending) { discovery.connecting = null; renderDiscovery(); }
-    }
+  async function establishSession(pending) {
+    requireCurrent(pending);
+    pending.searchSent = false; pending.token = null;
+    clearTimeout(pending.timeout); pending.timeout = null;
+    discovery.token = null; discovery.expiresAt = 0;
+    discovery.message = 'Connecting to MacHelper…'; renderDiscovery();
+    const permission = await localPermission();
+    requireCurrent(pending);
+    if (permission === 'denied') throw localError('permission');
+    const status = await localRequest('/v1/status', { signal: pending.controller.signal, timeout: 30000 });
+    requireCurrent(pending);
+    const version = typeof status.version === 'string' && status.version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (status.protocolVersion !== 1 || !version || version[0] !== status.version || Number(version[1]) < 6 || (Number(version[1]) === 6 && Number(version[2]) < 5)) throw localError('incompatible');
+    const session = await localRequest('/v1/session', { body: {}, signal: pending.controller.signal });
+    requireCurrent(pending);
+    if (typeof session.token !== 'string' || session.token.length !== 64 || !/^[a-f0-9]{64}$/.test(session.token) || !Number.isInteger(session.expiresIn) || session.expiresIn < 1 || session.expiresIn > 1800) throw localError('unavailable');
+    discovery.token = session.token; discovery.expiresAt = Date.now() + session.expiresIn * 1000;
+  }
+  async function requestSearch(pending) {
+    requireCurrent(pending);
+    pending.token = discovery.token; pending.searchSent = true;
+    discovery.message = 'Finding extensions with your AI…';
+    pending.timeout = setTimeout(()=>{
+      if (discovery.running !== pending) return;
+      cancelDiscovery(false); discovery.message = 'Search timed out. Please try again.'; renderDiscovery();
+    }, 180000);
+    renderDiscovery();
+    return localRequest('/v1/search', {
+      body: { requestId:pending.id, query:pending.query, language:pending.language },
+      token:pending.token, signal:pending.controller.signal, timeout:185000
+    });
   }
   function updateNeed() {
     if (!discovery.running && discovery.matches !== null) {
@@ -150,27 +161,38 @@
     if(pending) {
       clearTimeout(pending.timeout);
       pending.controller.abort();
-      localRequest('/v1/cancel', { body: { requestId: pending.id }, token: pending.token, timeout: 5000, keepalive: true }).catch(()=>{});
+      if (pending.searchSent && pending.token) localRequest('/v1/cancel', {
+        body: { requestId:pending.id }, token:pending.token, timeout:5000, keepalive:true
+      }).catch(()=>{});
       if(showMessage) discovery.message='Search cancelled.';
     }
     renderDiscovery();
   }
   async function searchWithAI() {
-    if(discovery.running || discovery.connecting || !state.data) return;
+    if(discovery.running || !state.data) return;
     const query=queryValue();
     if(!validQuery(query)) {
       discovery.message='Describe your need in 1–2,000 characters.'; renderDiscovery(); return;
     }
-    if (!connected()) { discovery.token = null; discovery.expiresAt = 0; discovery.message = connectionMessage('unauthorized'); renderDiscovery(); return; }
+    // Capture the intended data once. Interface changes while connecting must
+    // not change the query or answer language sent for this explicit click.
     const id=window.crypto?.randomUUID?.() || `search_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const pending={ id, token: discovery.token, controller: new AbortController(), timeout:null };
-    discovery.running=pending; discovery.matches=null; discovery.model=''; discovery.stale=false; $('#no-match-reason').textContent='';
-    discovery.message='Finding extensions with your AI…';
-    pending.timeout=setTimeout(()=>{ if(discovery.running===pending) { cancelDiscovery(false); discovery.message='Search timed out. Please try again.';renderDiscovery(); } },180000);
+    const pending={ id, query, language:i18n?.locale || 'en', token:null, controller:new AbortController(), timeout:null, searchSent:false };
+    discovery.running=pending; discovery.matches=null; discovery.model=''; discovery.stale=false; discovery.showConnectionHelp=false; $('#no-match-reason').textContent='';
     renderDiscovery();renderCards();
     try {
-      const response=await localRequest('/v1/search', { body: { requestId:id, query, language:i18n?.locale || 'en' }, token:pending.token, signal:pending.controller.signal, timeout:185000 });
-      if(discovery.running!==pending) return;
+      if (!connected()) await establishSession(pending);
+      let response;
+      try { response = await requestSearch(pending); }
+      catch (error) {
+        requireCurrent(pending);
+        // HTTP 401 is returned by MacHelper before invoking inference. Renew
+        // once for a restarted app/evicted session; never repeat other failures.
+        if (error.code !== 'unauthorized' || error.status !== 401) throw error;
+        await establishSession(pending);
+        response = await requestSearch(pending);
+      }
+      requireCurrent(pending);
       const result=response.search;
       if(!result || !Array.isArray(result.matches) || result.matches.length > 5) throw localError('search_failed');
       const known=new Set(state.tools.map(tool=>tool.id)), seen=new Set();
@@ -181,8 +203,9 @@
       $('#no-match-reason').textContent=!discovery.matches.length && typeof result.noMatchReason==='string' ? result.noMatchReason.slice(0,4000) : '';
     } catch (error) {
       if(discovery.running!==pending) return;
-      if (['unauthorized', 'unavailable', 'permission', 'incompatible'].includes(error.code)) { discovery.token = null; discovery.expiresAt = 0; discovery.message = connectionMessage(error.code); }
-      else discovery.message = error.code === 'busy' ? 'MacHelper is busy. Wait for its current search to finish, then try again.' : 'Search failed. Check AI Connection in MacHelper and try again.';
+      if (['unauthorized','unavailable','permission','incompatible','timeout'].includes(error.code)) {
+        discovery.token=null; discovery.expiresAt=0; discovery.showConnectionHelp=true; discovery.message=connectionMessage(error.code);
+      } else discovery.message = error.code === 'busy' ? 'MacHelper is busy. Wait for its current search to finish, then try again.' : 'Search failed. Check AI Connection in MacHelper and try again.';
     } finally {
       if(discovery.running===pending) { clearTimeout(pending.timeout); discovery.running=null; renderDiscovery();renderCards(); }
     }
@@ -531,12 +554,10 @@
   $('#keyword-mode').addEventListener('click',()=>chooseSearchMode('keywords'));
   $('#description-mode').addEventListener('click',()=>chooseSearchMode('description'));
   $('#need-query').addEventListener('input',updateNeed);
-  $('#connect-machelper').addEventListener('click',connectMacHelper);
   $('#find-with-ai').addEventListener('click',searchWithAI);
   $('#cancel-ai-search').addEventListener('click',()=>cancelDiscovery());
   window.addEventListener('pagehide',()=>{
     cancelDiscovery(false);
-    discovery.connecting?.abort(); discovery.connecting=null;
     discovery.token=null; discovery.expiresAt=0;
   });
   window.addEventListener('pageshow',renderDiscovery);

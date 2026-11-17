@@ -248,5 +248,5 @@
   "Website connection is stopped.": "웹사이트 연결이 중지되었습니다.",
   "Website connection could not start. Quit other copies of MacHelper and try again.": "연결을 시작할 수 없습니다. 다른 MacHelper 인스턴스를 종료한 후 다시 시도하세요.",
   "Restart Connection": "연결 다시 시작",
-  "Connect from Describe your need on the Extension Market. A new or reinstalled browser may ask you to allow local access.": "Extension Market의 필요한 기능 설명에서 연결하세요. 새로 설치하거나 재설치한 브라우저에서 로컬 접근 권한을 요청할 수 있습니다."
+  "Click Find with AI on the Extension Market. MacHelper connects automatically. A new or reinstalled browser may ask you to allow local access.": "Extension Market에서 AI로 찾기를 클릭하세요. MacHelper가 자동으로 연결됩니다. 새로 설치하거나 재설치한 브라우저에서 로컬 접근 권한을 요청할 수 있습니다."
 }
