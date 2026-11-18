@@ -46,14 +46,16 @@ public struct CapabilitySelectionAction {
     /// invalidate this action; activating new owner source/settings must.
     public let generation: String
     public let title: String
+    public let systemSymbolName: String
     public let allowsReplacement: Bool
     public let allowsPaste: Bool
     public let perform: @MainActor (CapabilitySelectionInput, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult
 
-    public init(identifier: String, generation: String = "", title: String, allowsReplacement: Bool = false, allowsPaste: Bool = false,
+    public init(identifier: String, generation: String = "", title: String, systemSymbolName: String? = nil, allowsReplacement: Bool = false, allowsPaste: Bool = false,
                 perform: @escaping @MainActor (CapabilitySelectionInput, @escaping @MainActor (CapabilityTranslationResult) -> Void) async throws -> CapabilityTranslationResult) {
         self.identifier = identifier; self.generation = generation
         self.title = title; self.allowsReplacement = allowsReplacement; self.perform = perform
+        self.systemSymbolName = systemSymbolName ?? (allowsReplacement ? "pencil.and.outline" : "character.bubble")
         self.allowsPaste = allowsPaste
     }
 }
@@ -161,7 +163,7 @@ public final class SelectionActionCapability {
         let preservesOwner = routing.reconcile(actions.map { .init(identifier: $0.identifier, generation: $0.generation) })
         if invalidateCurrent || (hadSelectedAction && !preservesOwner) { dismiss() }
         self.actions = actions
-        panels.setActions(actions.map { (identifier: $0.identifier, title: $0.title) })
+        panels.setActions(actions.map { (identifier: $0.identifier, title: $0.title, systemSymbolName: $0.systemSymbolName) })
         // If only the toolbar is visible, refresh its size/placement for added
         // or removed actions. A streamed/completed result keeps its placement.
         if let selection = state.selection, state.canTranslate { panels.refreshToolbar(near: selection.bounds) }

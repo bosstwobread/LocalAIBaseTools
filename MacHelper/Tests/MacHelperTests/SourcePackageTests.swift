@@ -29,6 +29,23 @@ private final class SourceFixtureURLProtocol: URLProtocol, @unchecked Sendable {
 }
 
 final class SourcePackageTests: XCTestCase {
+    func testCommandIconsRemainOptionalAndRoundTripThroughSourceMetadata() throws {
+        let old = try JSONDecoder().decode(SourceExtensionCommand.self,
+            from: Data(#"{"identifier":"translate","title":"Translate","trigger":"selection"}"#.utf8))
+        XCTAssertNil(old.systemSymbolName)
+        let command = SourceExtensionCommand(identifier: "translate", title: "Translate", trigger: "selection", systemSymbolName: "character.bubble")
+        XCTAssertEqual(try JSONDecoder().decode(SourceExtensionCommand.self, from: JSONEncoder().encode(command)), command)
+        for symbol in ["character.bubble", "future.valid-symbol.123"] {
+            let manifest = SourceExtensionManifest(identifier: "com.example.icons", displayName: "Icons", version: "1.0.0", summary: "Icon fixture",
+                permissions: ["selection.read"], commands: [.init(identifier: "action", title: "Action", trigger: "selection", systemSymbolName: symbol)])
+            XCTAssertNoThrow(try manifest.validate())
+        }
+        for symbol in ["", "pencil\n", "two words", "../icon", "https://example.com/icon", String(repeating: "a", count: 101)] {
+            let manifest = SourceExtensionManifest(identifier: "com.example.icons", displayName: "Icons", version: "1.0.0", summary: "Icon fixture",
+                permissions: ["selection.read"], commands: [.init(identifier: "action", title: "Action", trigger: "selection", systemSymbolName: symbol)])
+            XCTAssertThrowsError(try manifest.validate(), symbol)
+        }
+    }
     private let identity = "com.example.translation"
     private let baseURL = URL(string: "https://source.example/catalog.json")!
     private func temporary() throws -> URL {

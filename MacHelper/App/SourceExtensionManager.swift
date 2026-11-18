@@ -681,7 +681,7 @@ final class SourceExtensionManager {
             guard let runtime = active[id], state.enabled[id] == true, shouldMonitor(runtime.snapshot) else { return [] }
             return runtime.snapshot.manifest.commands.filter { $0.trigger == "selection" }.map { command in
                 CapabilitySelectionAction(identifier: id + "/" + command.identifier, generation: runtime.activationGeneration,
-                    title: localizedText(command.title, for: id),
+                    title: localizedText(command.title, for: id), systemSymbolName: command.systemSymbolName,
                     allowsReplacement: runtime.snapshot.manifest.permissions.contains("selection.replace"),
                     allowsPaste: runtime.snapshot.manifest.permissions.contains("selection.paste")) { [weak self, weak runtime] input, progress in
                     guard let self, let runtime, self.active[id] === runtime else { throw CancellationError() }

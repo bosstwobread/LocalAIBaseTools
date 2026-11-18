@@ -62,6 +62,12 @@ private final class CapabilityPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// Borderless toolbar cells use their complete frame as the click area.
+/// Native bezel/menu alignment insets must not shrink or overlap these slots.
+private final class CapabilityIconButton: NSButton {
+    override var alignmentRectInsets: NSEdgeInsets { .init(top: 0, left: 0, bottom: 0, right: 0) }
+}
+
 private final class CapabilityMenuTracking: NSObject, NSMenuDelegate {
     var isTracking = false
     func menuWillOpen(_ menu: NSMenu) { isTracking = true }
@@ -351,56 +357,74 @@ final class FloatingCapabilityPanels {
         actionStatusHeight?.constant = value.isEmpty ? 0 : max(16, ceil(height) + 4)
     }
 
-    func setActions(_ actions: [(identifier: String, title: String)]) {
+    func setActions(_ actions: [(identifier: String, title: String, systemSymbolName: String)]) {
         guard !actions.isEmpty else { return }
         let background = Self.background()
         let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 3
-        stack.alignment = .leading
+        stack.orientation = .horizontal
+        stack.spacing = 4
+        stack.alignment = .centerY
+        stack.userInterfaceLayoutDirection = AppLocalization.shared.isRightToLeft ? .rightToLeft : .leftToRight
         actionButtons.removeAll()
         iconButton = nil
-        var maximumWidth: CGFloat = 0
         // Keep the overlay bounded even with many extensions. Native menus
         // scroll their overflow while preserving every manifest command.
         let layout = SelectionToolbarLayout(identifiers: actions.map(\.identifier))
         for action in actions.prefix(layout.visible.count) {
-            let button = NSButton(title: action.title, target: self, action: #selector(performToolbarAction(_:)))
-            button.bezelStyle = .rounded
-            button.controlSize = .small
+            let image = Self.actionImage(action.systemSymbolName, label: action.title)
+            let button = CapabilityIconButton(image: image, target: self, action: #selector(performToolbarAction(_:)))
+            button.title = ""
+            button.imagePosition = .imageOnly
+            button.isBordered = false
+            button.contentTintColor = .controlAccentColor
+            button.imageScaling = .scaleProportionallyDown
             button.toolTip = L("%@ · selected text", action.title)
             button.setAccessibilityIdentifier(action.identifier)
             button.setAccessibilityLabel(action.title)
             actionButtons[ObjectIdentifier(button)] = action.identifier
-            maximumWidth = max(maximumWidth, min(300, button.intrinsicContentSize.width))
             stack.addArrangedSubview(button)
+            NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 34), button.heightAnchor.constraint(equalToConstant: 34)])
         }
         if !layout.overflow.isEmpty {
-            let menu = NSPopUpButton(frame: .zero, pullsDown: true)
-            menu.pullsDown = true
-            menu.controlSize = .small
-            menu.addItem(withTitle: L("More…"))
+            let menu = NSMenu(title: L("More…"))
             for action in actions.dropFirst(layout.visible.count) {
                 let item = NSMenuItem(title: action.title, action: #selector(performOverflowAction(_:)), keyEquivalent: "")
                 item.target = self; item.representedObject = action.identifier
                 item.setAccessibilityIdentifier(action.identifier)
-                menu.menu?.addItem(item)
+                menu.addItem(item)
             }
-            menu.menu?.delegate = menuTracking
-            maximumWidth = max(maximumWidth, menu.intrinsicContentSize.width)
-            stack.addArrangedSubview(menu)
+            menu.delegate = menuTracking
+            let more = CapabilityIconButton(image: Self.actionImage("ellipsis", label: L("More…")), target: self, action: #selector(showMoreActions(_:)))
+            more.title = ""
+            more.imagePosition = .imageOnly
+            more.isBordered = false
+            more.contentTintColor = .controlAccentColor
+            more.menu = menu
+            more.toolTip = L("More…")
+            more.setAccessibilityLabel(L("More…"))
+            more.setAccessibilityIdentifier("selection-toolbar-more")
+            stack.addArrangedSubview(more)
+            NSLayoutConstraint.activate([more.widthAnchor.constraint(equalToConstant: 34), more.heightAnchor.constraint(equalToConstant: 34)])
         }
-        toolbarSize = CGSize(width: max(70, maximumWidth + 16), height: CGFloat(stack.arrangedSubviews.count) * 27 + 12)
+        let count = CGFloat(stack.arrangedSubviews.count)
+        toolbarSize = CGSize(width: count * 34 + max(0, count - 1) * 4 + 12, height: 46)
         stack.translatesAutoresizingMaskIntoConstraints = false
         background.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -8),
+            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 6),
+            stack.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -6),
             stack.topAnchor.constraint(equalTo: background.topAnchor, constant: 6),
             stack.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -6)
         ])
         iconPanel.contentView = background
+        iconPanel.setContentSize(toolbarSize)
         background.userInterfaceLayoutDirection = AppLocalization.shared.isRightToLeft ? .rightToLeft : .leftToRight
+    }
+
+    private static func actionImage(_ name: String, label: String) -> NSImage {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: label)
+            ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: label)!
+        return image.withSymbolConfiguration(.init(pointSize: 17, weight: .regular)) ?? image
     }
 
     private static func panel(title: String, size: NSSize) -> NSPanel {
@@ -634,6 +658,9 @@ final class FloatingCapabilityPanels {
     @objc private func performOverflowAction(_ sender: NSMenuItem) {
         guard let identifier = sender.representedObject as? String else { return }
         onPerformAction?(identifier)
+    }
+    @objc private func showMoreActions(_ sender: NSButton) {
+        sender.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY), in: sender)
     }
     @objc private func applyResult() {
         guard replacementAllowed, replacementAvailable, applyButton.isEnabled,

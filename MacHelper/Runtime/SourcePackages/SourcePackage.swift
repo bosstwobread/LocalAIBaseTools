@@ -10,8 +10,10 @@ public struct SourceExtensionCommand: Codable, Equatable, Sendable {
     public let identifier: String
     public let title: String
     public let trigger: String
-    public init(identifier: String, title: String, trigger: String) {
+    public let systemSymbolName: String?
+    public init(identifier: String, title: String, trigger: String, systemSymbolName: String? = nil) {
         self.identifier = identifier; self.title = title; self.trigger = trigger
+        self.systemSymbolName = systemSymbolName
     }
 }
 
@@ -91,6 +93,10 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
             guard command.identifier.range(of: #"^[a-z][a-z0-9-]{0,47}$"#, options: .regularExpression) != nil,
                   SourcePackageRules.validText(command.title, limit: 160), ["selection", "manual"].contains(command.trigger) else {
                 throw SourcePackageError.invalid("The source extension declares an invalid command.")
+            }
+            if let symbol = command.systemSymbolName,
+               symbol.range(of: #"\A[a-z0-9][a-z0-9.-]{0,99}\z"#, options: .regularExpression) == nil {
+                throw SourcePackageError.invalid("The source extension declares an invalid command icon.")
             }
             if command.trigger == "selection", !permissions.contains("selection.read") {
                 throw SourcePackageError.invalid("Selection commands must declare selection.read permission.")

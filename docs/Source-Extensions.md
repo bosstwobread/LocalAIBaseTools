@@ -40,7 +40,7 @@ Small user preferences are stored separately under the MacHelper support folder'
   "entryPoint": "main.js",
   "permissions": ["selection.read", "ai.transform", "ui.panel"],
   "commands": [
-    {"identifier": "translate", "title": "Translate", "trigger": "selection"}
+    {"identifier": "translate", "title": "Translate", "trigger": "selection", "systemSymbolName": "character.bubble"}
   ],
   "settingsSchema": "settings.schema.json"
 }
@@ -52,7 +52,9 @@ Identifiers use lowercase reverse-domain notation and remain stable for an insta
 
 The shared toolbar uses every enabled tool’s `selection` command, rather than separate overlapping icons. Selection must be verified and nonempty. Displaying the toolbar does not invoke code or AI. Each selected command uses the current validated extension activation and normal cancellation/stale-result checks.
 
-One host coordinator owns the toolbar and active result panel. Placement stays within screen bounds. The toolbar shows all actions up to five rows; with more than five, it shows four actions plus **More…**, whose native scrolling menu contains the remaining commands, keeping every enabled selection action accessible. There is no five-extension installation limit. Each extension keeps independent source, worker, settings, and prompt resources.
+One host coordinator owns the toolbar and active result panel. Placement stays within screen bounds. MacHelper 6.6.1 shows separate icon cells in one horizontal row, with gaps that keep their click areas from overlapping. All actions appear when there are five or fewer; with more than five, four action icons and an ellipsis lead to **More…**, a native scrolling menu containing the remaining command names. There is no five-extension installation limit. Each extension keeps independent source, worker, settings, and prompt resources.
+
+Commands may provide an optional `systemSymbolName` containing an SF Symbols name, such as `character.bubble` or `pencil.and.outline` (MacHelper 6.6.1+). It controls presentation only and grants no capability. When omitted, the host uses a pencil for a tool with `selection.replace`, or a character bubble for a read-only tool. An unavailable symbol falls back to a generic extension icon. Existing source packages need no edit or new version to use the default icons. Keep `title` and its source translations: the host uses them for tooltips, accessibility labels, and overflow menu items.
 
 The current operation/result is associated with the owning extension’s immutable activation UUID (validated source/settings generation) and command identity. Successful activation/reload/re-enable assigns a new UUID. An internal worker recovery can retain that activation; worker IPC generations remain separately strict. Reconciling unrelated tool reloads, enablement, or disablement preserves that operation/result if its owner remains unchanged. Replacing/stopping that activation or removing its command invalidates it; stale output cannot cross generations. Selection changes and existing interface-language invalidation continue to dismiss the active work.
 

@@ -53,7 +53,7 @@ MyTranslation/
   "entryPoint": "main.js",
   "permissions": ["selection.read", "ai.transform", "ui.panel"],
   "commands": [
-    {"identifier": "translate", "title": "Translate", "trigger": "selection"}
+    {"identifier": "translate", "title": "Translate", "trigger": "selection", "systemSymbolName": "character.bubble"}
   ],
   "settingsSchema": "settings.schema.json"
 }
@@ -131,7 +131,7 @@ Keep the same prompt and settings schema above. Change the manifest to a unique 
   "summary": "Translate selected text in an independent Swift worker.",
   "entryPoint": "Main.swift",
   "permissions": ["native.execute", "selection.read", "ai.transform", "ui.panel"],
-  "commands": [{"identifier": "translate", "title": "Translate", "trigger": "selection"}],
+  "commands": [{"identifier": "translate", "title": "Translate", "trigger": "selection", "systemSymbolName": "character.bubble"}],
   "settingsSchema": "settings.schema.json"
 }
 ```
@@ -202,9 +202,9 @@ The first eight points describe the JavaScript adapter. The native equivalents a
 
 ### Shared selection actions and explicit Apply (MacHelper 6.6+)
 
-Each enabled source package’s commands with `trigger: "selection"` appear in one host-owned toolbar. Use clear command titles such as **Translate** or **Polish** and include them in the tool’s localization resource. A real nonempty selection is required; selection detection alone never invokes a worker command or AI. Do not create a separate floating icon or infer that the first command is selected automatically. Manual commands have no general Settings launcher.
+Each enabled source package’s commands with `trigger: "selection"` appear in one host-owned toolbar. Use clear command titles such as **Translate** or **Polish** and include them in the tool’s localization resource. MacHelper 6.6.1 presents icons while retaining those names in tooltips, accessibility labels, and menu items. Commands may supply optional `systemSymbolName`, an SF Symbols name such as `character.bubble` or `pencil.and.outline`. Without it, replacement-capable tools use a pencil and read-only tools use a character bubble; an unavailable symbol uses a generic extension icon. This field controls presentation only. Existing packages get the defaults without a source change. A real nonempty selection is required; selection detection alone never invokes a worker command or AI. Do not create a separate floating overlay or infer that the first command is selected automatically. Manual commands have no general Settings launcher.
 
-The host places one toolbar within screen bounds and allows one active result panel. Up to five action rows are visible; when there are more than five actions, four actions plus **More…** lead to a native scrolling menu for the remaining commands, keeping every enabled selection action accessible. Extension source, worker processes, settings, and prompts remain separate. An unrelated tool’s reload/enable/disable must not cancel the active operation/result when its owning extension activation UUID and command remain unchanged. The activation represents validated source/settings; successful reload/re-enable creates a new one, while an internal worker recovery may keep the same activation. Worker IPC generations remain separately checked. Replacing or disabling that activation, or removing its command, invalidates the operation. Existing selection and language-switch dismissal rules still apply.
+The host places one toolbar within screen bounds and allows one active result panel. MacHelper 6.6.1 uses one horizontal row of separate icon cells with gaps between their click areas. Up to five cells are visible; when there are more than five actions, four action icons plus an ellipsis open **More…**, a native scrolling menu naming the remaining commands, keeping every enabled selection action accessible. Extension source, worker processes, settings, and prompts remain separate. An unrelated tool’s reload/enable/disable must not cancel the active operation/result when its owning extension activation UUID and command remain unchanged. The activation represents validated source/settings; successful reload/re-enable creates a new one, while an internal worker recovery may keep the same activation. Worker IPC generations remain separately checked. Replacing or disabling that activation, or removing its command, invalidates the operation. Existing selection and language-switch dismissal rules still apply.
 
 For a polishing/editing tool, declare `selection.replace` together with `selection.read`, `ai.transform`, and `ui.panel`. To support host-owned clipboard-assisted Apply where direct selected-text writing is unavailable or unreliable, also request optional `selection.paste`, which requires `selection.read` and `selection.replace` and a separate permission review. Return the same final `{text, title}` object used by read-only tools; no `apply` method, AX object, extra result field, or replacement range is exposed to JavaScript or the native SDK. The host may offer **Apply** only after a successful final response. An explicitly edited complete source prompt still belongs to the extension and is sent unchanged.
 
@@ -242,7 +242,7 @@ Declare only capabilities used by the tool:
 | `clipboard.read` | Accepted only for compatibility with older source packages. The current host provides no clipboard-reading action or JavaScript clipboard API. New tools should omit it. |
 | `native.execute` | Required for `runtime: "native"`. Approve running trusted compiled code under the current user; this permission is unavailable to JavaScript packages. |
 
-Identifiers match `^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*){1,7}$` (2–8 lowercase reverse-domain segments), at most 128 UTF-8 bytes. Versions use `major.minor.patch` with an optional prerelease suffix. A manifest allows 1–16 commands; command identifiers match `^[a-z][a-z0-9-]{0,47}$`, and triggers are `selection` or `manual`. Manifest names, summaries, and command titles must be nonblank bounded text. Do not invent manifest fields such as arbitrary launch commands, runtime dependencies, or a minimum-host-version check that the current loader does not enforce; document host requirements in the README.
+Identifiers match `^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*){1,7}$` (2–8 lowercase reverse-domain segments), at most 128 UTF-8 bytes. Versions use `major.minor.patch` with an optional prerelease suffix. A manifest allows 1–16 commands; command identifiers match `^[a-z][a-z0-9-]{0,47}$`, and triggers are `selection` or `manual`. Manifest names, summaries, and command titles must be nonblank bounded text. Command `systemSymbolName` is an optional SF Symbols presentation name (MacHelper 6.6.1+); it is not executable code, an image path, or a new permission. Do not invent manifest fields such as arbitrary launch commands, runtime dependencies, or a minimum-host-version check that the current loader does not enforce; document host requirements in the README.
 
 Settings schema version 1 supports `select`, `text`, `boolean`, and `prompt`, with at most 32 fields. Keys match `^[A-Za-z][A-Za-z0-9_]{0,63}$` and must be unique. Ordinary fields need a correctly typed `default`; a select needs unique choice values and a default among them. Prompt fields use `path` instead and cannot declare a `default`; ordinary fields cannot declare a `path`. Normalization removes unknown keys and falls back to defaults for missing or invalid ordinary values; prompt resources remain outside the normalized dictionary. A boolean must be a JSON boolean, not a number. The host renders the declared fields dynamically in **Extensions**, including for disabled installed tools without starting their worker.
 

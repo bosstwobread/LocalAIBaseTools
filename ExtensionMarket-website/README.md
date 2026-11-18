@@ -26,7 +26,9 @@ native installation review. MacHelper checks the catalog and manifest before
 showing permissions, then downloads the complete hash-verified source after
 approval. Existing local edits, settings, and enabled/disabled choices survive
 repeat install clicks. Both current tools run through MacHelper without a
-browser extension. MacHelper 6.6 adds a shared Translate/Polish selection toolbar.
+browser extension. MacHelper 6.6 adds a shared Translate/Polish selection toolbar;
+6.6.1 presents separate icons with nonoverlapping click areas, localized tooltips,
+and an ellipsis menu when more than five actions are enabled.
 Polish-input streams a preview; **Apply** replaces only a still-unchanged selection
 in a supported editable field, while **Copy** is available for other selections.
 MacHelper identifies supported web editors through a bounded Accessibility
