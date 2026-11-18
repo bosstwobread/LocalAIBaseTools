@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build MacHelper with generic capabilities and an editable Translation source catalog."""
+"""Build MacHelper with generic capabilities and editable first-party source tools."""
 import argparse
 import json
 import plistlib
@@ -50,6 +50,7 @@ def main():
     if market_url.scheme != "https" or not market_url.hostname or market_url.username or market_url.password or market_url.query or market_url.fragment:
         parser.error("The marketplace URL must be a public HTTPS website URL without credentials, query, or fragment.")
     subprocess.run([sys.executable, str(ROOT / "scripts/build-app-icon.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/build-source-catalog.py")], check=True)
     identity = signing_identity(args.signing_identity)
     discovery_stage = ROOT / "dist"
     subprocess.run([sys.executable, str(ROOT / "ExtensionMarket-website/discovery.py"), "--output", str(discovery_stage)], check=True)
@@ -75,7 +76,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "6.5.1", "CFBundleVersion": "651", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.6.0", "CFBundleVersion": "660", "CFBundleIconFile": "AppIcon",
         "CFBundleDevelopmentRegion": "en",
         "CFBundleLocalizations": sorted(path.stem for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")),
         "MacHelperMarketplaceURL": args.marketplace_url,
@@ -106,11 +107,16 @@ def main():
     shutil.copy2(ROOT / "MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift", resources / "NativeExtensionSDK/MacHelperNativeSDK.swift")
     shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.icns", resources / "AppIcon.icns")
     shutil.copy2(ROOT / "catalog/extensions.json", resources / "SourceCatalog/extensions.json")
-    shutil.copytree(ROOT / "Extensions/Translation", resources / "SourceSeeds/Translation",
-                    ignore=shutil.ignore_patterns(".*", "__pycache__"))
+    for folder in sorted((ROOT / "Extensions").iterdir()):
+        manifest_path = folder / "extension.json"
+        if not folder.is_dir() or folder.is_symlink() or not manifest_path.is_file():
+            continue
+        manifest = json.loads(manifest_path.read_text())
+        shutil.copytree(folder, resources / "SourceSeeds" / (manifest["identifier"] + ".macsource"),
+                        ignore=shutil.ignore_patterns(".*", "__pycache__", "node_modules"))
     sign(app, identity, "com.localaibasetools.mac-helper")
     print(f"Built {app}")
-    print("Translation source installs into its editable working folder when enabled; hot reload uses an independent worker.")
+    print("Source tools install into independent editable working folders when enabled; each worker supports hot reload.")
 
 
 if __name__ == "__main__":

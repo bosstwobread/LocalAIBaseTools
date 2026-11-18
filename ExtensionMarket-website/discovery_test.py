@@ -72,4 +72,9 @@ class DiscoveryPublicationTests(unittest.TestCase):
         self.assertEqual(index['extensions'][0]['id'],'com.example.stable-browser');self.assertEqual(index['extensions'][0]['runtime'],'browser')
         with self.assertRaisesRegex(ValueError,'conflicting'):build_discovery_index(self.root,{'tools':{'Example':{'id':'com.example.other'}}})
 
+    def test_retired_tools_are_excluded_from_current_discovery(self):
+        (self.folder/'discovery.json').unlink()
+        index,_=build_discovery_index(self.root,{'tools':{},'retiredTools':['Example']})
+        self.assertEqual(index['extensions'],[])
+
 if __name__=='__main__':unittest.main()

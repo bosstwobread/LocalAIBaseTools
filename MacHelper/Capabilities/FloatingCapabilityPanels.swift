@@ -62,6 +62,12 @@ private final class CapabilityPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+private final class CapabilityMenuTracking: NSObject, NSMenuDelegate {
+    var isTracking = false
+    func menuWillOpen(_ menu: NSMenu) { isTracking = true }
+    func menuDidClose(_ menu: NSMenu) { isTracking = false }
+}
+
 /// A small dedicated mouse-capture area leaves the close button, result text
 /// selection, scroll view and footer controls with their normal AppKit behavior.
 private final class CapabilityPanelDragHandle: NSView {
@@ -136,6 +142,8 @@ enum CapabilityDragPointer {
 @MainActor
 final class FloatingCapabilityPanels {
     var onPerform: (() -> Void)?
+    var onPerformAction: ((String) -> Void)?
+    var onApply: ((String) -> Void)?
     var onDismiss: (() -> Void)?
     var onResultMoved: (() -> Void)?
     private let iconPanel: NSPanel
@@ -144,8 +152,16 @@ final class FloatingCapabilityPanels {
     private let output = NSTextView()
     private let scroll = NSScrollView()
     private let footer = NSTextField(labelWithString: "")
+    private let actionStatus = NSTextField(wrappingLabelWithString: "")
+    private var actionStatusHeight: NSLayoutConstraint?
     private let copyButton = NSButton(title: L("Copy"), target: nil, action: nil)
     private let retryButton = NSButton(title: L("Retry"), target: nil, action: nil)
+    private let applyButton = NSButton(title: L("Apply"), target: nil, action: nil)
+    private var actionButtons: [ObjectIdentifier: String] = [:]
+    private var toolbarSize = CGSize(width: 34, height: 34)
+    private var replacementAllowed = false
+    private var replacementAvailable = false
+    private let menuTracking = CapabilityMenuTracking()
     private var closeButton: NSButton?
     private var iconButton: NSButton?
     private var languageObserver: NSObjectProtocol?
@@ -153,7 +169,7 @@ final class FloatingCapabilityPanels {
     private var presentation = CapabilityPresentationState()
     private var placement = CapabilityPanelPlacement()
 
-    private let toolTitle: String
+    private var toolTitle: String
     private let systemSymbolName: String
 
     init(toolTitle: String, systemSymbolName: String) {
@@ -177,12 +193,14 @@ final class FloatingCapabilityPanels {
     private func refreshLanguage() {
         copyButton.title = L("Copy")
         retryButton.title = L("Retry")
+        applyButton.title = L("Apply")
         closeButton?.toolTip = L("Dismiss (Esc)")
         closeButton?.setAccessibilityLabel(L("Dismiss result"))
         iconButton?.toolTip = L("%@ · selected text", toolTitle)
         dragHandle.toolTip = L("Drag to move this panel")
         dragHandle.setAccessibilityLabel(L("Move result panel"))
         output.setAccessibilityLabel(L("Result text"))
+        actionStatus.setAccessibilityLabel(L("Apply status"))
         output.baseWritingDirection = .natural
         func applyDirection(_ view: NSView) {
             if view is NSTextView { return }
@@ -193,6 +211,7 @@ final class FloatingCapabilityPanels {
     }
 
     var isDraggingResultPanel: Bool { placement.isDragging }
+    var isInteractingWithOverlay: Bool { placement.isDragging || menuTracking.isTracking }
     /// Read-only diagnostic geometry for the explicit synthetic fixture.
     var resultFrame: CGRect { resultPanel.frame }
     var resultHeaderFrame: CGRect {
@@ -207,7 +226,7 @@ final class FloatingCapabilityPanels {
     }
 
     func contains(_ point: CGPoint) -> Bool {
-        (iconPanel.isVisible && iconPanel.frame.contains(point)) ||
+        menuTracking.isTracking || (iconPanel.isVisible && iconPanel.frame.contains(point)) ||
         (resultPanel.isVisible && resultPanel.frame.contains(point))
     }
 
@@ -215,8 +234,13 @@ final class FloatingCapabilityPanels {
         dragHandle.cancelDrag()
         placement.reset()
         resultPanel.orderOut(nil)
-        place(iconPanel, size: CGSize(width: 34, height: 34), near: anchor)
+        place(iconPanel, size: toolbarSize, near: anchor)
         iconPanel.orderFrontRegardless()
+    }
+
+    func refreshToolbar(near anchor: CGRect) {
+        guard iconPanel.isVisible else { return }
+        place(iconPanel, size: toolbarSize, near: anchor)
     }
 
     func showLoading(near anchor: CGRect) {
@@ -225,7 +249,9 @@ final class FloatingCapabilityPanels {
         updateText(L("Working…"), resetScroll: true)
         footer.stringValue = L("MacHelper · shared AI settings")
         footer.toolTip = nil
+        setActionStatus(nil)
         copyButton.isEnabled = false
+        applyButton.isHidden = true
         copyButton.title = L("Copy")
         output.isSelectable = false
         retryButton.isHidden = true
@@ -238,7 +264,9 @@ final class FloatingCapabilityPanels {
         if !presentation.text.isEmpty { updateText(presentation.text) }
         footer.stringValue = presentation.model.map { L("Working… · %@", $0) } ?? L("Working…")
         footer.toolTip = presentation.model
+        setActionStatus(nil)
         copyButton.isEnabled = false
+        applyButton.isHidden = true
         output.isSelectable = false
         retryButton.isHidden = true
         presentResult(near: anchor)
@@ -251,6 +279,12 @@ final class FloatingCapabilityPanels {
         footer.stringValue = presentation.model ?? L("MacHelper · shared AI settings")
         footer.toolTip = presentation.model
         copyButton.isEnabled = presentation.copyText != nil
+        applyButton.isHidden = !replacementAllowed || !replacementAvailable
+        applyButton.isEnabled = presentation.copyText != nil
+        applyButton.title = L("Apply")
+        if replacementAllowed && !replacementAvailable {
+            setActionStatus(L("Use Copy; safe replacement could not be verified for this selection."))
+        } else { setActionStatus(nil) }
         output.isSelectable = true
         retryButton.isHidden = true
         presentResult(near: anchor)
@@ -260,10 +294,11 @@ final class FloatingCapabilityPanels {
         presentation.fail(message)
         title.stringValue = presentation.isIncomplete ? L("Incomplete · %@", toolTitle) : L("Couldn’t complete %@", toolTitle)
         updateText(presentation.text)
-        footer.stringValue = presentation.isIncomplete ? L("Incomplete: %@", message)
-            : L("Check MacHelper settings and try again.")
-        footer.toolTip = message
+        footer.stringValue = presentation.model ?? L("MacHelper · shared AI settings")
+        footer.toolTip = presentation.model
+        setActionStatus(presentation.isIncomplete ? L("Incomplete: %@", message) : L("Check MacHelper settings and try again."))
         copyButton.isEnabled = false
+        applyButton.isHidden = true
         output.isSelectable = false
         retryButton.isHidden = false
         presentResult(near: anchor)
@@ -276,6 +311,96 @@ final class FloatingCapabilityPanels {
         resultPanel.orderOut(nil)
         presentation.reset()
         output.string = ""
+        setActionStatus(nil)
+    }
+
+    func setToolTitle(_ value: String) { toolTitle = value }
+
+    func configureReplacement(allowed: Bool, available: Bool) {
+        replacementAllowed = allowed; replacementAvailable = available
+        applyButton.isHidden = true
+    }
+
+    func replacementSucceeded(_ outcome: SelectionReplacementOutcome) {
+        applyButton.title = L("Applied")
+        applyButton.isEnabled = false
+        switch outcome {
+        case .confirmed: setActionStatus(L("Selected text replaced."))
+        case .unverified, .changedByEditor:
+            applyButton.title = L("Apply")
+            setActionStatus(L("Edit requested. Check the original app before continuing."))
+        case .pasteRequested:
+            applyButton.title = L("Apply")
+            setActionStatus(L("Paste requested. The result is on the clipboard."))
+        }
+    }
+
+    func replacementFailed(_ message: String) {
+        applyButton.isEnabled = false
+        setActionStatus(message)
+        // The authoritative result remains selectable/copyable after failure.
+    }
+
+    private func setActionStatus(_ message: String?) {
+        let value = message ?? ""
+        actionStatus.stringValue = value
+        actionStatus.isHidden = value.isEmpty
+        let width = max(1, resultPanel.frame.width - 36)
+        let height = (value as NSString).boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: NSFont.systemFont(ofSize: 11)]).height
+        actionStatusHeight?.constant = value.isEmpty ? 0 : max(16, ceil(height) + 4)
+    }
+
+    func setActions(_ actions: [(identifier: String, title: String)]) {
+        guard !actions.isEmpty else { return }
+        let background = Self.background()
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 3
+        stack.alignment = .leading
+        actionButtons.removeAll()
+        iconButton = nil
+        var maximumWidth: CGFloat = 0
+        // Keep the overlay bounded even with many extensions. Native menus
+        // scroll their overflow while preserving every manifest command.
+        let layout = SelectionToolbarLayout(identifiers: actions.map(\.identifier))
+        for action in actions.prefix(layout.visible.count) {
+            let button = NSButton(title: action.title, target: self, action: #selector(performToolbarAction(_:)))
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.toolTip = L("%@ · selected text", action.title)
+            button.setAccessibilityIdentifier(action.identifier)
+            button.setAccessibilityLabel(action.title)
+            actionButtons[ObjectIdentifier(button)] = action.identifier
+            maximumWidth = max(maximumWidth, min(300, button.intrinsicContentSize.width))
+            stack.addArrangedSubview(button)
+        }
+        if !layout.overflow.isEmpty {
+            let menu = NSPopUpButton(frame: .zero, pullsDown: true)
+            menu.pullsDown = true
+            menu.controlSize = .small
+            menu.addItem(withTitle: L("More…"))
+            for action in actions.dropFirst(layout.visible.count) {
+                let item = NSMenuItem(title: action.title, action: #selector(performOverflowAction(_:)), keyEquivalent: "")
+                item.target = self; item.representedObject = action.identifier
+                item.setAccessibilityIdentifier(action.identifier)
+                menu.menu?.addItem(item)
+            }
+            menu.menu?.delegate = menuTracking
+            maximumWidth = max(maximumWidth, menu.intrinsicContentSize.width)
+            stack.addArrangedSubview(menu)
+        }
+        toolbarSize = CGSize(width: max(70, maximumWidth + 16), height: CGFloat(stack.arrangedSubviews.count) * 27 + 12)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        background.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: background.topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -6)
+        ])
+        iconPanel.contentView = background
+        background.userInterfaceLayoutDirection = AppLocalization.shared.isRightToLeft ? .rightToLeft : .leftToRight
     }
 
     private static func panel(title: String, size: NSSize) -> NSPanel {
@@ -395,12 +520,25 @@ final class FloatingCapabilityPanels {
         retryButton.action = #selector(perform)
         retryButton.bezelStyle = .rounded
         retryButton.controlSize = .small
-        let bottom = NSStackView(views: [footer, retryButton, copyButton])
+        actionStatus.font = .systemFont(ofSize: 11)
+        actionStatus.textColor = .secondaryLabelColor
+        actionStatus.alignment = .natural
+        actionStatus.lineBreakMode = .byWordWrapping
+        actionStatus.maximumNumberOfLines = 0
+        actionStatus.isSelectable = true
+        actionStatus.isHidden = true
+        actionStatus.setAccessibilityLabel(L("Apply status"))
+        applyButton.target = self
+        applyButton.action = #selector(applyResult)
+        applyButton.bezelStyle = .rounded
+        applyButton.controlSize = .small
+        applyButton.isHidden = true
+        let bottom = NSStackView(views: [footer, retryButton, copyButton, applyButton])
         bottom.orientation = .horizontal
         bottom.spacing = 7
         bottom.alignment = .centerY
 
-        for view in [header, scroll, bottom] {
+        for view in [header, scroll, actionStatus, bottom] {
             view.translatesAutoresizingMaskIntoConstraints = false
             background.addSubview(view)
         }
@@ -412,12 +550,18 @@ final class FloatingCapabilityPanels {
             scroll.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 14),
             scroll.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -12),
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
-            scroll.bottomAnchor.constraint(equalTo: bottom.topAnchor, constant: -8),
+            scroll.bottomAnchor.constraint(equalTo: actionStatus.topAnchor, constant: -6),
+            actionStatus.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 14),
+            actionStatus.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -14),
+            actionStatus.bottomAnchor.constraint(equalTo: bottom.topAnchor, constant: -6),
             bottom.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 14),
             bottom.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -12),
             bottom.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -10),
             bottom.heightAnchor.constraint(equalToConstant: 24)
         ])
+        let statusHeight = actionStatus.heightAnchor.constraint(equalToConstant: 0)
+        statusHeight.isActive = true
+        actionStatusHeight = statusHeight
     }
 
     private static func background() -> NSVisualEffectView {
@@ -483,11 +627,24 @@ final class FloatingCapabilityPanels {
     }
 
     @objc private func perform() { onPerform?() }
+    @objc private func performToolbarAction(_ sender: NSButton) {
+        guard let identifier = actionButtons[ObjectIdentifier(sender)] else { return }
+        onPerformAction?(identifier)
+    }
+    @objc private func performOverflowAction(_ sender: NSMenuItem) {
+        guard let identifier = sender.representedObject as? String else { return }
+        onPerformAction?(identifier)
+    }
+    @objc private func applyResult() {
+        guard replacementAllowed, replacementAvailable, applyButton.isEnabled,
+              let result = presentation.copyText else { return }
+        onApply?(result)
+    }
     @objc private func dismiss() { onDismiss?() }
 
     @objc private func copyResult() {
         guard let resultText = presentation.copyText else { return }
-        // This is the only clipboard write and requires a deliberate Copy click.
+        // Copy writes only the completed result after a deliberate click.
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(resultText, forType: .string)
         copyButton.title = L("Copied")

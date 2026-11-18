@@ -151,6 +151,46 @@ final class SourcePackageTests: XCTestCase {
         }
     }
 
+    func testSelectionReplacementRequiresReadAndIsSupportedByBothAdapters() throws {
+        for runtime in ["javascript", "native"] {
+            let native = runtime == "native"
+            let extra = native ? ["native.execute"] : []
+            let valid = SourceExtensionManifest(runtime: runtime, identifier: "com.example.polish", displayName: "Polish", version: "1.0.0", summary: "Polish a selection",
+                entryPoint: native ? "main.swift" : "main.js",
+                permissions: ["selection.read", "selection.replace", "ai.transform", "ui.panel"] + extra,
+                commands: [.init(identifier: "polish", title: "Polish", trigger: "selection")])
+            XCTAssertNoThrow(try valid.validate())
+            let invalid = SourceExtensionManifest(runtime: runtime, identifier: "com.example.polish", displayName: "Polish", version: "1.0.0", summary: "Polish a selection",
+                entryPoint: native ? "main.swift" : "main.js", permissions: ["selection.replace"] + extra,
+                commands: [.init(identifier: "polish", title: "Polish", trigger: "manual")])
+            XCTAssertThrowsError(try invalid.validate())
+        }
+    }
+
+    func testSelectionPasteRequiresReadAndReplaceForBothSourceAdapters() throws {
+        for runtime in ["javascript", "native"] {
+            let extra = runtime == "native" ? ["native.execute"] : []
+            for permissions in [["selection.paste"], ["selection.read", "selection.paste"],
+                                ["selection.replace", "selection.paste"], ["selection.read", "selection.replace", "selection.paste"]] {
+                let value = SourceExtensionManifest(runtime: runtime, identifier: "com.example.paste", displayName: "Paste", version: "1.0.0", summary: "Paste a preview",
+                    entryPoint: runtime == "native" ? "main.swift" : "main.js", permissions: permissions + extra,
+                    commands: [.init(identifier: "paste", title: "Paste", trigger: "manual")])
+                if permissions.count == 3 { XCTAssertNoThrow(try value.validate()) }
+                else { XCTAssertThrowsError(try value.validate()) }
+            }
+        }
+    }
+
+    func testPasteApprovalIsExplicitAndDoesNotRepeatAlreadyApprovedReplacement() {
+        let replacement = ["selection.read", "selection.replace", "ai.transform", "ui.panel"]
+        let paste = replacement + ["selection.paste"]
+        XCTAssertEqual(SourceSelectionPermissionReview.required(requested: paste, approved: replacement), .paste)
+        XCTAssertEqual(SourceSelectionPermissionReview.required(requested: paste, approved: []), .paste)
+        XCTAssertNil(SourceSelectionPermissionReview.required(requested: paste, approved: paste))
+        XCTAssertEqual(SourceSelectionPermissionReview.required(requested: replacement, approved: ["selection.read"]), .replacement)
+        XCTAssertNil(SourceSelectionPermissionReview.required(requested: replacement, approved: paste))
+    }
+
     func testNativeSourceIsFrozenAndRejectsPrebuiltBinaryInventory() throws {
         let root = try temporary()
         let manifest = SourceExtensionManifest(runtime: "native", identifier: identity, displayName: "Native tool",

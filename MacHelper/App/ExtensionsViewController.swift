@@ -87,6 +87,24 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn
         }
+        manager.onApproveSelectionReplacement = { [weak self] manifest in
+            guard self != nil else { return false }
+            let alert = NSAlert()
+            alert.messageText = L("Allow “%@” to replace selected text?", manifest.displayName)
+            alert.informativeText = L("Results appear in a preview first. Only clicking Apply can replace the unchanged original selection in a supported app. Use Copy when direct replacement is unavailable.")
+            alert.addButton(withTitle: L("Allow Apply"))
+            alert.addButton(withTitle: L("Cancel"))
+            return alert.runModal() == .alertFirstButtonReturn
+        }
+        manager.onApproveSelectionPaste = { [weak self] manifest in
+            guard self != nil else { return false }
+            let alert = NSAlert()
+            alert.messageText = L("Allow “%@” to paste results?", manifest.displayName)
+            alert.informativeText = L("When direct replacement is unavailable, clicking Apply lets MacHelper replace the clipboard with the completed result and paste it into the verified selection. The result stays on the clipboard. Previous clipboard contents are never read or restored.")
+            alert.addButton(withTitle: L("Allow Paste"))
+            alert.addButton(withTitle: L("Cancel"))
+            return alert.runModal() == .alertFirstButtonReturn
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

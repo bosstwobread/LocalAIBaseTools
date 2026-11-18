@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 LANGUAGES = ('en', 'zh-Hans', 'zh-Hant', 'es', 'fr', 'de', 'ja', 'ko', 'pt', 'ar', 'hi', 'ru', 'it')
-PREVIEWS = ('translation-preview.svg', 'messagehelper-preview.svg')
+PREVIEWS = ('translation-preview.svg', 'polish-input-preview.svg')
 SVG = 'http://www.w3.org/2000/svg'
 ET.register_namespace('', SVG)
 

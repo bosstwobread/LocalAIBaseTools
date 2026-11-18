@@ -68,9 +68,9 @@ test('search, direct DOM reset click, category and platform filters stay consist
   try {
     const count = () => view.document.querySelectorAll('.extension-card').length;
     assert.equal(count(), catalog.extensions.length);
-    input(view, '#search', 'upwork');
+    input(view, '#search', 'polish');
     assert.equal(count(), 1);
-    assert.match(view.document.querySelector('.card-heading').textContent, /Upwork/);
+    assert.match(view.document.querySelector('.card-heading').textContent, /Polish-input/);
     input(view, '#search', 'a-search-that-cannot-match');
     assert.equal(count(), 0);
     assert.equal(view.document.querySelector('#catalog-empty').hidden, false);
@@ -85,8 +85,10 @@ test('search, direct DOM reset click, category and platform filters stay consist
     assert.equal(count(), 0);
     view.document.querySelector('#clear-filters').click();
     assert.equal(count(), catalog.extensions.length);
-    input(view, '#platform', 'Edge', 'change');
-    assert.equal(count(), catalog.extensions.filter(tool=>tool.platforms.includes('Edge')).length);
+    input(view, '#platform', 'macOS', 'change');
+    assert.equal(count(), catalog.extensions.length);
+    assert.deepEqual(catalog.extensions.map(tool=>tool.slug).sort(), ['polish-input','translation']);
+    assert.ok(catalog.extensions.every(tool=>tool.kind==='mac-source'));
   } finally { view.close(); }
 });
 
@@ -121,18 +123,47 @@ test('details links, accessible tab controls, custom install URL and close resto
   } finally { view.close(); }
 });
 
-test('browser installation opens on the correct tab and links the actual ZIP', async () => {
+test('Polish-input installs as editable MacHelper source and explains explicit Apply access', async () => {
   const view = await page();
   try {
-    [...view.document.querySelectorAll('.extension-card')].find(node => node.querySelector('h3').textContent.includes('Upwork')).querySelector('.card-install').click();
+    [...view.document.querySelectorAll('.extension-card')].find(node => node.querySelector('h3').textContent.includes('Polish-input')).querySelector('.card-install').click();
     await until(() => view.document.querySelector('#tool-dialog').open);
-    assert.match(view.window.location.hash, /messagehelper-upwork/);
+    assert.match(view.window.location.hash, /polish-input/);
     assert.equal(view.document.querySelector('#install-panel').hidden, false);
-    const download = view.document.querySelector('#install-panel a[download]');
-    assert.ok(download);
-    assert.match(new URL(download.href).pathname, /^\/extension-market\/packages\/.+\.zip$/);
-    assert.match(view.document.querySelector('#install-panel').textContent, /Load unpacked/);
-    assert.match(view.document.querySelector('#install-panel').textContent, /listings are not available yet/);
+    const open = new URL(view.document.querySelector('#install-panel a[href^="machelper:"]').href);
+    assert.equal(open.searchParams.get('extension'), 'com.localaibasetools.polish-input');
+    const download = view.document.querySelector('#install-panel a[download][href$=".macsource.zip"]');
+    assert.ok(download, 'The complete source package is downloadable.');
+    assert.doesNotMatch(view.document.querySelector('#install-panel').textContent, /Load unpacked/);
+    view.document.querySelector('#overview-tab').click();
+    assert.match(view.document.querySelector('#overview-panel').textContent, /only when you click Apply/);
+  } finally { view.close(); }
+});
+
+test('clipboard-assisted Apply access is explained in every language without touching the clipboard', async () => {
+  const data = clone(catalog);
+  const tool = data.extensions.find(item => item.slug === 'polish-input');
+  if (!tool.permissions.includes('selection.paste')) tool.permissions.push('selection.paste');
+  let clipboardReads = 0, clipboardWrites = 0;
+  const view = await page({ data, beforeApp(window) {
+    Object.defineProperty(window.navigator, 'clipboard', { value: {
+      readText: async () => { clipboardReads++; return 'private clipboard fixture'; },
+      writeText: async () => { clipboardWrites++; }
+    } });
+  } });
+  const label = 'Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.';
+  try {
+    view.window.location.hash = '#extension/polish-input';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    for (const code of Object.keys(previewCatalogs)) {
+      input(view, '#site-language', code, 'change');
+      const expected = code === 'en' ? label : view.window.MARKET_TRANSLATIONS[code][label];
+      assert.ok(expected, `${code}: clipboard Apply permission is translated`);
+      assert.ok([...view.document.querySelectorAll('#overview-panel .detail-list li')].some(node => node.textContent === expected), `${code}: clipboard behavior is visible during permission review`);
+    }
+    assert.equal(clipboardReads, 0);
+    assert.equal(clipboardWrites, 0);
+    assert.equal(view.localRequests.length, 0);
   } finally { view.close(); }
 });
 
@@ -186,9 +217,9 @@ test('create and customize entry offers a local readable guide and a Markdown AI
       const guide = view.document.querySelector('#overview-panel a[href$="developer-guide.html"]');
       assert.equal(guide.href, read.href);
       view.document.querySelector('.dialog-close').click();
-      view.window.location.hash = '#extension/messagehelper-upwork';
+      view.window.location.hash = '#extension/polish-input';
       await until(() => view.document.querySelector('#tool-dialog').open);
-      assert.equal(view.document.querySelector('#overview-panel a[download="AI_EXTENSION_GUIDE.md"]'), null, 'Browser tools must not claim the source-worker editing flow');
+      assert.ok(view.document.querySelector('#overview-panel a[download="AI_EXTENSION_GUIDE.md"]'), 'Polish-input shares the independent source-worker editing flow');
     } finally { view.close(); }
   }
 });
@@ -324,7 +355,7 @@ test('switching language updates marketing, filters, metadata and an open instal
 
 test('Arabic mirrors reading direction and localizes accessibility, tool permissions and clipboard status', async () => {
   const data = clone(catalog);
-  data.extensions.find(tool => tool.kind === 'mac-source').permissions.push('native.execute');
+  data.extensions.find(tool => tool.slug === 'translation').permissions.push('native.execute');
   const view = await page({ languages: ['ar-EG'], data });
   try {
     assert.equal(view.document.documentElement.dir, 'rtl');
@@ -421,7 +452,7 @@ test('authored interface copy and first-party catalog text have translations in 
     }
     for (const element of document.querySelectorAll('[aria-label],[placeholder],[title],[alt],meta[name="description"]')) {
       for (const attribute of ['aria-label', 'placeholder', 'title', 'alt', 'content']) {
-        if (attribute === 'alt' && /(?:translation|messagehelper)-preview\.svg$/.test(element.getAttribute('src') || '')) continue;
+        if (attribute === 'alt' && /(?:translation|polish-input)-preview\.svg$/.test(element.getAttribute('src') || '')) continue;
         const text = element.getAttribute(attribute);
         if (text) keys.add(text);
       }
@@ -433,7 +464,7 @@ test('authored interface copy and first-party catalog text have translations in 
       keys.add(Function(`return ${match[1]}`)().trim());
     }
     for (const tool of catalog.extensions) {
-      for (const value of [tool.category, ...tool.screenshots.flatMap(shot => /(?:translation|messagehelper)-preview\.svg$/.test(shot.src) ? [shot.caption] : [shot.alt, shot.caption])]) keys.add(value);
+      for (const value of [tool.category, ...tool.screenshots.flatMap(shot => /(?:translation|polish-input)-preview\.svg$/.test(shot.src) ? [shot.caption] : [shot.alt, shot.caption])]) keys.add(value);
     }
     const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', 'Translation/', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
     const translations = {};
@@ -778,7 +809,7 @@ test('illustration copy and every preview location follow all interface language
       assert.equal(view.document.querySelector('.preview-popover strong').textContent, previewCatalogs[code]['demo.panelTitle']);
       for (const image of view.document.querySelectorAll('img[src*="-preview.svg"]')) {
         assert.ok(image.src.includes(`/extension-market/assets/localized/${code}/`), `${code}: ${image.src}`);
-        const prefix = image.src.endsWith('translation-preview.svg') ? 'translation' : 'messagehelper';
+        const prefix = image.src.endsWith('translation-preview.svg') ? 'translation' : 'polish';
         assert.equal(image.alt, previewCatalogs[code][`${prefix}.description`]);
       }
       assert.equal(view.document.querySelector('#need-query').value, draft);

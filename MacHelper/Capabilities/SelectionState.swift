@@ -133,6 +133,7 @@ struct SelectionState {
     private(set) var selection: TextSelection?
     private(set) var generation: UInt64 = 0
     private(set) var dismissed = false
+    private(set) var retainsAppliedPreview = false
 
     @discardableResult
     mutating func observe(_ value: TextSelection?) -> Bool {
@@ -148,7 +149,13 @@ struct SelectionState {
     mutating func dismiss() {
         generation &+= 1
         dismissed = true
+        retainsAppliedPreview = false
     }
+
+    /// A setter may clear or move its selection asynchronously. Keep the final
+    /// preview/Copy through those polling updates; a deliberate gesture or
+    /// outside dismissal ends this retention, without permitting another Apply.
+    mutating func retainPreviewAfterApply() { retainsAppliedPreview = true }
 
     /// Only real selection gestures rearm a dismissed selection. Timer reads,
     /// geometry changes, and intermittent AX availability cannot bring it back.

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
 
-const extension = path.join(__dirname, '../Extensions/MessageHelper-Upwork');
+const extension = path.join(__dirname, '../legacy/MessageHelper-Upwork');
 const scripts = ['shared.js', 'content.js'].map(file => fs.readFileSync(path.join(extension, file), 'utf8'));
 const tick = async () => { for (let n = 0; n < 3; n++) await new Promise(resolve => setImmediate(resolve)); };
 const initialDraft = 'Hi Morgan Test, I has updated the draft.';

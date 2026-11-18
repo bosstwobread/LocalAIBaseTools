@@ -2,9 +2,9 @@
 
 MacHelper is the installed app and settings host, accessible from the Dock or menu bar. Its unified extension format is an editable source package declaring either a JavaScript or native Swift runtime. An extension can be developed in a separate repository, downloaded or imported into the installed MacHelper, and changed locally without rebuilding the host or installing another app.
 
-The source package uses manifest schema version two. MacHelper chooses a JavaScriptCore worker for `runtime: "javascript"`, or compiles and starts an independent Swift worker for `runtime: "native"`. Both share the same Extensions list, settings, installation, and reload controls. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation is the first source tool; its files include `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, root `discovery.json`, `README.md`, and `LICENSE`. New tools keep searchable descriptions in their own `discovery.json`; publishing requires it, while older installed packages remain runnable without it.
+The source package uses manifest schema version two. MacHelper chooses a JavaScriptCore worker for `runtime: "javascript"`, or compiles and starts an independent Swift worker for `runtime: "native"`. Both share the same Extensions list, settings, installation, and reload controls. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation and Polish-input are the current first-party source tools; their files include `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, root `discovery.json`, `README.md`, and `LICENSE`. New tools keep searchable descriptions in their own `discovery.json`; publishing requires it, while older installed packages remain runnable without it.
 
-Browser extensions remain separate browser packages and can continue using the [framed MacHelper service](MacHelper-Protocol.md). The old version-one native bundle SDK is a legacy migration source, not the new hot-reload runtime.
+Translation and Polish-input need no browser extension. Retired browser packages remain separate and can continue using the compatibility [framed MacHelper service](MacHelper-Protocol.md). The old version-one native bundle SDK is a legacy migration source, not the new hot-reload runtime.
 
 ## Create or modify a tool with AI
 
@@ -69,6 +69,16 @@ For several installed tools, use the list checkboxes or **Select All**, then **R
 
 See [Editable source extensions](Source-Extensions.md) for the complete manifest, JavaScript, schema, bounds, path validation, permission, and download contracts.
 
+## Selection actions and polishing
+
+MacHelper 6.6+ lists all enabled `selection` commands in one floating toolbar. Give commands clear extension-owned titles and localizations. A real selected span shows the toolbar; only choosing its action invokes the worker. There is no separate per-tool overlay and no first-command-only rule.
+
+Supporting Electron apps may need the shared, default-off **General → Improve compatibility with Electron apps** option, followed by a new selection. The host can request full Accessibility after that gesture using the app’s advertised/settable `AXManualAccessibility` switch; extension code must not implement its own bootstrap. Full Accessibility can alter app behavior, including VS Code Screen Reader Optimized mode and folding/minimap. Disabling stops new requests; already affected apps may need a restart. It does not toggle VoiceOver or macOS permissions, and never replaces the strict Apply checks or Copy fallback. See the [host compatibility contract](Source-Extensions.md#shared-toolbar-and-guarded-replacement-machelper-66).
+
+For a tool such as Polish-input, add `selection.replace` alongside `selection.read`, `ai.transform`, and `ui.panel`. Optional `selection.paste` requires read/replace access and separate approval for host-owned clipboard-assisted Apply when direct AX selected-text writing is unavailable or unreliable. Keep polishing instructions in a source prompt and return the ordinary `{text, title}` result. MacHelper handles Apply; no extra script API or result field is required. It offers editing only for a completed preview and only after another explicit user click.
+
+The host rechecks the original source PID/app, focused AX element identity, exact selected text and numeric range, and enabled/nonprotected editable state before Apply. A bounded Accessibility parent-chain check identifies web editors, including supported editors embedded in desktop apps, which select approved paste before any write even if a selected-text setter is advertised writable. Verified native controls prefer `AXSelectedText`. A depth/deadline-limited unknown classification permits only approved paste with strict positive editability and all original focus/range/text/permission checks; it never permits a direct setter. Missing/cyclic/protected ancestry stays blocked with Copy. No browser/app allowlist chooses the route. Every paste route still requires approval and strict editable-field evidence. For approved `selection.paste`, the host may write only the completed result and its ownership stamp to the clipboard, revalidate target and own clipboard change count/stamp, then send fixed Command-V down/up to that original PID. It never reads/saves/restores previous clipboard contents; the result remains there. There is no whole-field value write/reconstruction, app activation, focus/range forcing, arbitrary keyboard SDK, Enter/Send, or automatic retry after a direct write. Both supported partial and full selections are eligible. Unsupported/read-only/protected fields keep manual Copy. The host reports a paste as requested unless insertion is confirmed; check the original app. Formatting and Undo vary. Test only disposable fields with sending disabled. See the [exact capability contract](Source-Extensions.md#shared-toolbar-and-guarded-replacement-machelper-66).
+
 ## Describe a tool so people can find it
 
 Add root `discovery.json` with schema version 1, an accurate description, capabilities, example task queries, keywords, limitations, and platforms. Optional installation steps and exact-source translation maps provide public display text. Keep metadata in the extension's source folder, including for tools in separate repositories; do not hard-code tool descriptions in MacHelper. Use all 13 supported language maps for a fully localized listing. See the [complete metadata schema and bounds](Source-Extensions.md#public-discovery-metadata-machelper-63).
@@ -81,17 +91,18 @@ The marketplace serves a JSON catalog over HTTPS. Each entry contains display me
 
 **Add Catalog…** reads metadata without downloading or running packages. First enablement downloads the complete declared inventory into a staging directory, validates every file and the manifest identity/version, and atomically installs the source. Failed downloads leave no partial installed tool. Existing local source is always preserved; automatic upstream replacement is not part of enablement.
 
-The first-party catalog is `catalog/extensions.json`. Regenerate it after changing Translation's source:
+The first-party catalog is `catalog/extensions.json`. Regenerate it after changing published first-party source:
 
 ```sh
 python3 scripts/build-source-catalog.py --ref PUBLISHED_GIT_COMMIT
 ```
 
-For a separate marketplace or CDN, pass `--base-url https://example.com/packages/translation/1.0.0/`. Use immutable source URLs for a published catalog so its hashes continue matching its files. The app bundles a first-party source seed for offline installation; external marketplace entries do not receive that implicit fallback.
+The first-party generator includes all `Extensions` folders with source `extension.json` manifests, currently Translation and Polish-input. Repeat `--package NAME` to select a subset. A custom `--base-url` requires exactly one selected package, for example `--package Translation --base-url https://example.com/packages/translation/1.0.0/`. For a separate marketplace or CDN, generate catalog entries using the same complete inventory contract and immutable source URLs so hashes continue matching their files. The app bundles first-party source seeds at `Contents/Resources/SourceSeeds/<identifier>.macsource/` for offline installation; external marketplace entries do not receive that implicit fallback.
 
 ## Source verification
 
 ```sh
+node --test test/translation-source.test.cjs test/polish-input-source.test.cjs
 swift test --package-path MacHelper
 python3 scripts/test-source-extensions.py
 python3 scripts/test-native-extensions.py

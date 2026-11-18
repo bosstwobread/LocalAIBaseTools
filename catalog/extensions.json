@@ -2,6 +2,62 @@
   "schemaVersion": 1,
   "extensions": [
     {
+      "identifier": "com.localaibasetools.polish-input",
+      "displayName": "Polish-input",
+      "version": "1.0.0",
+      "summary": "Polish selected writing, preview the result, and apply it to a supported editable field.",
+      "files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/LICENSE",
+          "sha256": "440e6585ed0fdb621839a4431bc7d1ad2306557df0d7a50596d2f48973801a9f",
+          "size": 1063
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/README.md",
+          "sha256": "0e3dc449c899a1b7b027a86cea42b1e5bc6eab7bd2af7ca9f5c4bc5576fe21bc",
+          "size": 5291
+        },
+        {
+          "path": "discovery.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/discovery.json",
+          "sha256": "07cadc63e2f291b0f8068f196c7f070ae8641890d253ff5f4a4bcaaab7e680b0",
+          "size": 35287
+        },
+        {
+          "path": "extension.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/extension.json",
+          "sha256": "ccf5285a1f617542e11322ef0fda62424651c2a990ce7b661c325585bcdc119d",
+          "size": 567
+        },
+        {
+          "path": "localizations.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/localizations.json",
+          "sha256": "0d3bddf90f3aaeaea6b2322c219718ccf4a4a7028771173f6c075b5c93a18165",
+          "size": 4311
+        },
+        {
+          "path": "main.js",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/main.js",
+          "sha256": "ce7e729f57e2d496ed97c789456677557254fb32da75c5ba5b2f1cff36d9390c",
+          "size": 652
+        },
+        {
+          "path": "prompts/polish.txt",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/prompts/polish.txt",
+          "sha256": "754bfc90ebf7ad201c9bc4c5ed740b209b90d4aea43a051312416b697d241c21",
+          "size": 775
+        },
+        {
+          "path": "settings.schema.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Polish-input/settings.schema.json",
+          "sha256": "351ca15c676520c1c9ad86f4d2ba1a8d74602ddcc62a3788c0073abd384701a1",
+          "size": 149
+        }
+      ]
+    },
+    {
       "identifier": "com.localaibasetools.translation",
       "displayName": "Translation",
       "version": "4.5.2",
@@ -9,55 +65,55 @@
       "files": [
         {
           "path": "LICENSE",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/LICENSE",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/LICENSE",
           "sha256": "440e6585ed0fdb621839a4431bc7d1ad2306557df0d7a50596d2f48973801a9f",
           "size": 1063
         },
         {
           "path": "README.md",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/README.md",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/README.md",
           "sha256": "d055488a95b4943ccf7206ee164ba80c5257007f747bd2fa588475b947ca590f",
           "size": 5337
         },
         {
           "path": "discovery.json",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/discovery.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/discovery.json",
           "sha256": "d7929a69749c4729afafe17554c691f9435c6928484ce9517b376dc7f28601c6",
           "size": 36878
         },
         {
           "path": "extension.json",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/extension.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/extension.json",
           "sha256": "e7cbfb9aeea1527bbc05cc18fb66e71cafd9fdfc5fd134ea23c8229f7d446d68",
           "size": 555
         },
         {
           "path": "localizations.json",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/localizations.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/localizations.json",
           "sha256": "13d7824a2d79e7ee79e1c50de80565cafe920084ca85c041b62870e308131153",
           "size": 5191
         },
         {
           "path": "main.js",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/main.js",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/main.js",
           "sha256": "f8fa4f4d437c8b838ab2b58a378810191b4d2d7686a9c0f4c7b1220fde5da3c8",
           "size": 6854
         },
         {
           "path": "prompts/translate.txt",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/prompts/translate.txt",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/prompts/translate.txt",
           "sha256": "6712f1b4a367bc482d7b71acd343690c070e5b798943d1334fd7cef92e2279d2",
           "size": 368
         },
         {
           "path": "prompts/word-in-context.txt",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/prompts/word-in-context.txt",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/prompts/word-in-context.txt",
           "sha256": "7faa62ae6593e381b3736ac990033e512f72e4b30cb475641853a081cf0ed068",
           "size": 1594
         },
         {
           "path": "settings.schema.json",
-          "url": "https://local-ai-extension.nelson007.com/packages/translation/4.5.2/settings.schema.json",
+          "url": "https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/main/Extensions/Translation/settings.schema.json",
           "sha256": "94d08d15fbed22ad2f5c5eaaf59f2cd18146fd45d7cf852ed71715b92c81466b",
           "size": 838
         }

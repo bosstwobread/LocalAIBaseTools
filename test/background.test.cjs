@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const {webcrypto} = require('node:crypto');
 
 const extensionID = 'fmhfobfddchbeibojepeocgfemkpcklo';
-const source = fs.readFileSync(path.join(__dirname, '../Extensions/MessageHelper-Upwork/background.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../legacy/MessageHelper-Upwork/background.js'), 'utf8');
 
 function background() {
   let requestListener;

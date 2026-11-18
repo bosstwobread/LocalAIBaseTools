@@ -230,7 +230,7 @@ def build(output, app, without_app=False, allow_legacy_discovery=False):
         seen_ids = set()
         seen_slugs = set()
         for folder in sorted((ROOT / "Extensions").iterdir()):
-            if not folder.is_dir() or folder.name.startswith("."):
+            if not folder.is_dir() or folder.name.startswith(".") or folder.name in config.get("retiredTools", []):
                 continue
             metadata = known.get(folder.name, {})
             native_manifest = folder / "extension.json"

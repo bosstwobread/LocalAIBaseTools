@@ -1,6 +1,6 @@
 # LocalAIBaseTools
 
-**MacHelper** is one macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. **Translation** is an editable JavaScript source extension: enabling it installs all its source files on your Mac, and saving changes while enabled reloads its worker without restarting MacHelper. **MessageHelper — Upwork** remains a Chrome/Edge extension using the same AI connection. The **Extension Market** searches public extension descriptions with keywords or uses MacHelper’s built-in local service for explicit AI matching. Website search needs no browser extension. Current release: MacHelper **6.5.1** (build **651**), Translation **4.5.2**, MessageHelper — Upwork **1.4.0**.
+**MacHelper** is one macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. **Translation** and **Polish-input** are editable JavaScript source extensions: select text in a supported Mac app, then choose Translate or Polish in one shared floating toolbar. Polishing streams a preview and changes selected text only after **Apply**. Neither tool needs a browser extension. The **Extension Market** searches public extension descriptions with keywords or MacHelper’s built-in local service for explicit AI matching. Current release: MacHelper **6.6.0** (build **660**), Translation **4.5.2**, Polish-input **1.0.0**. MessageHelper — Upwork is retired from current distribution; its compatibility source and published downloads are preserved.
 
 Before making changes, read the short [development checklist](DEVELOPMENT.md). Check it again before finishing so related functionality, documentation, and website content stay consistent.
 
@@ -20,7 +20,8 @@ LocalAIBaseTools/
 │   └── Tests/                    Runtime, source packages/workers, and native capabilities
 ├── Extensions/
 │   ├── Translation/              Editable JS, manifest, schema, prompts, README, and license
-│   └── MessageHelper-Upwork/     Independent Chrome/Edge extension
+│   └── Polish-input/             Editable cross-app polishing source and prompt
+├── legacy/MessageHelper-Upwork/  Retired browser package and safe test fixture
 ├── catalog/extensions.json       Source catalog metadata and complete SHA-256 file inventory
 ├── ExtensionMarket-website/      Searchable tool marketplace, source packages, Docker deployment
 ├── examples/NativeGreeting/      Independent native Swift source-worker example
@@ -29,11 +30,11 @@ LocalAIBaseTools/
 └── test/                         Browser and installer tests with synthetic fixtures
 ```
 
-JavaScript and native Swift source extensions share one Extensions interface. Their manifest runtime chooses execution and reload automatically. Source extensions use MacHelper's capability interface for selected text, nearby panels, shared AI, and schema-based settings. They can be authored outside this repository and installed without rebuilding MacHelper. JavaScript workers do not expose Node.js, shell, arbitrary file, or network APIs. Browser tools such as MessageHelper-Upwork still need their browser component installed in Chrome or Edge. Marketplace search connects directly to MacHelper without a browser extension.
+JavaScript and native Swift source extensions share one Extensions interface. Their manifest runtime chooses execution and reload automatically. Source extensions use MacHelper's capability interface for selected text, nearby panels, shared AI, and schema-based settings. They can be authored outside this repository and installed without rebuilding MacHelper. JavaScript workers do not expose Node.js, shell, arbitrary file, or network APIs. Translation and Polish-input use MacHelper’s shared selection toolbar, without browser installation. Retired browser clients can still use the compatibility AI host. Marketplace search also connects directly to MacHelper without a browser extension.
 
 ## Create or customize your own extension
 
-All source tools are editable. Choose a tool under **Extensions → Edit Source** to change its local scripts, prompts, or settings schema; saving reloads an enabled tool without restarting MacHelper. Disabled tools read the changes when enabled. Native Swift code edits compile and replace only its worker; an invalid build keeps the last working version. Translation also offers direct prompt editors in its detail page. To create a separate tool, build a source folder in your own repository and import it with **Install Source…**. No additional Mac app is needed.
+All source tools are editable. Choose a tool under **Extensions → Edit Source** to change its local scripts, prompts, or settings schema; saving reloads an enabled tool without restarting MacHelper. Disabled tools read the changes when enabled. Native Swift code edits compile and replace only its worker; an invalid build keeps the last working version. Translation and Polish-input also offer direct prompt editors in their detail pages. To create a separate tool, build a source folder in your own repository and import it with **Install Source…**. No additional Mac app is needed.
 
 Give your AI coding assistant [AI_EXTENSION_GUIDE.md](AI_EXTENSION_GUIDE.md), the tool source (when modifying one), and the behavior you want. The guide contains a complete independent example, supported APIs, testing, and distribution steps. Use [Extension Development](docs/Extension-Development.md) for the human walkthrough and [Project Design](PROJECT_DESIGN.md) for the architecture. Private deployment notes stay local and are excluded from Git.
 
@@ -41,8 +42,8 @@ Give your AI coding assistant [AI_EXTENSION_GUIDE.md](AI_EXTENSION_GUIDE.md), th
 
 - macOS 14 or later. Building MacHelper requires Swift 6 or later command-line tools and Python 3; the prebuilt developer release targets Apple Silicon. Native source extensions also require Apple's Swift command-line tools on the user's Mac, even with a prebuilt MacHelper.
 - A signed-in Codex/ChatGPT installation with its bundled Codex app-server, Ollama with a model downloaded, or LM Studio with a model loaded and its local server running.
-- Chrome/Edge for MessageHelper. Website AI search needs a running MacHelper 6.5 or later and browser approval for the website’s local connection when requested; no search extension is needed. Node.js/npm is needed for browser development tests.
-- Accessibility approval for **MacHelper** to read selected text in other apps.
+- A supported Mac app exposing selected text through Accessibility. Browser fields can use Translation and Polish-input without a Chrome/Edge extension. Website AI search needs a running MacHelper 6.5 or later and browser approval for the website’s local connection when requested. Node.js/npm is needed for JavaScript development tests.
+- Accessibility approval for **MacHelper** to read selected text in other apps and apply approved replacements in supported editable fields.
 
 ChatGPT processes requests online using the existing sign-in. The helper runs locally; it is not an offline GPT model. Ollama and LM Studio use the service running on this Mac. Remote service addresses and redirects are rejected. There is no automatic fallback between providers.
 
@@ -53,9 +54,9 @@ python3 scripts/build-apps.py
 python3 scripts/install-apps.py
 ```
 
-This installs `~/Applications/LocalAIBaseTools/MacHelper.app`, including its AI host, JavaScript worker executable, and native Swift worker SDK. The installer also registers an AI host copy under `~/Library/Application Support/LocalAIBaseTools/MacHelper/mac-helper-host` for Chrome/Edge native messaging.
+The build regenerates the first-party source catalog before bundling so its inventories match the included source seeds. Installation places `MacHelper.app` at `~/Applications/LocalAIBaseTools/`, including its AI host, JavaScript worker executable, and native Swift worker SDK. The installer also registers an AI host copy under `~/Library/Application Support/LocalAIBaseTools/MacHelper/mac-helper-host` for Chrome/Edge native messaging.
 
-Translation's catalog entry is included in the app. First enablement downloads its complete source to `~/Library/Application Support/LocalAIBaseTools/Extensions/com.localaibasetools.translation.macsource/`; the bundled source seed supports offline installation. Existing local source is preserved on re-enable and upgrades. On upgrade, the installer retires our earlier standalone Translation app to Trash without removing its preferences. Quit an older running MacHelper before replacing it, then reopen the installed app.
+Translation and Polish-input catalog entries are included in the app. First enablement downloads each complete source to `~/Library/Application Support/LocalAIBaseTools/Extensions/<identifier>.macsource/`; the bundled `Contents/Resources/SourceSeeds/<identifier>.macsource/` seeds support offline installation. Their identifiers are `com.localaibasetools.translation` and `com.localaibasetools.polish-input`. Existing local source is preserved on re-enable and upgrades. On upgrade, the installer retires our earlier standalone Translation app to Trash without removing its preferences. Quit an older running MacHelper before replacing it, then reopen the installed app.
 
 The build prefers an available Developer ID Application or Apple Development signing identity; otherwise it uses ad-hoc signing. Use `--signing-identity` to choose explicitly. A consistent Apple identity gives macOS a stable app requirement across updates. Public distribution still requires the appropriate signing/notarization release workflow.
 
@@ -69,6 +70,8 @@ In the **Installed** list, check individual tools or use **Select All**, then ch
 - **Extensions**: **Marketplace…** opens the tool website; source tools can also use **Install Source…**, **Add Catalog…**, **Edit Source**, and **Reload**. A selected tool's fields, labels, choices, and defaults are loaded from the settings schema declared in its own `extension.json`; MacHelper supplies the generic native controls. Installed disabled tools can be configured without starting their worker or enabling them. Marketplace installs show a native permissions review before downloading and enabling a complete source package. Existing local copies retain their edits, preferences, and enabled state. JavaScript and native Swift tools share this list and the same controls; no separate native management page is needed.
 - **General**: launch at login and the system Login Items shortcut. MacHelper registers itself through Apple's ServiceManagement API on its first explicit installed-app launch. It starts in the background with a Dock icon and menu-bar shortcut when you log in; closing Settings keeps enabled extensions running. Click the Dock icon to reopen Settings. A later user disablement is respected.
 
+**General → Improve compatibility with Electron apps** is off by default. When enabled, a new text-selection gesture can ask a supporting app to expose full Accessibility information; select text again after changing it. Some apps may change behavior: VS Code can enter Screen Reader Optimized mode, affecting folding and the minimap. Turning it off stops new requests; already affected apps may need a restart to revert. It does not enable VoiceOver or change macOS permissions. Compatibility requests do not guarantee Apply support; insufficient editability evidence still keeps Copy.
+
 Shared AI preferences are stored in the MacHelper support folder's `settings.json`; source-tool enablement, permissions, and catalog addresses are in `source-extensions.json`. Source-tool settings live separately under `ExtensionSettings/<identifier>/settings.json`. Any old native registry file remains legacy data; new native source tools use the shared source-tool state. These files contain configuration, not selected text or translations.
 
 ### Interface languages
@@ -79,15 +82,17 @@ Website illustrations follow the selected language too: preview labels, buttons,
 
 MacHelper updates its interface without restarting workers. Finish unsaved prompt/AI settings edits and pending operations before switching. Interface language is separate from Translation's target language, AI provider, and model. Source prompts, user text, model IDs, and code stay unchanged. The technical AI guide and provider/system diagnostics may remain in their original language.
 
-Extensions own their translated descriptions and settings labels through an optional `localizations` JSON resource in the manifest. Translation 4.5.2 includes all 13 interface languages. Unknown or older tools retain their original labels until their source provides translations; existing editable installations are never overwritten automatically. See the [source contract](docs/Source-Extensions.md) for the format.
+Extensions own their translated descriptions and settings labels through an optional `localizations` JSON resource in the manifest. Translation 4.5.2 and Polish-input 1.0.0 include all 13 interface languages. Unknown or older tools retain their original labels until their source provides translations; existing editable installations are never overwritten automatically. See the [source contract](docs/Source-Extensions.md) for the format.
 
 ### Translation
 
 Open **MacHelper → Extensions → Translation**. Enable it, choose the target language, then use **Accessibility Settings…** to allow **MacHelper** in Privacy & Security. Translation 4.5.2 requires MacHelper 4.5 or later for translation and 6.2 or later for localized interface labels. Its **Translation prompt** and **Word lookup prompt** boxes show the actual source prompt files. Edit a prompt and save it to change the extension's behavior. Saved prompts are sent unchanged as provider instructions; input text, target language, and optional sentence context are separate data. MacHelper adds no translation/style instructions to these explicit-prompt requests. Permission granted to the old Translation app does not grant it to MacHelper.
 
-Select text in another app. A small icon appears above/below the selection according to the available screen space. Click it for a nearby translation panel that fills with text as the model responds. Drag its header to move it; streaming and completion keep your chosen position. The panel shows the actual model name; Copy becomes available after the completed answer is validated. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
+Select text in another app. A shared toolbar appears above/below the selection according to the available screen space, with actions from enabled selection tools. Choose **Translate** for a nearby translation panel that fills with text as the model responds. Drag its header to move it; streaming and completion keep your chosen position. The panel shows the actual model name; Copy becomes available after the completed answer is validated. Esc, deselecting, clicking elsewhere, and switching apps dismiss/invalidate the result. Changing selections prevents an older answer from replacing the current result.
 
-The icon requires a verified nonempty selection range. An ordinary click or a browser's cached selected-text value cannot reopen it after dismissal. Select text again by dragging, double-clicking, Shift-clicking, or using keyboard selection to show it again.
+MacHelper owns one toolbar and one active result panel, so enabled tools do not place separate icons on top of each other. The toolbar stays within the available screen space and shows at most five rows: all actions when there are five or fewer, otherwise four actions plus **More…**. More opens a native scrolling menu for the remaining actions, so every enabled selection command stays accessible. Each tool still has its own source, worker, prompts, and settings. Reloading, enabling, or disabling an unrelated tool preserves the current operation/result while its owning extension activation and command stay unchanged; replacing or disabling that activation invalidates the operation. Each validated source/settings activation has its own identity; an internal worker recovery during that activation does not turn an unrelated toolbar update into cancellation.
+
+The toolbar requires a verified nonempty selection range. An ordinary click or a browser's cached selected-text value cannot reopen it after dismissal. Select text again by dragging, double-clicking, Shift-clicking, or using keyboard selection to show it again.
 
 With MacHelper 4.3 and Translation 4.2, selecting one word shows its meaning in the enclosing sentence, followed by that sentence's full translation. The sentence is read only when you click the icon, through bounded Accessibility ranges. If the app cannot supply it, the panel gives a standalone word meaning and notes that sentence context is unavailable. Longer selections keep the normal translation behavior.
 
@@ -96,6 +101,18 @@ MacHelper 4.3.1 also reads sentence context from supported read-only browser tex
 Protected/password fields, images, and apps that do not expose selected text through Accessibility cannot be read automatically. Translation never simulates Copy or changes the clipboard automatically; the result's Copy button requires a click. The extension settings page contains source editing and reload controls; demo and clipboard input buttons are not offered there.
 
 Use **Edit Source** to open Translation's installed working folder. Change `main.js`, `prompts/translate.txt`, or its settings schema and save. The watcher debounces saves, validates a candidate, and replaces only that extension's worker. Invalid edits show an error while the last working generation remains active. Settings stay separate, and re-enabling does not overwrite local edits. **Reload** performs the same validation on demand.
+
+### Polish-input
+
+Open **MacHelper → Extensions → Polish-input**, enable it, and review its `selection.read`, `selection.replace`, `selection.paste`, `ai.transform`, and `ui.panel` access. MacHelper 6.6 or later is required. Its editable source prompt defines the polishing instructions; MacHelper forwards that prompt unchanged and uses the shared provider/model.
+
+Select a draft in a supported app and choose **Polish** from the shared toolbar. Read the streamed preview, then choose **Apply**. MacHelper rechecks the original app/PID, focused Accessibility element, exact numeric selection range and selected text, and enabled/nonprotected editable state. MacHelper checks whether the selected field belongs to a web editor or a native control. Supported web editors, including those embedded in desktop apps, use approved **Clipboard-assisted Apply** (`selection.paste`) before any write because an advertised writable selection may still ignore a direct edit. Verified native controls prefer direct selected-text replacement and can use approved paste when direct editing is unavailable. If the bounded check cannot determine the editor type, only approved paste is eligible, with the same strict editable-field and selection checks. Fields without that evidence keep Copy. The host puts the completed result on the clipboard and sends only Command-V to the verified source app after another target and clipboard-ownership check. Without paste approval or sufficient editable-field evidence, a web selection keeps Copy. Both partial and full selections can work when the editor exposes the required evidence; there is no select-all requirement.
+
+Clipboard-assisted Apply has a separate permission review explaining that it replaces the clipboard and leaves the result there, like Copy. MacHelper never reads, saves, or restores your previous clipboard. It does not activate another app, force a selection, send Enter, or click Send. If target or clipboard ownership changes, it refuses the paste. A dispatched paste is reported as requested unless the inserted text can be confirmed; check the original app before continuing. There is no automatic retry or rollback. A completed preview remains available through **Copy** for read-only or unsupported fields, and sending remains your action.
+
+After an explicit Apply attempt, the completed preview and Copy remain visible through Accessibility polling changes caused by the write, with Apply disabled. Explicit dismissal or an outside click, a new selection gesture, switching apps, or replacing/disabling the owning activation clears that retained preview.
+
+Replacement depends on the editor’s Accessibility support and, where needed, approved clipboard-assisted Apply. Browser fields can support partial or full selections; unsupported fields keep manual Copy. Replacement is plain text; rich formatting and the editor’s Undo behavior are not guaranteed. Protected fields and text inside images are unsupported. Editing Polish-input’s prompt, script, or settings schema uses the same validated hot-reload workflow as Translation.
 
 ### Adding extensions developed elsewhere
 
@@ -117,21 +134,15 @@ MacHelper starts the local service when the app starts, including background log
 
 For website AI requests, MacHelper downloads a small revision manifest and a separate, verified public description index, caching it with a bundled seed for unavailable networks. Source code is downloaded only when installing a chosen tool. New or changed descriptions can be published without shipping a new MacHelper. With more than 40 indexed tools, AI expands the query into keywords, local retrieval selects up to 40 candidates, then AI ranks a bounded subset. This is useful discovery rather than guaranteed exhaustive semantic search of every tool. The service response retains the model and whether cached metadata is stale; these details are not shown in the search form. Search returns up to five suggested tools with a reason and a good/partial fit; it never installs or executes extension code. Review details and permissions before separately choosing installation.
 
-### MessageHelper — Upwork
+### Retired MessageHelper — Upwork
 
-In Edge, use `edge://extensions`; in Chrome, use `chrome://extensions`. Enable Developer mode, choose Load unpacked, and select `Extensions/MessageHelper-Upwork`. Reload an existing installation after source changes, and refresh affected tabs after preserving unsaved drafts.
+Translation and Polish-input replace the main translation and polishing workflows through text selection in supported Mac apps, including browser fields. MessageHelper — Upwork is no longer a current marketplace tool. Its source is retained under `legacy/MessageHelper-Upwork/`, and immutable published downloads remain available for compatibility. The old inline per-message controls are specific to that retired browser package; the current tools use the floating selection toolbar.
 
-Supported routes include Upwork messages, proposal conversations, and contract Leave feedback forms. Message Translate shows output below the original. Polish previews English before Apply; Cancel preserves the draft, and Undo restores it while unchanged. Feedback Translate draft is read-only. Ratings and submission controls are untouched. Only the user may send messages or submit feedback.
-
-The popup's AI model list uses the currently selected MacHelper provider. MacHelper default follows shared preferences; a named choice overrides the shared model only for this browser extension. If a provider change makes that override unavailable, select an available model or MacHelper default. Use its safe test page for synthetic Apply/Undo checks.
-
-Native host: `com.localaibasetools.mac_helper`; compatibility alias: `com.messagehelper.gpt`. Both launch the same new host. The stable Upwork extension ID is `fmhfobfddchbeibojepeocgfemkpcklo`. Additional browser clients need explicit registration:
+The framed host remains compatible with existing browser and standalone clients. Its canonical name is `com.localaibasetools.mac_helper`; `com.messagehelper.gpt` is a compatibility alias. Existing browser registrations are preserved. Additional legacy browser clients still require explicit IDs, with no wildcard origins:
 
 ```sh
 python3 scripts/install-helper.py --extension-id ADDITIONAL_32_CHARACTER_EXTENSION_ID
 ```
-
-Repeated flags add multiple IDs; existing registrations are preserved, with no wildcard origins.
 
 ## Data
 
@@ -165,7 +176,7 @@ The extension-list check drives the actual offscreen list controls with temporar
 
 The discovery script checks the compatibility framed-host discovery contract with synthetic input; its optional live mode uses the saved provider and consumes usage. With MacHelper running, `python3 scripts/test-marketplace-service.py` checks the extension-free HTTP connection and rejects invalid/unauthorized requests without calling AI. Add `--live` to rank one synthetic public need through the saved provider; this consumes usage. Local-service tests use bounded HTTP/socket fixtures and mocked inference to check origin/host validation, session ownership, cancellation, and rejection of unrelated operations. Website tests mock the local HTTP API and verify that opening a page, changing language, and playing demonstrations make no connection or AI request.
 
-The optional live AI-host check (`scripts/test-native.py --live`) also uses synthetic text only. Add `--model MODEL_ID_FROM_CATALOG` to test an explicit model. Browser tests use synthetic messages/feedback and zero-send/zero-submit sentinels. Swift tests cover the providers, framing, source validation/downloads/watchers, JavaScript and native source workers/settings, selection lifecycle/geometry, preferences, and startup decisions. Native worker integration checks build outside the editable package, exercise invalid-build recovery and runtime migration, and use isolated extension state. Legacy SDK checks remain separate development fixtures.
+The optional live AI-host check (`scripts/test-native.py --live`) also uses synthetic text only. Add `--model MODEL_ID_FROM_CATALOG` to test an explicit model. Browser tests use synthetic messages/feedback and zero-send/zero-submit sentinels. Swift tests cover the providers, framing, source validation/downloads/watchers, JavaScript and native source workers/settings, shared-toolbar routing, selected-text replacement validation, selection lifecycle/geometry, preferences, and startup decisions. Native worker integration checks build outside the editable package, exercise invalid-build recovery and runtime migration, and use isolated extension state. Legacy SDK checks remain separate development fixtures.
 
 See [MacHelper Protocol](docs/MacHelper-Protocol.md) for browser and native AI requests.
 

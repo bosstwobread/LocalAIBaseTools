@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacHelper — safe selection test</title>
+<style>
+  body { max-width: 850px; margin: 48px auto; padding: 0 24px; font: 18px/1.6 system-ui; color: #24302d; background: #f5f4ef; }
+  h1 { font-size: 30px; } section { padding: 22px; background: white; border: 1px solid #d5dcd8; border-radius: 12px; margin: 20px 0; }
+  label { display: block; font-weight: 600; margin-bottom: 8px; }
+  textarea, [contenteditable] { box-sizing: border-box; width: 100%; min-height: 100px; padding: 12px; border: 1px solid #929f98; border-radius: 6px; font: inherit; }
+  output { display: block; font-size: 14px; color: #586a60; margin-top: 8px; }
+</style>
+<h1>MacHelper selection tools</h1>
+<p>Disposable test text. This page has no message submission controls.</p>
+<section>
+  <label for="draft">Plain text draft</label>
+  <textarea id="draft">I has finished the update. Please checking it when you has time.</textarea>
+  <output id="draft-events">Input events: 0</output>
+</section>
+<section>
+  <label id="rich-label">Editable document</label>
+  <div contenteditable="true" role="textbox" aria-labelledby="rich-label">We was ready to review the report yesterday. I will sends the notes after lunch.</div>
+  <output id="rich-events">Input events: 0</output>
+</section>
+<section>
+  <h2>Read-only text</h2>
+  <p>The crane is lifting a steel beam beside the new building.</p>
+</section>
+<section>
+  <label for="protected">Protected field</label>
+  <input id="protected" type="password" value="synthetic-test-only" autocomplete="off">
+</section>
+<script>
+  for (const [field, target] of [[document.querySelector('#draft'), document.querySelector('#draft-events')], [document.querySelector('[contenteditable]'), document.querySelector('#rich-events')]]) {
+    let count = 0;
+    field.addEventListener('input', () => { target.textContent = `Input events: ${++count}`; });
+  }
+</script>
+</html>

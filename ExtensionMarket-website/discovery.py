@@ -84,7 +84,7 @@ def build_discovery_index(root, config=None, allow_legacy=False):
     for folder in sorted((root / 'Extensions').iterdir()):
         if folder.is_symlink():
             raise ValueError('Extensions cannot be symbolic links.')
-        if not folder.is_dir() or folder.name.startswith('.'):
+        if not folder.is_dir() or folder.name.startswith('.') or folder.name in config.get('retiredTools', []):
             continue
         metadata = config.get('tools', {}).get(folder.name, {})
         source = folder / 'extension.json'

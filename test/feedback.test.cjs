@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
 
-const extension = path.join(__dirname, '../Extensions/MessageHelper-Upwork');
+const extension = path.join(__dirname, '../legacy/MessageHelper-Upwork');
 const tick = async () => { for (let n = 0; n < 3; n++) await new Promise(resolve => setImmediate(resolve)); };
 const publicDraft = 'The client communicate clearly and pay on time.';
 const privateDraft = 'I would works with this client again.';

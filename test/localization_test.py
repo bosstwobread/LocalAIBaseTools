@@ -24,16 +24,19 @@ class InterfaceCatalogTests(unittest.TestCase):
                 catalog = json.loads(path.read_text())
                 self.assertFalse(keys - set(catalog), f"Missing UI keys: {sorted(keys - set(catalog))}")
 
-    def test_translation_owns_display_labels(self):
-        package = ROOT / "Extensions/Translation"
-        manifest = json.loads((package / "extension.json").read_text())
-        table = json.loads((package / manifest["localizations"]).read_text())
-        self.assertEqual(set(table["translations"]), LANGUAGES)
-        schema = json.loads((package / manifest["settingsSchema"]).read_text())
-        required = {manifest["summary"], *[field["label"] for field in schema["fields"]]}
-        for code, strings in table["translations"].items():
-            with self.subTest(language=code):
-                self.assertFalse(required - set(strings))
+    def test_source_extensions_own_display_labels_and_selection_action_titles(self):
+        for package in (ROOT / "Extensions").iterdir():
+            if not (package / "extension.json").is_file():
+                continue
+            manifest = json.loads((package / "extension.json").read_text())
+            table = json.loads((package / manifest["localizations"]).read_text())
+            self.assertEqual(set(table["translations"]), LANGUAGES, package.name)
+            schema = json.loads((package / manifest["settingsSchema"]).read_text())
+            required = {manifest["summary"], *[field["label"] for field in schema["fields"]],
+                        *[command["title"] for command in manifest["commands"]]}
+            for code, strings in table["translations"].items():
+                with self.subTest(package=package.name, language=code):
+                    self.assertFalse(required - set(strings))
 
 
 if __name__ == "__main__":

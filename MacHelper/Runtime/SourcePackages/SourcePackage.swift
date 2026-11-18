@@ -15,6 +15,19 @@ public struct SourceExtensionCommand: Codable, Equatable, Sendable {
     }
 }
 
+public enum SourceSelectionPermissionReview: Equatable {
+    case replacement, paste
+
+    public static func required(requested: [String], approved: [String]) -> Self? {
+        let existing = Set(approved)
+        // The paste review explicitly includes replacement on Apply, so a new
+        // tool requesting both capabilities needs one clear selection review.
+        if requested.contains("selection.paste"), !existing.contains("selection.paste") { return .paste }
+        if requested.contains("selection.replace"), !existing.contains("selection.replace") { return .replacement }
+        return nil
+    }
+}
+
 public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let runtime: String
@@ -58,7 +71,7 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         }
         // Accept old immutable packages' clipboard declaration for compatibility;
         // the current source-worker API does not provide a clipboard reader.
-        var allowed: Set<String> = ["selection.read", "clipboard.read", "ai.transform", "ui.panel"]
+        var allowed: Set<String> = ["selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel"]
         if runtime == "native" { allowed.insert("native.execute") }
         guard permissions.count <= allowed.count, Set(permissions).count == permissions.count,
               permissions.allSatisfy(allowed.contains), !commands.isEmpty, commands.count <= 16,
@@ -67,6 +80,12 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         }
         if runtime == "native", !permissions.contains("native.execute") {
             throw SourcePackageError.invalid("Native extensions must declare native.execute permission for trusted native code execution.")
+        }
+        if permissions.contains("selection.replace"), !permissions.contains("selection.read") {
+            throw SourcePackageError.invalid(L("Selected-text replacement requires selection.read permission."))
+        }
+        if permissions.contains("selection.paste"), !Set(["selection.read", "selection.replace"]).isSubset(of: Set(permissions)) {
+            throw SourcePackageError.invalid(L("Selected-text paste requires selection.read and selection.replace permissions."))
         }
         for command in commands {
             guard command.identifier.range(of: #"^[a-z][a-z0-9-]{0,47}$"#, options: .regularExpression) != nil,

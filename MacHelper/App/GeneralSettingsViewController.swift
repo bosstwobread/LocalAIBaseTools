@@ -1,10 +1,12 @@
 import AppKit
 import MacHelper
+import MacHelperCapabilities
 
 @MainActor
 final class GeneralSettingsViewController: NSViewController {
     private let login: LoginItemManager
     private let toggle = NSButton(checkboxWithTitle: L("Launch MacHelper at login"), target: nil, action: nil)
+    private let compatibilityToggle = NSButton(checkboxWithTitle: L("Improve compatibility with Electron apps"), target: nil, action: nil)
     private let languagePicker = NSPopUpButton()
     var onLanguageChange: ((String) -> Bool)?
     private let status = NSTextField(wrappingLabelWithString: "")
@@ -62,7 +64,27 @@ final class GeneralSettingsViewController: NSViewController {
         language.orientation = .vertical
         language.alignment = .leading
         language.spacing = 10
-        let stack = NSStackView(views: [header, language, startup])
+        let compatibilityTitle = NSTextField(labelWithString: L("App compatibility"))
+        compatibilityTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        compatibilityToggle.state = SelectionCompatibilityPreferences.isEnabled ? .on : .off
+        compatibilityToggle.target = self
+        compatibilityToggle.action = #selector(changeCompatibility)
+        compatibilityToggle.identifier = NSUserInterfaceItemIdentifier("electron-compatibility")
+        compatibilityToggle.cell?.wraps = true
+        compatibilityToggle.cell?.lineBreakMode = .byWordWrapping
+        compatibilityToggle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let compatibilityNote = NSTextField(wrappingLabelWithString: L("Off by default. After you select text, MacHelper can ask supporting apps to expose full Accessibility information. Select the text again after changing this option."))
+        let compatibilityEffects = NSTextField(wrappingLabelWithString: L("Some apps may change behavior. VS Code may enable Screen Reader Optimized mode, affecting features such as folding and the minimap."))
+        let compatibilityReset = NSTextField(wrappingLabelWithString: L("Turning this off stops new requests. Apps already enabled may need to restart to revert. This does not turn on VoiceOver or change macOS permissions."))
+        for label in [compatibilityNote, compatibilityEffects, compatibilityReset] {
+            label.font = .systemFont(ofSize: 12)
+            label.textColor = .secondaryLabelColor
+        }
+        let compatibility = NSStackView(views: [compatibilityTitle, compatibilityToggle, compatibilityNote, compatibilityEffects, compatibilityReset])
+        compatibility.orientation = .vertical
+        compatibility.alignment = .leading
+        compatibility.spacing = 10
+        let stack = NSStackView(views: [header, language, startup, compatibility])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 28
@@ -86,6 +108,11 @@ final class GeneralSettingsViewController: NSViewController {
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -28),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             startup.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            compatibility.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            compatibilityToggle.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor),
+            compatibilityNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            compatibilityEffects.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            compatibilityReset.widthAnchor.constraint(equalTo: stack.widthAnchor),
             subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor),
             status.widthAnchor.constraint(equalTo: stack.widthAnchor),
             note.widthAnchor.constraint(equalTo: stack.widthAnchor)
@@ -96,6 +123,7 @@ final class GeneralSettingsViewController: NSViewController {
         loadViewIfNeeded()
         if login.isEnabled || login.requiresApproval { registrationError = nil }
         toggle.state = login.isEnabled || login.requiresApproval ? .on : .off
+        compatibilityToggle.state = SelectionCompatibilityPreferences.isEnabled ? .on : .off
         status.stringValue = registrationError.map { L("Startup error: %@", L($0)) } ?? L(login.statusMessage)
         status.textColor = registrationError == nil ? .secondaryLabelColor : .systemRed
     }
@@ -117,6 +145,9 @@ final class GeneralSettingsViewController: NSViewController {
             registrationError = nil
         } catch { registrationError = error.localizedDescription }
         refreshStatus()
+    }
+    @objc private func changeCompatibility() {
+        SelectionCompatibilityPreferences.isEnabled = compatibilityToggle.state == .on
     }
     @objc private func openLoginItems() { login.openLoginSettings() }
 }

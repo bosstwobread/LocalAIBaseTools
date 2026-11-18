@@ -100,9 +100,9 @@ def main():
     retired = retire_legacy_translation(Path.home())
     if retired:
         print(f"Moved the old standalone Translation app to {retired}; its preferences were preserved.")
-    print("Open MacHelper.app. Translation settings are under Extensions; launch at login is under General.")
-    print("MacHelper requires your approval in System Settings > Privacy & Security > Accessibility for text selection.")
-    print("If MacHelper is already running, quit and reopen it to use this build. Reload browser extensions to reconnect the host.")
+    print("Open MacHelper.app. Translation and Polish-input settings are under Extensions; launch at login is under General.")
+    print("MacHelper requires Accessibility approval for selection; supported edits require an explicit Apply action.")
+    print("If MacHelper is already running, quit and reopen it to use this build.")
 
 
 if __name__ == "__main__":

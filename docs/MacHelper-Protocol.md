@@ -2,7 +2,7 @@
 
 MacHelper is implemented by the Swift package in `MacHelper`. This document describes its framed AI host protocol for browser native messaging and standalone local clients, plus its separate local HTTP protocol for website discovery. The unified schema-2 extension system runs editable JavaScript or native Swift source in independent workers. Those extensions use `MacHelper.ai.transform` or `MacHelperNativeInput.transform`; MacHelper validates the capability and invokes this AI host on their behalf. Extension authors should use the [source API](Source-Extensions.md) rather than implement this transport.
 
-Browser extensions use native messaging; standalone local clients can launch the installed host directly without importing MacHelper's private Swift implementation. The old schema-1 SDK's executable context is a legacy verification/migration interface and is not loaded by the normal app. MacHelper 6.5 also runs a narrow loopback HTTP service for extension-free website discovery, documented separately below; native messaging remains the transport for MessageHelper-Upwork and local text clients.
+Browser extensions use native messaging; standalone local clients can launch the installed host directly without importing MacHelper's private Swift implementation. The old schema-1 SDK's executable context is a legacy verification/migration interface and is not loaded by the normal app. MacHelper 6.5 also runs a narrow loopback HTTP service for extension-free website discovery, documented separately below; native messaging remains a compatibility transport for retired MessageHelper-Upwork and other local text clients. Translation and Polish-input use host-managed source capabilities and need no browser extension.
 
 Installed executable: `~/Library/Application Support/LocalAIBaseTools/MacHelper/mac-helper-host`.
 Browser host name: `com.localaibasetools.mac_helper`.
@@ -30,7 +30,7 @@ When `systemPrompt` is supplied, `text` is opaque extension-prepared data and ma
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"6.5.1","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.6.0","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -38,7 +38,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"6.5.1","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.6.0","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.
@@ -49,7 +49,7 @@ Browser clients need explicit extension-ID registration. Native clients omit the
 
 The source-worker bridge uses its own framed process connection and generation identifiers. Source changes create a replacement worker after candidate validation; the host cancels stopped generations and ignores their stale responses. Extension JavaScript only receives declared capabilities and frozen package resources, not the helper executable path or this native-client authority. Browsing a catalog, enabling a source tool, and selecting text do not authorize AI inference; an explicit tool action is required.
 
-Do not auto-send, auto-paste, collect entire documents, or log private content. Treat all selected/source text as untrusted input; display it as text, not executable HTML. Keep provider settings UI in MacHelper so more tools can share one configuration.
+Do not auto-send, paste without an explicit approved Apply action, collect entire documents, or log private content. Clipboard-assisted Apply belongs to the source host’s separately approved `selection.paste` capability, not this framed AI transport; it provides no general clipboard or keyboard endpoint. Treat all selected/source text as untrusted input; display it as text, not executable HTML. Keep provider settings UI in MacHelper so more tools can share one configuration.
 
 ## Extension discovery (MacHelper 6.3)
 
@@ -65,7 +65,7 @@ This native action remains available for compatible local clients, including his
 {
   "id": "discovery-example",
   "ok": true,
-  "version": "6.5.1",
+  "version": "6.6.0",
   "search": {
     "revision": "<64 lowercase hexadecimal characters>",
     "updatedAt": "2026-11-17T00:00:00Z",
@@ -92,9 +92,9 @@ The website’s AI search action is **Find with AI**. First validate the need lo
 
 | Request | Authentication and body | Success response |
 | --- | --- | --- |
-| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.5.1",protocolVersion:1}` |
+| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.6.0",protocolVersion:1}` |
 | `POST /v1/session` | Client/Origin/Host headers; `{}` | `{ok:true,token:"<opaque random token>",expiresIn:1800}` |
-| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.5.1",search:<discovery result>}` |
+| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.6.0",search:<discovery result>}` |
 | `POST /v1/cancel` | `Authorization: Bearer <token>`; `{requestId}` | `{ok:true,cancelled:<boolean>}` |
 
 `requestId` is 1–80 ASCII letters, digits, `_`, or `-`. Search `query` has the native discovery bounds above: nonblank, no NUL, at most 2,000 UTF-16 units and 8,000 UTF-8 bytes. `language` uses the supported interface codes above. Additional fields are rejected. The `search` object follows the revision/model/matches contract above; results are terminal, rather than streamed. Only an explicit **Find with AI** action may start ranking.
@@ -103,7 +103,7 @@ Session tokens are random, bounded to 16, kept only in the app and page memory, 
 
 Error responses use `{ok:false,code:"<machine-readable code>",error:"<readable message>"}` with an appropriate non-2xx status. Invalid/unauthorized requests use 4xx; a busy search uses HTTP 429. Clients must handle unavailable service, denied browser local access, timeout/cancellation, expired sessions, and provider errors separately from a valid empty-match result. Do not interpret browser network failure as permission to fall back to a cloud AI backend or another provider. Keyword filtering remains usable without the local connection.
 
-After a local connection error, **Open MacHelper** uses the exact `machelper://open` URL to launch/focus the installed app, with no search query or AI action, while **Get MacHelper** offers the download. An unreachable local service cannot distinguish a closed app from a missing app; the website must not assert that MacHelper is uninstalled. After resolving the connection issue, the user chooses **Find with AI** again. It is separate from reviewed `machelper://install` source-package links. Chrome/Edge may be installed before or after MacHelper; no per-browser/profile installation is required for this service. A new profile or browser reinstall may require local-access approval and a fresh session, while the MacHelper app and shared provider settings remain in place. MessageHelper-Upwork continues to require its own browser extension and Native Messaging host. The native **Website connection** status and **Restart Connection** control manage the loopback listener, not browser installation or AI settings.
+After a local connection error, **Open MacHelper** uses the exact `machelper://open` URL to launch/focus the installed app, with no search query or AI action, while **Get MacHelper** offers the download. An unreachable local service cannot distinguish a closed app from a missing app; the website must not assert that MacHelper is uninstalled. After resolving the connection issue, the user chooses **Find with AI** again. It is separate from reviewed `machelper://install` source-package links. Chrome/Edge may be installed before or after MacHelper; no per-browser/profile installation is required for this service. A new profile or browser reinstall may require local-access approval and a fresh session, while the MacHelper app and shared provider settings remain in place. The retired MessageHelper-Upwork package uses its own browser extension and Native Messaging host; the current Translation and Polish-input tools need neither a browser extension nor profile registration. The native **Website connection** status and **Restart Connection** control manage the loopback listener, not browser installation or AI settings.
 
 With MacHelper running, `python3 scripts/test-marketplace-service.py` checks the installed HTTP service without inference. Its optional `--live` flag ranks one synthetic public need using the saved provider and consumes usage. Swift socket tests and website mocked-HTTP tests separately cover session expiry/eviction, cancellation, malformed requests, and unavailable service; the compatibility `scripts/test-discovery.py` still checks framed native requests.
 

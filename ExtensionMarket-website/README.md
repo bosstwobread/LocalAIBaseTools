@@ -2,7 +2,8 @@
 
 Public marketplace: **https://local-ai-extension.nelson007.com/**
 
-The website lists every current tool under `Extensions`, with search, category
+The website lists every current tool under `Extensions` (excluding explicit
+`retiredTools` entries in its public config), with search, category
 and platform filters, interface previews, details, source links, and complete
 source downloads. JavaScript and native Swift tools share the same catalog, install review, and editable package format. It is a static website served from its own Docker container.
 Keyword search reads only public metadata and does not call AI. The optional
@@ -17,16 +18,46 @@ or download [AI_EXTENSION_GUIDE.md](../AI_EXTENSION_GUIDE.md) for their coding
 assistant. It explains both **Edit Source → save → hot reload** for an installed
 enabled source tool and **Install Source… → enable** for a new independent tool.
 JavaScript edits replace the script worker; native Swift edits build and replace
-the native worker. Both keep MacHelper running. Chrome/Edge companions use the
-browser's extension reload flow. Legacy compiled bundles require migration to
+the native worker. Both keep MacHelper running. Legacy compiled bundles require migration to
 the current native source SDK.
 
-Translation's **Open MacHelper** link uses `machelper://install` to request a
+The **Open MacHelper** links for Translation and Polish-input use `machelper://install` to request a
 native installation review. MacHelper checks the catalog and manifest before
 showing permissions, then downloads the complete hash-verified source after
 approval. Existing local edits, settings, and enabled/disabled choices survive
-repeat install clicks. MessageHelper-Upwork is distributed as a complete ZIP
-with Chrome/Edge Developer mode installation instructions.
+repeat install clicks. Both current tools run through MacHelper without a
+browser extension. MacHelper 6.6 adds a shared Translate/Polish selection toolbar.
+Polish-input streams a preview; **Apply** replaces only a still-unchanged selection
+in a supported editable field, while **Copy** is available for other selections.
+MacHelper identifies supported web editors through a bounded Accessibility
+parent-chain check, including editors embedded in desktop apps. These select
+approved paste before any write because an advertised selected-text setter may
+ignore direct edits. Verified native controls prefer direct selected-text editing;
+if the bounded check cannot determine the editor type, only approved paste is
+eligible with the same strict editable-field and selection checks. Fields without
+that evidence keep Copy. Every paste route still needs approval and sufficient
+editable-field evidence. A tool with separately approved
+`selection.paste` access may use clipboard-assisted Apply in a supported editor:
+only after you click **Apply**, MacHelper rechecks the original app, focused field,
+selection range, and exact text, writes the completed result to the clipboard,
+and sends the fixed Paste shortcut to that app. This replaces the clipboard and
+leaves the result there; previous clipboard contents are never read or restored.
+It does not retry a failed direct edit by pasting, or press Enter or Send. Changed, protected, read-only, or unsupported
+targets retain **Copy** for manual use. Previewing or selecting text never applies
+an edit. The illustration shows one fully selected example field. Editor support
+varies.
+Polishing preserves the input language by default. Prompt editing and hot reload
+remain part of the independent extension source. MessageHelper-Upwork is retired
+from current listings; its published ZIPs remain immutable historical downloads.
+
+MacHelper’s **General → Improve compatibility with Electron apps** setting is off
+by default. After a new selection, enabling it lets the host ask supporting apps
+for full Accessibility information. This can change app behavior: VS Code may
+enter Screen Reader Optimized mode, affecting folding and the minimap. Turning
+it off stops new requests; already affected apps may need restarting. It does
+not turn on VoiceOver or change macOS permissions. Reselect text after changing
+it. This host option is not a website or extension permission and does not
+guarantee that an editor supports Apply.
 
 ## Files
 
@@ -54,12 +85,12 @@ with Chrome/Edge Developer mode installation instructions.
   automatic. The no-JavaScript hero displays the completed example. All
   placements omit the progress bar and duration/example-content footer;
   the accessible summary still identifies the illustration as an example.
-- `marketplace.config.json`: public URL and visual display metadata (categories, artwork, and screenshots).
+- `marketplace.config.json`: public URL, MacHelper 6.6 release metadata, visual display metadata (categories, artwork, and screenshots), and explicitly retired source folders.
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
   while the current catalog lists only the latest versions. This includes the
   original Translation 4.1.0, 4.2.0, 4.3.0, and 4.4.0 source/ZIP inventories and the
-  MessageHelper-Upwork 1.3.0 ZIP. Translation 4.1.0's
+  MessageHelper-Upwork 1.3.0, 1.3.1, and 1.4.0 ZIPs. Translation 4.1.0's
   retained ZIP SHA-256 is `3f2f881578751ddcf445fc868212db96819c068369d786c29f72acd3c602be75`.
 - `build.py`: discovers actual extension manifests, builds the source catalog,
   complete source ZIPs, and the prebuilt MacHelper app ZIP in `dist/`. Its explicit
@@ -191,7 +222,7 @@ root project's license; source files already present in that folder are retained
 
 ## Unified source runtimes
 
-MacHelper 6 reads `runtime: "javascript"` or `"native"` from the schema-2 manifest. The website packages both as complete `.macsource.zip` inventories and uses the same Open MacHelper install link. Native source requires a `.swift` entry and `native.execute`; its detail/install page explains the compiler requirement and trusted native execution. No arbitrary native binary or manifest build hook is introduced by website packaging. The current Translation package remains JavaScript.
+MacHelper 6 reads `runtime: "javascript"` or `"native"` from the schema-2 manifest. The website packages both as complete `.macsource.zip` inventories and uses the same Open MacHelper install link. Native source requires a `.swift` entry and `native.execute`; its detail/install page explains the compiler requirement and trusted native execution. No arbitrary native binary or manifest build hook is introduced by website packaging. The current Translation and Polish-input packages remain JavaScript.
 
 The authoring section and AI guide describe both adapters and migration with a stable identifier/settings. The public-document allowlist includes `docs/Native-Extensions.md`; a separate explicit mapping publishes `MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift` at `NativeExtensionSDK/MacHelperNativeSDK.swift`. The MacHelper download must bundle these exact public bytes. `AI_DEPLOYMENT.md` remains excluded from the website, source ZIPs, and app ZIP.
 
@@ -264,7 +295,8 @@ this search service; local-access approval and a fresh session may be needed.
 MacHelper must be running, while its settings window can stay closed. Search and
 its results remain on the website. The former Connector is retired from current
 listings; previously published ZIPs remain available as immutable historical
-downloads. MessageHelper-Upwork still requires its own browser extension.
+downloads. MessageHelper-Upwork is also retired in favor of Translation and
+Polish-input, which work across supported Mac apps without browser extensions.
 
 The production service rejects localhost preview origins. Automated frontend
 tests mock the local HTTP API; manual previews can use keyword filtering. Do not

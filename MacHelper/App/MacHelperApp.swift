@@ -90,7 +90,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         sourceManager = SourceExtensionManager(workerExecutableURL: bin.appendingPathComponent("MacHelperScriptWorker"),
             helperExecutableURL: bin.appendingPathComponent("mac-helper-host"),
             bundledCatalogURL: Bundle.main.resourceURL!.appendingPathComponent("SourceCatalog/extensions.json"),
-            bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds/Translation"))
+            bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds"))
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         general = GeneralSettingsViewController(login: login)
@@ -411,7 +411,8 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private func reviewMarketplaceInstall(_ preview: MarketplaceInstallPreview) -> Bool {
         let alert = NSAlert()
         alert.messageText = L("Install %@?", preview.manifest.displayName)
-        let permissionNames = ["selection.read": "Read selected text across apps", "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
+        let permissionNames = ["selection.read": "Read selected text across apps", "selection.replace": "Replace selected text only when you click Apply", "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
+                               "selection.paste": "Use the clipboard to paste completed results after Apply",
                                "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
                                "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
         let permissions = preview.manifest.permissions.map { "• " + L(permissionNames[$0] ?? $0) }.joined(separator: "\n")

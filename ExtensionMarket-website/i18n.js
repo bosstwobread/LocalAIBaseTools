@@ -23,7 +23,7 @@
   try { stored = localStorage.getItem(storageKey); } catch { /* Private browsing may disable storage. */ }
   let locale = canonical(stored) || (navigator.languages || [navigator.language]).map(canonical).find(Boolean) || 'en';
   const previewText = key => previewCatalogs[locale]?.[key] || previewCatalogs.en?.[key] || '';
-  const previewNames = new Map([['translation-preview.svg', 'translation'], ['messagehelper-preview.svg', 'messagehelper']]);
+  const previewNames = new Map([['translation-preview.svg', 'translation'], ['polish-input-preview.svg', 'polish']]);
   function previewName(value) {
     try {
       const path = typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value.slice(1) : value;

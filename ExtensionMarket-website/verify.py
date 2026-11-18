@@ -30,8 +30,8 @@ def main():
     assert data["schemaVersion"] == catalog["schemaVersion"] == 1
     assert len({tool["id"] for tool in data["extensions"]}) == len(data["extensions"])
     assert len({tool["slug"] for tool in data["extensions"]}) == len(data["extensions"])
-    folders = [p for p in (ROOT / "Extensions").iterdir() if p.is_dir() and not p.name.startswith(".")]
-    assert len(folders) == len(data["extensions"]), "The website must list every extension directory."
+    folders = [p for p in (ROOT / "Extensions").iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in config.get("retiredTools", [])]
+    assert len(folders) == len(data["extensions"]), "The website must list every current extension directory."
     index_bytes = (site / "discovery-index.json").read_bytes()
     index = json.loads(index_bytes)
     discovery_manifest = json.loads((site / "discovery-manifest.json").read_bytes())

@@ -15,6 +15,22 @@ final class SelectionStateTests: XCTestCase {
         XCTAssertTrue(state.acceptsResult(for: token))
     }
 
+    func testAppliedPreviewSurvivesOwnSelectionPollingUntilDeliberateDismissal() {
+        var state = SelectionState()
+        state.observe(selection())
+        state.retainPreviewAfterApply()
+        state.observe(nil)
+        XCTAssertTrue(state.retainsAppliedPreview, "An asynchronous setter clearing its selection must not remove Copy")
+        state.observe(selection("polished"))
+        XCTAssertTrue(state.retainsAppliedPreview)
+        state.dismiss()
+        XCTAssertFalse(state.retainsAppliedPreview)
+        state.rearmAfterSelectionGesture()
+        state.observe(selection("another selection"))
+        XCTAssertTrue(state.canTranslate)
+        XCTAssertFalse(state.retainsAppliedPreview)
+    }
+
     func testNewSelectionRejectsStaleTranslation() {
         var state = SelectionState()
         state.observe(selection())

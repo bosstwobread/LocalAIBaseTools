@@ -3,7 +3,7 @@
   "baseUrl": "https://local-ai-extension.nelson007.com/",
   "sourceUrl": "https://github.com/bosstwobread/LocalAIBaseTools",
   "macHelper": {
-    "version": "6.5.1",
+    "version": "6.6.0",
     "minimumOS": "macOS 14+",
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
@@ -21,18 +21,20 @@
         }
       ]
     },
-    "MessageHelper-Upwork": {
-      "id": "com.localaibasetools.messagehelper-upwork",
-      "slug": "messagehelper-upwork",
+    "Polish-input": {
+      "slug": "polish-input",
       "category": "Writing",
-      "icon": "assets/messagehelper-icon.svg",
+      "icon": "assets/polish-input-icon.svg",
       "screenshots": [
         {
-          "src": "assets/messagehelper-preview.svg",
-          "alt": "Illustrated browser with a translated client message and an English draft editing preview. Example content.",
-          "caption": "Interface preview — translate messages and review polished drafts before applying."
+          "src": "assets/polish-input-preview.svg",
+          "alt": "Illustrated editor with selected text, a shared Translate and Polish toolbar, and a polished preview with Apply and Copy. Example content.",
+          "caption": "Interface preview — select text, review the polished result, then Apply or Copy."
         }
       ]
     }
-  }
+  },
+  "retiredTools": [
+    "MessageHelper-Upwork"
+  ]
 }

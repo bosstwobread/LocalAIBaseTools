@@ -238,6 +238,7 @@ enum SourceExtensionVerification {
             probe.streamNext = true; probe.releaseStream = false
             var cancelledProgress: [String] = []
             let streamingPID = try remember(manager.workerPID(for: id))
+            let activationBeforeRecovery = manager.activationGeneration(for: id)
             let cancelledStream = Task { () -> Bool in
                 do { _ = try await manager.performCommand(for: id, text: sample) { cancelledProgress.append($0.text) }; return false }
                 catch { return true }
@@ -253,6 +254,8 @@ enum SourceExtensionVerification {
             try check(cancelledProgress == ["AI:"], "Late progress from a cancelled translation reached its display callback.")
             try check(try await manager.performCommand(for: id, text: sample).text == "AI:" + samplePayload,
                       "Translation did not recover after cancelling a partial stream.")
+            try check(manager.activationGeneration(for: id) == activationBeforeRecovery,
+                      "Recovering a stopped process changed the unchanged source activation and blocked an explicit retry.")
             _ = try remember(manager.workerPID(for: id))
             note("cancelling a partial stream rejects late updates, stops its worker, and permits a fresh translation")
 
@@ -289,6 +292,7 @@ enum SourceExtensionVerification {
             probe.streamNext = true; probe.releaseStream = false
             var reloadedStreamProgress: [String] = []
             let streamBeforeReloadPID = try remember(manager.workerPID(for: id))
+            let activationBeforeReload = manager.activationGeneration(for: id)
             let countBeforeStreamingReload = try info(manager).reloadCount
             let replacedStream = Task { () -> Bool in
                 do { _ = try await manager.performCommand(for: id, text: sample) { reloadedStreamProgress.append($0.text) }; return false }
@@ -302,6 +306,8 @@ enum SourceExtensionVerification {
                 ((try? info(manager).reloadCount) ?? 0) > countBeforeStreamingReload && manager.workerPID(for: id) != streamBeforeReloadPID
             }
             try check(await replacedStream.value, "A replaced stream incorrectly completed its old command.")
+            try check(manager.activationGeneration(for: id) != activationBeforeReload,
+                      "A source reload reused the old activation identity and could retain a stale preview.")
             try await eventually("Reloading a running stream did not reap its old worker.") { !processExists(streamBeforeReloadPID) }
             oldStreamEmitter?(["text": "STALE RELOADED STREAM", "delta": "STALE", "model": "fixture-model"])
             probe.releaseStream = true
@@ -524,7 +530,8 @@ enum SourceExtensionVerification {
             try FileManager.default.createDirectory(at: external.appendingPathComponent("config"), withIntermediateDirectories: true)
             let externalManifest = SourceExtensionManifest(identifier: externalID, displayName: "Personal Greeting", version: "1.0.0",
                 summary: "An independently authored settings fixture.", permissions: ["ui.panel"],
-                commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")], settingsSchema: "config/preferences.json")
+                commands: [.init(identifier: "greet", title: "Greet", trigger: "manual"),
+                           .init(identifier: "secondary", title: "Secondary", trigger: "manual")], settingsSchema: "config/preferences.json")
             try JSONEncoder().encode(externalManifest).write(to: external.appendingPathComponent("extension.json"), options: .atomic)
             try "throw new Error('Settings must not execute this tool.');".write(to: external.appendingPathComponent("main.js"), atomically: true, encoding: .utf8)
             var externalFields: [[String: Any]] = [
@@ -582,13 +589,20 @@ enum SourceExtensionVerification {
               const s=input.settings;
               const text=(s.prefix||'')+s.greeting+' '+input.text+s.punctuation+s.signature;
               return {text:s.loud?text.toUpperCase():text};
-            }}});
+            },secondary(input){return {text:'SECONDARY:'+input.text};}}});
             """
             try externalMain.write(to: externalSource.appendingPathComponent("main.js"), atomically: true, encoding: .utf8)
             try await restarted.setEnabled(true, for: externalID)
             let externalPID = try remember(restarted.workerPID(for: externalID))
             try check(try await restarted.performCommand(for: externalID, text: "there").text == "WELCOME THERE. / CUSTOM",
                       "The external tool did not receive its independently saved settings.")
+            try check(try await restarted.performCommand(for: externalID, text: "there", commandIdentifier: "secondary").text == "SECONDARY:there",
+                      "Selecting a specific command silently invoked the first declared command.")
+            var unknownCommandRejected = false
+            do { _ = try await restarted.performCommand(for: externalID, text: "there", commandIdentifier: "missing") }
+            catch { unknownCommandRejected = true }
+            try check(unknownCommandRejected, "An unknown action silently fell back to a different command.")
+            note("specific manifest command dispatch reaches the selected command and rejects unknown action identifiers")
             let externalReloads = restarted.tools.first(where: { $0.id == externalID })!.reloadCount
             externalFields.append(["key": "prefix", "label": "Prefix", "type": "text", "default": "New "])
             try externalSchema().write(to: externalSchemaURL, options: .atomic)
@@ -619,6 +633,37 @@ enum SourceExtensionVerification {
             try check(restarted.tools.first(where: { $0.id == externalID })?.error == nil && probe.calls == callsBeforeSettings,
                       "Repairing a disabled tool's schema did not clear its configuration error without AI.")
             note("invalid disabled settings retain the last valid form, reject writes, and recover after a source repair")
+
+            // Exercise two independently owned real workers while one streams.
+            // The shared UI's reconciliation uses these exact activation tokens;
+            // its pure tests separately assert preview/ticket preservation.
+            try await restarted.setEnabled(true, for: id)
+            try await restarted.setEnabled(true, for: externalID)
+            let isolatedOwnerPID = try remember(restarted.workerPID(for: id))
+            let isolatedOwnerGeneration = restarted.activationGeneration(for: id)
+            let otherGeneration = restarted.activationGeneration(for: externalID)
+            let otherPID = try remember(restarted.workerPID(for: externalID))
+            let callsBeforeIsolation = probe.calls
+            probe.streamNext = true; probe.releaseStream = false
+            var isolatedProgress: [String] = []
+            let isolatedStream = Task {
+                try await restarted.performCommand(for: id, text: sample) { isolatedProgress.append($0.text) }
+            }
+            try await eventually("The independent-tool fixture did not enter a partial stream.") { !isolatedProgress.isEmpty }
+            try await restarted.reload(externalID)
+            _ = try remember(restarted.workerPID(for: externalID))
+            try check(restarted.workerPID(for: externalID) != otherPID && restarted.activationGeneration(for: externalID) != otherGeneration &&
+                      restarted.workerPID(for: id) == isolatedOwnerPID && restarted.activationGeneration(for: id) == isolatedOwnerGeneration &&
+                      isolatedProgress == ["AI:"] && probe.streaming && probe.calls == callsBeforeIsolation + 1,
+                      "Reloading an unrelated extension interrupted or replaced the active stream's owner.")
+            probe.releaseStream = true
+            let independentResult = try await isolatedStream.value
+            try check(isolatedProgress.count > 1 && isolatedProgress.last.map { independentResult.text.hasSuffix($0) } == true,
+                      "An independent owner failed to complete its stream after another tool reloaded.")
+            try await restarted.setEnabled(false, for: externalID)
+            try check(restarted.activationGeneration(for: id) == isolatedOwnerGeneration && restarted.workerPID(for: id) == isolatedOwnerPID,
+                      "Disabling another tool changed the completed result's activation generation.")
+            note("unrelated extension reload and disable preserve an active stream and its completed owner's activation generation")
             await restarted.stopAll()
 
             let market = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,

@@ -394,7 +394,7 @@
     return h('div', { class: 'detail-grid' }, main, side);
   }
   function permissionLabel(value) {
-    return ({ 'selection.read': t("Read text you select through macOS Accessibility."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
+    return ({ 'selection.read': t("Read text you select through macOS Accessibility."), 'selection.replace': t("Replace unchanged selected text in a supported editable field only when you click Apply."), 'selection.paste': t("Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
   }
   function installContent(tool) {
     const sourceTool = tool.kind === 'mac-source';
@@ -433,7 +433,9 @@
     }
     if (tool.installSteps.length) container.append(h('h3', { class: 'detail-subheading' }, t("Installation, step by step")), h('ol', { class: 'install-steps' }, tool.installSteps.map(step => h('li', {}, toolText(tool,step)))));
     const preview = /preview/i.test(state.data?.macHelper?.releaseChannel || t("Developer preview"));
-    container.append(h('p', { class: 'install-footnote' }, t('MacHelper supports {architecture}, {minimumOS}. Unzip the app, move it to Applications, and open it.', { architecture: state.data?.macHelper?.architecture || 'Apple Silicon', minimumOS: state.data?.macHelper?.minimumOS || 'macOS 14+' }) + ' ' + (preview ? t('This developer preview is not notarized; macOS may require you to review it in Privacy & Security.') + ' ' : '') + t('Prefer to build it yourself? The full source is available below.')), textLink(t("Review the project source"), sourceURL(), external));
+    container.append(h('p', { class: 'install-footnote' }, t('MacHelper supports {architecture}, {minimumOS}. Unzip the app, move it to Applications, and open it.', { architecture: state.data?.macHelper?.architecture || 'Apple Silicon', minimumOS: state.data?.macHelper?.minimumOS || 'macOS 14+' }) + ' ' + (preview ? t('This developer preview is not notarized; macOS may require you to review it in Privacy & Security.') + ' ' : '') + t('Prefer to build it yourself? The full source is available below.')),
+      h('p', { class: 'install-footnote' }, t('Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.')),
+      textLink(t("Review the project source"), sourceURL(), external));
     return container;
   }
   async function copy(value, sender) {

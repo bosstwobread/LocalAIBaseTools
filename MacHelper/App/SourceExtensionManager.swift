@@ -24,6 +24,8 @@ final class SourceExtensionManager {
     static let translationID = "com.localaibasetools.translation"
     var onChange: (() -> Void)?
     var onApproveNativeExecution: ((SourceExtensionManifest) -> Bool)?
+    var onApproveSelectionReplacement: ((SourceExtensionManifest) -> Bool)?
+    var onApproveSelectionPaste: ((SourceExtensionManifest) -> Bool)?
     var accessibilityGranted: Bool { AXIsProcessTrusted() }
     private let store: SourcePackageStore
     private let stateDirectory: URL
@@ -50,6 +52,8 @@ final class SourceExtensionManager {
     private var state = State()
     private var shuttingDown = false
     private var started = false
+    private lazy var selectionCapability = SelectionActionCapability(title: "MacHelper")
+    private var languageObserver: NSObjectProtocol?
 
     private struct State: Codable {
         var schemaVersion = 1
@@ -65,17 +69,20 @@ final class SourceExtensionManager {
     }
     private final class Gate { var invoking = false; var calls = 0; var model: String? }
     private final class Running {
+        /// Stable for this validated source/settings activation. A crashed IPC
+        /// process can recover inside it; source/settings reload creates a new
+        /// Running and therefore a new toolbar authority.
+        let activationGeneration = UUID().uuidString
         var snapshot: SourcePackageSnapshot
         var worker: ScriptWorkerClient
         var gate: Gate
-        let capability: SelectionTranslationCapability
         var schema: ScriptSettingsSchema?
         var settings: [String: Any]
         var actionInProgress = false
         init(snapshot: SourcePackageSnapshot, worker: ScriptWorkerClient, gate: Gate,
-             capability: SelectionTranslationCapability, schema: ScriptSettingsSchema?, settings: [String: Any]) {
+             schema: ScriptSettingsSchema?, settings: [String: Any]) {
             self.snapshot = snapshot; self.worker = worker; self.gate = gate
-            self.capability = capability; self.schema = schema; self.settings = settings
+            self.schema = schema; self.settings = settings
         }
     }
 
@@ -91,6 +98,9 @@ final class SourceExtensionManager {
             ?? URL(fileURLWithPath: "/unavailable/MacHelperNativeSDK.swift")
         self.headless = headless; self.testTransform = testTransform; self.testStreamingTransform = testStreamingTransform
         store = SourcePackageStore(directory: sourceDirectory)
+        languageObserver = NotificationCenter.default.addObserver(forName: .macHelperLanguageDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.synchronizeSelectionActions(invalidateCurrent: true) }
+        }
     }
 
     var tools: [SourceToolInfo] {
@@ -325,14 +335,15 @@ final class SourceExtensionManager {
         epochs.removeAll()
         reloadTasks.values.forEach { $0.cancel() }; reloadTasks.removeAll()
         watchers.values.forEach { $0.stop() }; watchers.removeAll()
-        active.values.forEach { $0.capability.stop() }
+        if !headless { selectionCapability.stop() }
+        if let languageObserver { NotificationCenter.default.removeObserver(languageObserver); self.languageObserver = nil }
         let workers = active.values.map(\.worker) + Array(pending.values)
         active.removeAll(); pending.removeAll()
         for worker in workers { await worker.stop() }
     }
 
     // Also used by the isolated integration harness with a fake AI callback.
-    func performCommand(for id: String, text: String, sentence: String? = nil,
+    func performCommand(for id: String, text: String, sentence: String? = nil, commandIdentifier: String? = nil,
                         onProgress: (@MainActor (CapabilityTranslationResult) -> Void)? = nil) async throws -> CapabilityTranslationResult {
         guard state.enabled[id] == true, let runtime = active[id], !shuttingDown else {
             throw SourcePackageError.invalid(L("This extension is disabled."))
@@ -351,8 +362,11 @@ final class SourceExtensionManager {
         runtime.actionInProgress = true
         defer { runtime.actionInProgress = false }
         if runtime.worker.generation == nil { try await replaceWorker(runtime) }
+        try Task.checkCancellation()
         guard active[id] === runtime, state.enabled[id] == true, !shuttingDown else { throw CancellationError() }
-        guard let command = runtime.snapshot.manifest.commands.first else { throw SourcePackageError.invalid(L("This extension has no command.")) }
+        let command = commandIdentifier.flatMap { id in runtime.snapshot.manifest.commands.first { $0.identifier == id } }
+            ?? (commandIdentifier == nil ? runtime.snapshot.manifest.commands.first : nil)
+        guard let command else { throw SourcePackageError.invalid(L("This extension has no command.")) }
         let worker = runtime.worker, gate = runtime.gate
         gate.invoking = true; gate.calls = 0; gate.model = nil
         defer { gate.invoking = false }
@@ -373,6 +387,7 @@ final class SourceExtensionManager {
     }
 
     func workerPID(for id: String) -> Int32? { active[id]?.worker.processIdentifier }
+    func activationGeneration(for id: String) -> String? { active[id]?.activationGeneration }
 
     private var stateURL: URL { stateDirectory.appendingPathComponent("source-extensions.json") }
     private func settingsURL(_ id: String) -> URL {
@@ -399,7 +414,12 @@ final class SourceExtensionManager {
                     // The bundled first-party source seed supports offline first
                     // launch. Remote marketplace packages have no implicit seed.
                     guard definition.base == bundledCatalogURL, sourceURL(for: id) == nil,
-                          id == Self.translationID, let seed = bundledSeedDirectory else { throw error }
+                          let seeds = bundledSeedDirectory else { throw error }
+                    let candidate = seeds.appendingPathComponent(id + ".macsource", isDirectory: true)
+                    // Retain compatibility with the old Translation-only seed.
+                    let seed = FileManager.default.fileExists(atPath: candidate.appendingPathComponent("extension.json").path)
+                        ? candidate : seeds
+                    guard let verified = try? SourcePackageInspector.snapshot(at: seed), verified.manifest.identifier == id else { throw error }
                     snapshot = try store.importSource(from: seed)
                 }
             } else { snapshot = try store.snapshot(for: id) }
@@ -420,26 +440,27 @@ final class SourceExtensionManager {
                 }
                 guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
             }
+            if !headless, let review = SourceSelectionPermissionReview.required(requested: snapshot.manifest.permissions, approved: approved ?? []) {
+                guard approving else { throw CancellationError() }
+                switch review {
+                case .paste: guard onApproveSelectionPaste?(snapshot.manifest) == true else { throw CancellationError() }
+                case .replacement: guard onApproveSelectionReplacement?(snapshot.manifest) == true else { throw CancellationError() }
+                }
+                guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+            }
             let schema = try parseSchema(snapshot)
             let values = try loadSettings(id, schema: schema)
             let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values, epoch: epoch)
             guard epochs[id] == epoch, !shuttingDown, !Task.isCancelled else { await worker.stop(); throw CancellationError() }
             let old = active[id]
-            let capability = old?.capability ?? SelectionTranslationCapability(title: snapshot.manifest.displayName)
-            capability.stop()
-            let runtime = Running(snapshot: snapshot, worker: worker, gate: gate, capability: capability, schema: schema, settings: values)
+            let runtime = Running(snapshot: snapshot, worker: worker, gate: gate, schema: schema, settings: values)
             active[id] = runtime
             preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
             configurationErrors.removeValue(forKey: id)
             if pending[id] === worker { pending.removeValue(forKey: id) }
             state.enabled[id] = true
             if approving { state.permissions[id] = snapshot.manifest.permissions }
-            capability.onPerformSelectionStreaming = { [weak self] input, onProgress in
-                guard let self else { throw CancellationError() }
-                return try await self.performCommand(for: id, text: input.text, sentence: input.sentence, onProgress: onProgress)
-            }
-            capability.onStatusChange = { [weak self] in self?.notify() }
-            if shouldMonitor(snapshot) { capability.start() }
+            synchronizeSelectionActions()
             if let old { await old.worker.stop() }
             guard epochs[id] == epoch, active[id] === runtime, !shuttingDown else { throw CancellationError() }
             counts[id, default: 0] += 1
@@ -562,6 +583,7 @@ final class SourceExtensionManager {
         }
         runtime.worker = worker; runtime.gate = gate
         if pending[id] === worker { pending.removeValue(forKey: id) }
+        synchronizeSelectionActions()
         notify()
     }
     private func stop(_ id: String) async {
@@ -571,7 +593,7 @@ final class SourceExtensionManager {
         let candidate = pending.removeValue(forKey: id)
         let runtime = active.removeValue(forKey: id)
         if let runtime { preparedSettings[id] = PreparedSettings(snapshot: runtime.snapshot, schema: runtime.schema, values: runtime.settings) }
-        runtime?.capability.stop()
+        synchronizeSelectionActions()
         if let candidate { await candidate.stop() }
         if let runtime { await runtime.worker.stop() }
     }
@@ -646,18 +668,34 @@ final class SourceExtensionManager {
             await worker.stop()
             throw CancellationError()
         }
-        let capability = SelectionTranslationCapability(title: snapshot.manifest.displayName)
-        active[id] = Running(snapshot: snapshot, worker: worker, gate: gate, capability: capability, schema: schema, settings: values)
+        active[id] = Running(snapshot: snapshot, worker: worker, gate: gate, schema: schema, settings: values)
         preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
         if pending[id] === worker { pending.removeValue(forKey: id) }
-        capability.onPerformSelectionStreaming = { [weak self] input, onProgress in
-            guard let self else { throw CancellationError() }
-            return try await self.performCommand(for: id, text: input.text, sentence: input.sentence, onProgress: onProgress)
-        }
-        if shouldMonitor(snapshot) { capability.start() }
+        synchronizeSelectionActions()
         statuses[id] = "Running the last working version while local edits are invalid."
         watch(id)
     }
+    private func synchronizeSelectionActions(invalidateCurrent: Bool = false) {
+        guard !headless, !shuttingDown else { return }
+        let actions: [CapabilitySelectionAction] = active.keys.sorted().flatMap { id -> [CapabilitySelectionAction] in
+            guard let runtime = active[id], state.enabled[id] == true, shouldMonitor(runtime.snapshot) else { return [] }
+            return runtime.snapshot.manifest.commands.filter { $0.trigger == "selection" }.map { command in
+                CapabilitySelectionAction(identifier: id + "/" + command.identifier, generation: runtime.activationGeneration,
+                    title: localizedText(command.title, for: id),
+                    allowsReplacement: runtime.snapshot.manifest.permissions.contains("selection.replace"),
+                    allowsPaste: runtime.snapshot.manifest.permissions.contains("selection.paste")) { [weak self, weak runtime] input, progress in
+                    guard let self, let runtime, self.active[id] === runtime else { throw CancellationError() }
+                    return try await self.performCommand(for: id, text: input.text, sentence: input.sentence,
+                        commandIdentifier: command.identifier, onProgress: progress)
+                }
+            }
+        }
+        selectionCapability.setActions(actions, invalidateCurrent: invalidateCurrent)
+        selectionCapability.onStatusChange = { [weak self] in self?.notify() }
+        if actions.isEmpty { selectionCapability.stop() }
+        else { selectionCapability.start() }
+    }
+
     private func shouldMonitor(_ snapshot: SourcePackageSnapshot) -> Bool {
         !headless && snapshot.manifest.permissions.contains("selection.read") && snapshot.manifest.permissions.contains("ui.panel") &&
             snapshot.manifest.commands.contains { $0.trigger == "selection" }
