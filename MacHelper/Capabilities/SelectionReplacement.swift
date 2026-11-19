@@ -46,6 +46,41 @@ enum SelectionProviderContext: Equatable {
     case web, native, unknown, blocked
 }
 
+enum SelectionAncestorProtection: Equatable { case clear, unknown, blocked }
+
+/// Failed parent/protection queries are not evidence of a safe ancestry.
+/// A bounded incomplete chain remains distinct from invalid or cyclic data.
+struct SelectionProtectionReader<Element> {
+    let parent: (Element) -> SelectionParent<Element>
+    let isProtected: (Element) -> Bool
+    let sameElement: (Element, Element) -> Bool
+    let canRead: () -> Bool
+    var maximumAncestors = 8
+
+    func read(from origin: Element) -> SelectionAncestorProtection {
+        var current = origin
+        var visited: [Element] = []
+        for _ in 0..<max(0, min(8, maximumAncestors)) {
+            guard canRead() else { return .unknown }
+            guard !visited.contains(where: { sameElement($0, current) }) else { return .blocked }
+            visited.append(current)
+            guard !isProtected(current) else { return .blocked }
+            guard canRead() else { return .unknown }
+            let link = parent(current)
+            if case .invalid = link { return .blocked }
+            guard canRead() else { return .unknown }
+            switch link {
+            case .root: return .clear
+            case .invalid: return .blocked
+            case .element(let next):
+                guard !visited.contains(where: { sameElement($0, next) }) else { return .blocked }
+                current = next
+            }
+        }
+        return .unknown
+    }
+}
+
 /// Inspect only roles/protection/parents on the selected control's ancestor
 /// chain. No child crawl, titles, URLs, field values or surrounding text.
 struct SelectionProviderContextReader<Element> {
@@ -79,6 +114,13 @@ struct SelectionProviderContextReader<Element> {
 
 enum SelectionReplacementStrategy: Equatable {
     case selectedText, pasteShortcut
+
+    func acceptsCurrentContext(_ context: SelectionProviderContext) -> Bool {
+        switch self {
+        case .selectedText: return context == .native
+        case .pasteShortcut: return context != .blocked
+        }
+    }
 
     static func choose(bundleIdentifier: String?, providerContext: SelectionProviderContext,
                        directAvailable: Bool, pasteApproved: Bool, pasteEditable: Bool) -> Self? {
@@ -146,15 +188,24 @@ final class AccessibilitySelectionEditTarget {
         guard let focus = AccessibilityFocusResolver.read(application: application) else { return nil }
         var source = focus.leaf
         let classificationDeadline = ProcessInfo.processInfo.systemUptime + 0.8
+        let stillSource = {
+            guard AXIsProcessTrusted(), let current = NSWorkspace.shared.frontmostApplication else { return false }
+            return identity.matches(processIdentifier: current.processIdentifier, bundleIdentifier: current.bundleIdentifier) &&
+                ProcessInfo.processInfo.systemUptime < classificationDeadline
+        }
+        if let origin = selection.accessibilityOrigin,
+           !origin.isCurrent(continuing: stillSource) { return nil }
         for _ in 0..<4 {
             AXUIElementSetMessagingTimeout(source, 0.18)
-            guard !isProtected(source) else {
+            guard stillSource(), !isProtected(source) else {
                 return nil
             }
-            let text = attribute(kAXSelectedTextAttribute, of: source) as? String
-            let range = selectedRange(source)
-            let selectionMatches = text?.utf16.elementsEqual(selection.text.utf16) == true
-            if let text, selectionMatches, let range,
+            // Edit targets remain restricted to the captured focus path's own
+            // ancestry AND the exact selected source node. Identical text/ranges
+            // in another focused control never authorize editing that control.
+            if selection.accessibilityOrigin.map({ $0.matchesSource(source) }) ?? true,
+               case .selected(let span) = AccessibilitySelectedText.read(source, continuing: stillSource),
+               span.text.utf16.elementsEqual(selection.text.utf16), let range = span.range,
                range == NSRange(location: selection.rangeLocation, length: selection.rangeLength) {
                 let context = providerContext(of: source, deadline: classificationDeadline)
                 let directAvailable = isSettable(kAXSelectedTextAttribute, in: source) && !isDisabled(source)
@@ -163,13 +214,12 @@ final class AccessibilitySelectionEditTarget {
                     providerContext: context, directAvailable: directAvailable,
                     pasteApproved: allowsPaste, pasteEditable: pasteEditable) {
                     let target = AccessibilitySelectionEditTarget(application: application, focus: focus, source: source,
-                        evidence: .init(processIdentifier: selection.sourcePID, range: range, text: text), sourceIdentity: identity, strategy: strategy)
+                        evidence: .init(processIdentifier: selection.sourcePID, range: range, text: span.text), sourceIdentity: identity, strategy: strategy)
                     let current = target.isCurrent
                     if current { return target }
-                } else {
                 }
-            } else {
             }
+            guard stillSource() else { return nil }
             guard let parent = attribute(kAXParentAttribute, of: source),
                   CFGetTypeID(parent) == AXUIElementGetTypeID() else {
                 return nil
@@ -182,12 +232,23 @@ final class AccessibilitySelectionEditTarget {
     var isCurrent: Bool {
         guard AXIsProcessTrusted(), let currentApplication = NSWorkspace.shared.frontmostApplication,
               sourceIdentity.matches(processIdentifier: currentApplication.processIdentifier, bundleIdentifier: currentApplication.bundleIdentifier) else { return false }
+        let stillSource = {
+            guard AXIsProcessTrusted(), let current = NSWorkspace.shared.frontmostApplication else { return false }
+            return self.sourceIdentity.matches(processIdentifier: current.processIdentifier, bundleIdentifier: current.bundleIdentifier)
+        }
+        guard case .selected(let span) = AccessibilitySelectedText.read(source, continuing: stillSource),
+              let range = span.range else { return false }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.8
+        let context = Self.providerContext(of: source, deadline: deadline)
+        guard strategy.acceptsCurrentContext(context) else { return false }
+        let protection = Self.protectionChain(focus.leaf, application: application, deadline: deadline)
+        guard protection != .blocked,
+              protection != .unknown || strategy == .pasteShortcut else { return false }
         let writable = strategy == .selectedText ? Self.isSettable(kAXSelectedTextAttribute, in: source) : Self.canPaste(source)
         return evidence.accepts(processIdentifier: currentApplication.processIdentifier,
             sameFocusedElement: AccessibilityFocusResolver.matches(focus, application: application),
-            currentRange: Self.selectedRange(source),
-            currentText: Self.attribute(kAXSelectedTextAttribute, of: source) as? String,
-            protected: Self.protectedChain(focus.leaf), settable: writable, enabled: !Self.isDisabled(source))
+            currentRange: range, currentText: span.text,
+            protected: false, settable: writable, enabled: !Self.isDisabled(source)) && stillSource()
     }
 
     func replace(with text: String, validateInvocation: () -> Bool = { true }) throws -> SelectionReplacementOutcome {
@@ -209,7 +270,9 @@ final class AccessibilitySelectionEditTarget {
         guard AXUIElementSetAttributeValue(source, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
             throw CapabilityError.invalid(L("This app could not replace the selected text. Use Copy instead."))
         }
-        guard validateInvocation(), AXIsProcessTrusted(), !Self.protectedChain(focus.leaf),
+        guard validateInvocation(), AXIsProcessTrusted(),
+              Self.protectionChain(focus.leaf, application: application,
+                deadline: ProcessInfo.processInfo.systemUptime + 0.8) == .clear,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == evidence.processIdentifier,
               AccessibilityFocusResolver.matches(focus, application: application) else {
             return .unverified
@@ -226,13 +289,6 @@ final class AccessibilitySelectionEditTarget {
         var result: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &result) == .success else { return nil }
         return result
-    }
-
-    private static func selectedRange(_ element: AXUIElement) -> NSRange? {
-        guard let value = attribute(kAXSelectedTextRangeAttribute, of: element), CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        var range = CFRange(location: -1, length: 0)
-        guard AXValueGetValue(value as! AXValue, .cfRange, &range), range.location >= 0, range.length > 0 else { return nil }
-        return NSRange(location: range.location, length: range.length)
     }
 
     private static func isSettable(_ name: String, in element: AXUIElement) -> Bool {
@@ -262,17 +318,13 @@ final class AccessibilitySelectionEditTarget {
 
     private static func isDisabled(_ element: AXUIElement) -> Bool { attribute(kAXEnabledAttribute, of: element) as? Bool == false }
     private static func isProtected(_ element: AXUIElement) -> Bool {
-        (attribute(kAXSubroleAttribute, of: element) as? String) == kAXSecureTextFieldSubrole ||
-            (attribute("AXProtectedContent", of: element) as? Bool) == true
+        AccessibilitySelectedText.isProtected(element)
     }
-    private static func protectedChain(_ focused: AXUIElement) -> Bool {
-        var element = focused
-        for _ in 0..<8 {
-            AXUIElementSetMessagingTimeout(element, 0.18)
-            if isProtected(element) { return true }
-            guard let parent = attribute(kAXParentAttribute, of: element), CFGetTypeID(parent) == AXUIElementGetTypeID() else { return false }
-            element = parent as! AXUIElement
-        }
-        return false
+    private static func protectionChain(_ focused: AXUIElement, application: AXUIElement,
+                                        deadline: TimeInterval) -> SelectionAncestorProtection {
+        SelectionProtectionReader<AXUIElement>(
+            parent: { AccessibilitySelectionOrigin.parent(of: $0, application: application) },
+            isProtected: isProtected, sameElement: { CFEqual($0, $1) },
+            canRead: { ProcessInfo.processInfo.systemUptime < deadline }).read(from: focused)
     }
 }

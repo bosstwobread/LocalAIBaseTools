@@ -29,6 +29,16 @@ repeat install clicks. Both current tools run through MacHelper without a
 browser extension. MacHelper 6.6 adds a shared Translate/Polish selection toolbar;
 6.6.1 presents separate icons with nonoverlapping click areas, localized tooltips,
 and an ellipsis menu when more than five actions are enabled.
+MacHelper 6.6.2 also hides the waiting toolbar while Command is held; releasing
+Command alone does not reopen it, while an existing result panel stays open.
+Its bounded Accessibility reader checks the selected mouse location, fixed
+application/system-focus routes, and focused/main window or application selection
+providers. It reads only verified selected numeric or marker spans, including
+same-range attributed-text fallback; it never crawls arbitrary descendants or
+reads an entire document to find a selection. Apps without usable Accessibility
+selection data remain unsupported. There is no simulated Copy, macOS Services,
+or OCR capture fallback and no screen-reading permission request. These shared
+host changes need no extension source update.
 Polish-input streams a preview; **Apply** replaces only a still-unchanged selection
 in a supported editable field, while **Copy** is available for other selections.
 MacHelper identifies supported web editors through a bounded Accessibility

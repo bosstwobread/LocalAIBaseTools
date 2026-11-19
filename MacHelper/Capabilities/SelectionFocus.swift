@@ -5,17 +5,26 @@ import Foundation
 /// the whole identity path; numeric ranges always belong to the node read.
 struct SelectionFocusPath<Element> {
     let elements: [Element]
+    var systemWide = false
     var anchor: Element { elements[0] }
     var leaf: Element { elements[elements.count - 1] }
 
     func matches(_ other: Self?, sameElement: (Element, Element) -> Bool) -> Bool {
-        guard let other, elements.count == other.elements.count else { return false }
+        guard let other, systemWide == other.systemWide, elements.count == other.elements.count else { return false }
         return zip(elements, other.elements).allSatisfy { sameElement($0.0, $0.1) }
     }
 }
 
 enum SelectionFocusLink<Element> {
     case leaf, element(Element), invalid
+}
+
+enum SelectionFocusResolution<Element> {
+    case path(SelectionFocusPath<Element>)
+    /// Only a genuinely unsupported/absent root focus attribute permits this.
+    case unavailable
+    /// Invalid, protected, stale, foreign, cyclic or truncated focus evidence.
+    case blocked
 }
 
 /// Follow only the provider's focus relationship, never arbitrary children.
@@ -27,40 +36,73 @@ struct SelectionFocusReader<Element> {
     var maximumElements = 4
 
     func read(from anchor: Element) -> SelectionFocusPath<Element>? {
+        guard case .path(let path) = resolve(from: anchor) else { return nil }
+        return path
+    }
+
+    func resolveRoot(_ link: SelectionFocusLink<Element>,
+                     validAnchor: (Element) -> Bool = { _ in true }) -> SelectionFocusResolution<Element> {
+        guard canRead() else { return .blocked }
+        switch link {
+        case .leaf: return .unavailable
+        case .invalid: return .blocked
+        case .element(let anchor):
+            guard validAnchor(anchor), canRead() else { return .blocked }
+            return resolve(from: anchor)
+        }
+    }
+
+    func resolve(from anchor: Element) -> SelectionFocusResolution<Element> {
         var path: [Element] = []
         var current = anchor
         for _ in 0..<max(0, min(4, maximumElements)) {
-            guard canRead(), !path.contains(where: { sameElement($0, current) }), !isProtected(current), canRead() else { return nil }
+            guard canRead(), !path.contains(where: { sameElement($0, current) }), !isProtected(current), canRead() else { return .blocked }
             path.append(current)
             let next = focusedChild(current)
-            guard canRead() else { return nil }
+            guard canRead() else { return .blocked }
             switch next {
-            case .leaf: return SelectionFocusPath(elements: path)
-            case .invalid: return nil
+            case .leaf: return .path(SelectionFocusPath(elements: path))
+            case .invalid: return .blocked
             case .element(let child):
-                if sameElement(current, child) { return SelectionFocusPath(elements: path) }
+                if sameElement(current, child) { return .path(SelectionFocusPath(elements: path)) }
                 current = child
             }
         }
-        return nil
+        return .blocked
     }
 }
 
 enum AccessibilityFocusResolver {
-    static func read(application: AXUIElement) -> SelectionFocusPath<AXUIElement>? {
+    static func read(application: AXUIElement, systemWide: Bool = false) -> SelectionFocusPath<AXUIElement>? {
+        guard case .path(let path) = resolve(application: application, systemWide: systemWide) else { return nil }
+        return path
+    }
+
+    static func resolve(application: AXUIElement, systemWide: Bool = false) -> SelectionFocusResolution<AXUIElement> {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.8
         func withinBudget() -> Bool { ProcessInfo.processInfo.systemUptime < deadline }
-        guard case .element(let anchor) = focusLink(application) else { return nil }
-        return SelectionFocusReader<AXUIElement>(focusedChild: focusLink,
-            isProtected: { element in
-                AXUIElementSetMessagingTimeout(element, 0.10)
-                return (attribute(kAXSubroleAttribute, of: element) as? String) == kAXSecureTextFieldSubrole ||
-                    (attribute("AXProtectedContent", of: element) as? Bool) == true
-            }, sameElement: { CFEqual($0, $1) }, canRead: withinBudget).read(from: anchor)
+        let root = systemWide ? AXUIElementCreateSystemWide() : application
+        let reader = SelectionFocusReader<AXUIElement>(focusedChild: focusLink,
+            isProtected: { AccessibilitySelectedText.isProtected($0) },
+            sameElement: { CFEqual($0, $1) }, canRead: withinBudget)
+        let result = reader.resolveRoot(focusLink(root), validAnchor: { anchor in
+            guard withinBudget() else { return false }
+            guard systemWide else { return true }
+            // The system focus is useful only when it belongs to this exact
+            // application. Never turn it into a cross-application scan.
+            var expected: pid_t = 0, actual: pid_t = 0
+            guard AXUIElementGetPid(application, &expected) == .success, expected > 1,
+                  withinBudget(), AXUIElementGetPid(anchor, &actual) == .success,
+                  withinBudget(), actual == expected else { return false }
+            return true
+        })
+        guard case .path(var path) = result else { return result }
+        path.systemWide = systemWide
+        return .path(path)
     }
 
     static func matches(_ captured: SelectionFocusPath<AXUIElement>, application: AXUIElement) -> Bool {
-        captured.matches(read(application: application), sameElement: { CFEqual($0, $1) })
+        captured.matches(read(application: application, systemWide: captured.systemWide), sameElement: { CFEqual($0, $1) })
     }
 
     private static func focusLink(_ element: AXUIElement) -> SelectionFocusLink<AXUIElement> {
@@ -72,9 +114,4 @@ enum AccessibilityFocusResolver {
         return .element(value as! AXUIElement)
     }
 
-    private static func attribute(_ name: String, of element: AXUIElement) -> CFTypeRef? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
-        return value
-    }
 }

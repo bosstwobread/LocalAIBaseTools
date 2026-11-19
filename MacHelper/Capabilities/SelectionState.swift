@@ -125,6 +125,12 @@ struct TextSelection: Equatable, Sendable {
     let rangeLength: Int
     /// AppKit global coordinates, in screen points.
     let bounds: CGRect
+    var accessibilityOrigin: AccessibilitySelectionOrigin? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.sourcePID == rhs.sourcePID && lhs.rangeLocation == rhs.rangeLocation && lhs.rangeLength == rhs.rangeLength &&
+            lhs.bounds == rhs.bounds && lhs.text.utf16.elementsEqual(rhs.text.utf16) && lhs.accessibilityOrigin == rhs.accessibilityOrigin
+    }
 }
 
 /// Selection changes invalidate every in-flight result, including repeated text
@@ -137,7 +143,12 @@ struct SelectionState {
 
     @discardableResult
     mutating func observe(_ value: TextSelection?) -> Bool {
-        guard value != selection else { return false }
+        guard value != selection else {
+            // Refresh read-only provenance without cancelling an operation
+            // when the same control/selection was proved via another route.
+            selection = value
+            return false
+        }
         generation &+= 1
         selection = value
         // AX can briefly return no selection, cached text, or different fallback

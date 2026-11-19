@@ -22,12 +22,19 @@ struct AccessibilitySelectionReader {
         }
         func readRange(of element: AXUIElement) -> NSRange? {
             guard withinBudget() else { return nil }
-            return selectedRange(of: element)
+            return AccessibilitySelectedText.numericRange(of: element, continuing: withinBudget)
         }
         let app = AXUIElementCreateApplication(selection.sourcePID)
         AXUIElementSetMessagingTimeout(app, 0.18)
-        guard let focus = AccessibilityFocusResolver.read(application: app) else { return nil }
-        var element = focus.leaf
+        let capturedOrigin = selection.accessibilityOrigin
+        let focus = capturedOrigin == nil ? AccessibilityFocusResolver.read(application: app) : nil
+        func sameOrigin() -> Bool {
+            guard withinBudget() else { return false }
+            if let capturedOrigin { return capturedOrigin.isCurrent(continuing: withinBudget) }
+            return focus.map { AccessibilityFocusResolver.matches($0, application: app) } ?? false
+        }
+        guard sameOrigin(), let initial = capturedOrigin?.source ?? focus?.leaf else { return nil }
+        var element = initial
         var ancestors: [AXUIElement] = []
         // Stay on the focused element's short ancestor chain. A browser may
         // expose selected text on one node and document markers on its WebArea.
@@ -46,9 +53,9 @@ struct AccessibilitySelectionReader {
         var origin: (index: Int, range: NSRange?)?
         for (index, candidate) in ancestors.prefix(4).enumerated() {
             guard withinBudget() else { return nil }
-            if let text = readAttribute(kAXSelectedTextAttribute, of: candidate) as? String {
-                guard text == selection.text else { return nil }
-                let range = readRange(of: candidate)
+            if case .selected(let span) = AccessibilitySelectedText.read(candidate, continuing: withinBudget) {
+                guard span.text.utf16.elementsEqual(selection.text.utf16) else { return nil }
+                let range = span.range
                 if selection.rangeLocation >= 0,
                    range != NSRange(location: selection.rangeLocation, length: selection.rangeLength) { return nil }
                 origin = (index, range)
@@ -60,9 +67,9 @@ struct AccessibilitySelectionReader {
         func currentSelection() -> Bool {
             guard withinBudget(), AXIsProcessTrusted(),
                   ancestors.allSatisfy({ !isProtected($0, continuing: withinBudget) }), withinBudget(),
-                  (readAttribute(kAXSelectedTextAttribute, of: source) as? String) == selection.text,
-                  readRange(of: source) == origin.range,
-                  AccessibilityFocusResolver.matches(focus, application: app) else { return false }
+                  case .selected(let span) = AccessibilitySelectedText.read(source, continuing: withinBudget),
+                  span.text.utf16.elementsEqual(selection.text.utf16), span.range == origin.range,
+                  sameOrigin() else { return false }
             return withinBudget()
         }
         for candidate in ancestors.dropFirst(origin.index) {
@@ -72,7 +79,8 @@ struct AccessibilitySelectionReader {
             // Numeric ranges describe the whole text control in editors. A
             // browser's static inline node may describe only a sentence fragment.
             if [kAXTextAreaRole, kAXTextFieldRole].contains(role ?? ""),
-               (readAttribute(kAXSelectedTextAttribute, of: candidate) as? String) == selection.text,
+               case .selected(let span) = AccessibilitySelectedText.read(candidate, continuing: withinBudget),
+               span.text.utf16.elementsEqual(selection.text.utf16),
                let range = readRange(of: candidate),
                let count = readAttribute(kAXNumberOfCharactersAttribute, of: candidate) as? Int,
                let window = SelectionSentenceContext.window(selection: range, documentUTF16Length: count),
@@ -92,7 +100,16 @@ struct AccessibilitySelectionReader {
         return nil
     }
 
-    func read(sourcePID: Int32, mainScreenTop: CGFloat, fallbackPoint: CGPoint) -> SelectionReadResult {
+    func read(sourcePID: Int32, mainScreenTop: CGFloat, fallbackPoint: CGPoint,
+              hitPoint: CGPoint? = nil, continuing: @escaping () -> Bool = { true }) -> SelectionReadResult {
+        let deadline = ProcessInfo.processInfo.systemUptime + 2.4
+        var routeDeadline = deadline
+        guard let process = SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication),
+              process.processIdentifier == sourcePID else { return .unavailable }
+        func withinBudget() -> Bool {
+            continuing() && ProcessInfo.processInfo.systemUptime < min(deadline, routeDeadline) &&
+                process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication)
+        }
         let app = AXUIElementCreateApplication(sourcePID)
         AXUIElementSetMessagingTimeout(app, 0.18)
         // A read-only role query lets Chromium activate native accessibility.
@@ -100,107 +117,87 @@ struct AccessibilitySelectionReader {
         // guarantee an Electron app exposes web contents. No AX attributes are set.
         // https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/browser/chrome_browser_application_mac.mm
         _ = attribute(kAXRoleAttribute, of: app)
-        let resolvedFocus = AccessibilityFocusResolver.read(application: app)
-        guard let focus = resolvedFocus else { return .unavailable }
-        var element = focus.leaf
+        let candidates = SelectionCandidateReader<AXUIElement>(parent: { element in
+            AccessibilitySelectionOrigin.parent(of: element, application: app)
+        }, isProtected: { isProtected($0, continuing: withinBudget) },
+            sameElement: { CFEqual($0, $1) }, canRead: withinBudget, selectedSpan: { element in
+                AccessibilitySelectedText.read(element, continuing: withinBudget)
+            })
 
-        // Some editors expose the selection on their immediate text container.
-        // Do not crawl arbitrary descendants or read an entire AXValue as fallback.
-        for _ in 0..<4 {
-            AXUIElementSetMessagingTimeout(element, 0.18)
-            if isProtected(element) {
-                return .unavailable
+        func selection(from candidate: SelectionCandidate<AXUIElement>, focus: SelectionFocusPath<AXUIElement>?,
+                       point: CGPoint?, window: SelectionWindowAnchor? = nil,
+                       applicationAnchor: Bool = false) -> TextSelection? {
+            let origin = AccessibilitySelectionOrigin(process: process, ancestry: candidate.ancestry,
+                sourceIndex: candidate.sourceIndex, focus: focus, hitPoint: point,
+                windowAnchor: window, applicationAnchor: applicationAnchor, terminalParent: candidate.terminalParent)
+            guard withinBudget(), origin.isCurrent(continuing: withinBudget),
+                  case .selected(let current) = AccessibilitySelectedText.read(origin.source, continuing: withinBudget),
+                  current.range == candidate.span.range,
+                  current.text.utf16.elementsEqual(candidate.span.text.utf16), withinBudget() else { return nil }
+            var bounds = CGRect(x: fallbackPoint.x, y: fallbackPoint.y, width: 1, height: 1)
+            if let range = current.range {
+                var numeric = CFRange(location: range.location, length: range.length)
+                if let value = AXValueCreate(.cfRange, &numeric), let rect = boundsForRange(value, in: origin.source) {
+                    bounds = FloatingGeometry.appKitRect(fromAccessibility: rect, mainScreenTop: mainScreenTop)
+                }
             }
-            if let text = attribute(kAXSelectedTextAttribute, of: element) as? String {
-                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .empty }
-                guard text.count <= 24_000, text.utf8.count <= 96_000 else { return .unavailable }
-                let rangeValue = attribute(kAXSelectedTextRangeAttribute, of: element)
-                var numericRange: NSRange?
-                if let rangeValue {
-                    var range = CFRange(location: -1, length: 0)
-                    let validRangeValue = CFGetTypeID(rangeValue) == AXValueGetTypeID() &&
-                        AXValueGetValue(rangeValue as! AXValue, .cfRange, &range)
-                    guard validRangeValue else { return .unavailable }
-                    numericRange = NSRange(location: range.location, length: range.length)
-                }
-                // AXSelectedText can be cached after a browser clears its
-                // selection. A caret (zero-length range) is not selected text.
-                // Read-only web text may instead expose opaque text markers.
-                let marker = numericRange == nil ? markerSelection(text: text, from: element) : nil
-                let evidenceValid = SelectionEvidence.isSelected(text: text, numericRange: numericRange,
-                    markerLength: marker?.length, markerText: marker?.text)
-                guard evidenceValid else { return .empty }
-                if let numericRange {
-                    let stillMatches = selectedRange(of: element) == numericRange
-                    guard stillMatches else { return .unavailable }
-                }
-                let textMatches = (attribute(kAXSelectedTextAttribute, of: element) as? String)?.utf16.elementsEqual(text.utf16) == true
-                guard textMatches else { return .unavailable }
-                let focusMatches = AccessibilityFocusResolver.matches(focus, application: app)
-                guard focusMatches else { return .unavailable }
-                var bounds = CGRect(x: fallbackPoint.x, y: fallbackPoint.y, width: 1, height: 1)
-                if let rangeValue, let axBounds = boundsForRange(rangeValue, in: element) {
-                    bounds = FloatingGeometry.appKitRect(fromAccessibility: axBounds, mainScreenTop: mainScreenTop)
-                }
-                return .selection(TextSelection(text: text, sourcePID: sourcePID,
-                                                rangeLocation: numericRange?.location ?? -1,
-                                                rangeLength: numericRange?.length ?? text.utf16.count,
-                                                bounds: bounds))
-            } else {
-            }
-            guard let parent = attribute(kAXParentAttribute, of: element),
-                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return .unavailable }
-            element = parent as! AXUIElement
+            guard origin.isCurrent(continuing: withinBudget), withinBudget() else { return nil }
+            return TextSelection(text: current.text, sourcePID: sourcePID, rangeLocation: current.range?.location ?? -1,
+                rangeLength: current.range?.length ?? current.text.utf16.count, bounds: bounds, accessibilityOrigin: origin)
         }
-        return .unavailable
-    }
 
-    /// Verify the selected range only, never an enclosing document. Chromium
-    /// may expose markers on a focused static node's short ancestor chain.
-    private func markerSelection(text: String, from origin: AXUIElement) -> (length: Int, text: String)? {
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.8
-        var element = origin
-        var visited: [AXUIElement] = []
-        for _ in 0..<4 {
-            guard ProcessInfo.processInfo.systemUptime < deadline,
-                  !visited.contains(where: { CFEqual($0, element) }) else { return nil }
-            visited.append(element)
-            AXUIElementSetMessagingTimeout(element, 0.12)
-            guard !isProtected(element) else { return nil }
-            if let value = attribute("AXSelectedTextMarkerRange", of: element),
-               CFGetTypeID(value) == AXTextMarkerRangeGetTypeID() {
-                let selected = value as! AXTextMarkerRange
-                let start = AXTextMarkerRangeCopyStartMarker(selected)
-                let end = AXTextMarkerRangeCopyEndMarker(selected)
-                guard !CFEqual(start, end),
-                      let orderedValue = parameter("AXTextMarkerRangeForUnorderedTextMarkers", value: [start, end] as CFArray, in: element),
-                      CFGetTypeID(orderedValue) == AXTextMarkerRangeGetTypeID(),
-                      let length = parameter("AXLengthForTextMarkerRange", value: orderedValue, in: element) as? Int,
-                      length > 0, length == text.utf16.count,
-                      ProcessInfo.processInfo.systemUptime < deadline,
-                      let actual = parameter("AXStringForTextMarkerRange", value: orderedValue, in: element) as? String,
-                      let current = attribute("AXSelectedTextMarkerRange", of: element), CFEqual(value, current),
-                      ProcessInfo.processInfo.systemUptime < deadline else { return nil }
-                return (length, actual)
-            }
-            guard let parent = attribute(kAXParentAttribute, of: element),
-                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
-            element = parent as! AXUIElement
+        // A mouse selection can belong to a nonfocused text node. Keep the
+        // hit-test inside this application; keyboard reads never reuse a point.
+        // Give each route a bounded slice so an unresponsive hit provider
+        // cannot consume the entire read before focused/window routes run.
+        routeDeadline = min(deadline, ProcessInfo.processInfo.systemUptime + 0.8)
+        if let hitPoint, withinBudget() {
+            let point = CGPoint(x: hitPoint.x, y: mainScreenTop - hitPoint.y)
+            if let anchor = AccessibilitySelectionOrigin.hit(in: app, at: point), withinBudget(),
+               let candidate = candidates.read(from: anchor),
+               let value = selection(from: candidate, focus: nil, point: point) { return .selection(value) }
         }
-        return nil
+        for systemWide in [false, true] {
+            routeDeadline = min(deadline, ProcessInfo.processInfo.systemUptime + 0.6)
+            guard withinBudget() else { break }
+            switch AccessibilityFocusResolver.resolve(application: app, systemWide: systemWide) {
+            case .blocked:
+                // A rejected secure/malformed focus cannot be bypassed by a
+                // broader focus/window/application selected-text provider.
+                return .empty
+            case .unavailable: break
+            case .path(let focus):
+                // A provider can expose a wrapper through app focus but a
+                // useful control through system focus. Probe both fixed roots.
+                // Forwarded focus nodes are not an arbitrary child-tree crawl.
+                for anchor in focus.elements.reversed() {
+                    guard withinBudget() else { break }
+                    if let candidate = candidates.read(from: anchor),
+                       let value = selection(from: candidate, focus: focus, point: nil) { return .selection(value) }
+                }
+            }
+        }
+        routeDeadline = deadline
+        var inspectedWindows: [AXUIElement] = []
+        for attribute in [SelectionWindowAttribute.focused, .main] {
+            guard withinBudget() else { break }
+            if let window = AccessibilitySelectionOrigin.window(in: app, attribute: attribute),
+               !inspectedWindows.contains(where: { CFEqual($0, window) }) {
+                inspectedWindows.append(window)
+                if let candidate = candidates.read(from: window),
+                   let value = selection(from: candidate, focus: nil, point: nil,
+                       window: .init(attribute: attribute, element: window)) { return .selection(value) }
+            }
+        }
+        if withinBudget(), let candidate = candidates.read(from: app),
+           let value = selection(from: candidate, focus: nil, point: nil, applicationAnchor: true) { return .selection(value) }
+        return .empty
     }
 
     private func attribute(_ name: String, of element: AXUIElement) -> CFTypeRef? {
         var result: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &result) == .success else { return nil }
         return result
-    }
-
-    private func selectedRange(of element: AXUIElement) -> NSRange? {
-        guard let value = attribute(kAXSelectedTextRangeAttribute, of: element), CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        var range = CFRange(location: -1, length: 0)
-        guard AXValueGetValue(value as! AXValue, .cfRange, &range), range.location >= 0, range.length > 0 else { return nil }
-        return NSRange(location: range.location, length: range.length)
     }
 
     private func parameter(_ name: String, value: CFTypeRef, in element: AXUIElement) -> CFTypeRef? {
@@ -264,9 +261,8 @@ struct AccessibilitySelectionReader {
 
     private func isProtected(_ element: AXUIElement, continuing: () -> Bool = { true }) -> Bool {
         guard continuing() else { return true }
-        if (attribute(kAXSubroleAttribute, of: element) as? String) == kAXSecureTextFieldSubrole { return true }
-        guard continuing() else { return true }
-        return (attribute("AXProtectedContent", of: element) as? Bool) == true
+        let protected = AccessibilitySelectedText.isProtected(element)
+        return !continuing() || protected
     }
 
     private func boundsForRange(_ range: CFTypeRef, in element: AXUIElement) -> CGRect? {
@@ -286,6 +282,7 @@ struct AccessibilitySelectionReader {
 final class SelectionMonitor {
     var onRead: ((SelectionReadResult) -> Void)?
     var onDismiss: (() -> Void)?
+    var onToolbarDismiss: (() -> Void)?
     var onFrontApplicationChange: (() -> Void)?
     var onPermissionChange: ((Bool) -> Void)?
     var onSelectionGesture: ((Bool) -> Void)?
@@ -304,9 +301,12 @@ final class SelectionMonitor {
     private let readQueue = DispatchQueue(label: "org.localaibasetools.capabilities.selection", qos: .userInitiated)
     private var reading = false
     private var dragging = false
+    private var commandHeld = false
+    private var commandSelectionPending = false
     private var trusted = false
     private var context: UInt64 = 0
     private var selectionPoint = NSEvent.mouseLocation
+    private var selectionHitPoint: CGPoint?
     private let ownPID = ProcessInfo.processInfo.processIdentifier
 
     func input(for selection: TextSelection) async -> CapabilitySelectionInput {
@@ -357,6 +357,7 @@ final class SelectionMonitor {
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor); self.globalMonitor = nil }
         if let localMonitor { NSEvent.removeMonitor(localMonitor); self.localMonitor = nil }
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver); self.workspaceObserver = nil }
+        commandHeld = false
         invalidateReadContext()
     }
 
@@ -364,8 +365,10 @@ final class SelectionMonitor {
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         // Inspect only event type/key code/modifier flags. Typed text is not collected.
+        commandHeld = NSEvent.modifierFlags.contains(.command)
+        commandSelectionPending = false
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .leftMouseDragged,
-                                          .leftMouseUp, .rightMouseUp, .keyDown, .keyUp]
+                                          .leftMouseUp, .rightMouseUp, .keyDown, .keyUp, .flagsChanged]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
             self?.handle(event, local: false)
         }
@@ -383,6 +386,20 @@ final class SelectionMonitor {
         if isInteractingWithOverlay?() == true,
            [.leftMouseDown, .rightMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp].contains(event.type) { return }
         switch event.type {
+        case .flagsChanged:
+            let held = event.modifierFlags.contains(.command)
+            guard held != commandHeld else { return }
+            let deferredSelection = commandSelectionPending
+            commandHeld = held
+            invalidateReadContext(preserveHitPoint: true)
+            if held {
+                // Modifier changes are distinct from keyDown/keyUp. A fixed
+                // Command-V paste event pair must not dismiss an active result.
+                onToolbarDismiss?()
+            } else if deferredSelection {
+                registerSelectionGesture(true)
+                scheduleRead()
+            }
         case .leftMouseDown, .rightMouseDown:
             let point = CapabilityDragPointer.screenPoint(for: event, window: event.window,
                 primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
@@ -399,8 +416,8 @@ final class SelectionMonitor {
                 primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
             let selecting = event.type == .leftMouseUp &&
                 (selectedByDragging || event.clickCount >= 2 || event.modifierFlags.contains(.shift))
-            if selecting { compatibilityGestureContext = context }
-            onSelectionGesture?(selecting)
+            selectionHitPoint = selecting ? selectionPoint : nil
+            registerSelectionGesture(selecting)
             scheduleRead()
         case .keyDown:
             if event.keyCode == 53 { invalidateReadContext(); onDismiss?() }
@@ -414,12 +431,23 @@ final class SelectionMonitor {
                 invalidateReadContext()
                 let shiftSelection = event.modifierFlags.contains(.shift) && [123, 124, 125, 126, 115, 119, 116, 121].contains(event.keyCode)
                 let selectAll = event.keyCode == 0 && event.modifierFlags.contains(.command)
-                if shiftSelection || selectAll { compatibilityGestureContext = context }
-                onSelectionGesture?(shiftSelection || selectAll)
+                registerSelectionGesture(shiftSelection || selectAll)
                 scheduleRead()
             }
         default: break
         }
+    }
+
+    private func registerSelectionGesture(_ selecting: Bool) {
+        if selecting && commandHeld {
+            // Cmd+A / Cmd+Shift+arrow can finish while Command is still held.
+            // Rearm only when it is released, keeping the toolbar hidden now.
+            commandSelectionPending = true
+            return
+        }
+        commandSelectionPending = false
+        if selecting { compatibilityGestureContext = context }
+        onSelectionGesture?(selecting)
     }
 
     private func tick() {
@@ -441,8 +469,10 @@ final class SelectionMonitor {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.14, execute: work)
     }
 
-    private func invalidateReadContext() {
+    private func invalidateReadContext(preserveHitPoint: Bool = false) {
         context &+= 1
+        if !preserveHitPoint { selectionHitPoint = nil }
+        commandSelectionPending = false
         compatibilityGestureContext = nil
         compatibilityWaitingContext = nil
         compatibilityRetry?.cancel(); compatibilityRetry = nil
@@ -458,7 +488,7 @@ final class SelectionMonitor {
             compatibilityRetry?.cancel(); compatibilityRetry = nil
             compatibilityToken?.invalidate(); compatibilityToken = nil
         }
-        guard trusted, !reading, !dragging, isInteractingWithOverlay?() != true,
+        guard trusted, !reading, !dragging, !commandHeld, isInteractingWithOverlay?() != true,
               let source = SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication),
               source.processIdentifier != ownPID else { return }
         let pid = source.processIdentifier
@@ -469,6 +499,7 @@ final class SelectionMonitor {
         let token = SelectionCompatibilityRequestToken()
         compatibilityToken = token
         let point = selectionPoint
+        let hitPoint = selectionHitPoint
         let mainTop = NSScreen.screens.first?.frame.maxY ?? 0
         let activator = compatibilityActivator
         readQueue.async { [weak self] in
@@ -477,11 +508,12 @@ final class SelectionMonitor {
             }
             let settlementDelay = activator.delayBeforeRefresh(source: source)
             let result = outcome.needsDelayedRead ? SelectionReadResult.unavailable :
-                AccessibilitySelectionReader().read(sourcePID: pid, mainScreenTop: mainTop, fallbackPoint: point)
+                AccessibilitySelectionReader().read(sourcePID: pid, mainScreenTop: mainTop, fallbackPoint: point,
+                    hitPoint: hitPoint, continuing: { token.isValid && source == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) })
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.reading = false
-                guard self.context == capturedContext, token.isValid,
+                guard self.context == capturedContext, token.isValid, !self.commandHeld,
                       self.isInteractingWithOverlay?() != true,
                       source == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) else { return }
                 if outcome.needsDelayedRead {

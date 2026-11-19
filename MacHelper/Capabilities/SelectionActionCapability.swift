@@ -135,6 +135,10 @@ public final class SelectionActionCapability {
         monitor.isInteractingWithOverlay = { [weak self] in self?.panels.isInteractingWithOverlay == true }
         monitor.onRead = { [weak self] in self?.receive($0) }
         monitor.onDismiss = { [weak self] in self?.dismiss() }
+        monitor.onToolbarDismiss = { [weak self] in
+            guard let self, self.panels.isToolbarVisible else { return }
+            self.dismiss()
+        }
         monitor.onFrontApplicationChange = { [weak self] in self?.clearSelection() }
         monitor.onSelectionGesture = { [weak self] selecting in
             guard let self, selecting else { return }

@@ -217,6 +217,7 @@ final class FloatingCapabilityPanels {
     }
 
     var isDraggingResultPanel: Bool { placement.isDragging }
+    var isToolbarVisible: Bool { iconPanel.isVisible }
     var isInteractingWithOverlay: Bool { placement.isDragging || menuTracking.isTracking }
     /// Read-only diagnostic geometry for the explicit synthetic fixture.
     var resultFrame: CGRect { resultPanel.frame }

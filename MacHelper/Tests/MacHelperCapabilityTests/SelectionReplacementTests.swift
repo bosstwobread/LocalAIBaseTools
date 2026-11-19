@@ -175,6 +175,31 @@ final class SelectionReplacementTests: XCTestCase {
         XCTAssertEqual(protectedWeb.read(from: 0), .blocked)
     }
 
+    func testSavedStrategyCannotBecomeAnUnclassifiedOrWebDirectWrite() {
+        XCTAssertTrue(SelectionReplacementStrategy.selectedText.acceptsCurrentContext(.native))
+        for context in [SelectionProviderContext.web, .unknown, .blocked] {
+            XCTAssertFalse(SelectionReplacementStrategy.selectedText.acceptsCurrentContext(context))
+        }
+        for context in [SelectionProviderContext.web, .native, .unknown] {
+            XCTAssertTrue(SelectionReplacementStrategy.pasteShortcut.acceptsCurrentContext(context))
+        }
+        XCTAssertFalse(SelectionReplacementStrategy.pasteShortcut.acceptsCurrentContext(.blocked))
+    }
+
+    func testProtectionRevalidationDistinguishesInvalidParentsCyclesAndDepthLimits() {
+        func protection(parent: @escaping (Int) -> SelectionParent<Int>, protected: Set<Int> = [],
+                        canRead: @escaping () -> Bool = { true }) -> SelectionAncestorProtection {
+            SelectionProtectionReader(parent: parent, isProtected: { protected.contains($0) },
+                sameElement: ==, canRead: canRead).read(from: 0)
+        }
+        XCTAssertEqual(protection(parent: { $0 == 2 ? .root : .element($0 + 1) }), .clear)
+        XCTAssertEqual(protection(parent: { $0 == 2 ? .invalid : .element($0 + 1) }), .blocked)
+        XCTAssertEqual(protection(parent: { .element($0 == 1 ? 0 : 1) }), .blocked)
+        XCTAssertEqual(protection(parent: { .element($0 + 1) }, protected: [2]), .blocked)
+        XCTAssertEqual(protection(parent: { .element($0 + 1) }), .unknown)
+        XCTAssertEqual(protection(parent: { _ in .root }, canRead: { false }), .unknown)
+    }
+
     func testProviderContextDeadlineAndDepthNeverGuessNativeFromIncompleteProof() {
         var roleReads = 0
         let expired = SelectionProviderContextReader<Int>(role: { _ in roleReads += 1; return "AXWebArea" }, parent: { $0 + 1 },
