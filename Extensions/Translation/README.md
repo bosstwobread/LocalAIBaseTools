@@ -1,10 +1,12 @@
 # Translation — editable source extension
 
-Translation 4.5.2 requires MacHelper 4.5 or later for translation, and MacHelper 6.2 or later for localized interface labels. This folder is its complete JavaScript source, manifest, settings schema, prompts, UI translations, searchable discovery metadata, and license. It needs no separate app or compiler. It requests only selection, AI, and result-panel permissions; the unused clipboard-reading declaration has been removed. Copying a finished result remains an explicit user action.
+Translation 4.5.5 requires MacHelper 4.5 or later for translation, and MacHelper 6.2 or later for localized interface labels. This folder is its complete JavaScript source, manifest, settings schema, prompts, UI translations, searchable discovery metadata, and license. It needs no separate app or compiler. It requests only selection, AI, and result-panel permissions; the unused clipboard-reading declaration has been removed. Copying a finished result remains an explicit user action.
 
 MacHelper's interface language is chosen under General and is separate from this tool's target language. The extension owns `localizations.json`, which translates its description and settings labels into 13 interface languages. Prompt source files stay exactly as authored; changing the interface language never rewrites prompts or changes the target language.
 
 Enable Translation in **MacHelper → Extensions**, then choose it from the installed list. Select text in a supported Mac app and click the floating icon. Results stream into a nearby panel; drag its header to move it without interrupting the response. Copy is available after completion. Esc, selection changes, and app switching dismiss/cancel the result.
+
+MacHelper 6.7 can automatically copy and restore the clipboard when a recognized text-selection gesture cannot be read through Accessibility. No manual compatibility switch is needed. The host skips unsafe, stale, unreadable, or oversized cases and never copies from ordinary clicks or polling. Capture-only text supports previews and the completed result’s Copy button, without sentence context; it cannot authorize replacement by itself. Translation is read-only. Before any Copy attempt, bounded preparation checks briefly let the selection, menu, and clipboard settle. A Copy attempt is never retried. The host keeps the snapshot in memory and avoids overwriting later clipboard changes. Preservation and app coverage are best effort; clipboard-history tools may observe temporary changes. The extension has no clipboard-reading or arbitrary keyboard API.
 
 ## Edit the actual prompts
 

@@ -293,24 +293,117 @@ final class SelectionMonitor {
     private var localMonitor: Any?
     private var workspaceObserver: NSObjectProtocol?
     private var debounce: DispatchWorkItem?
+    private var readNotBefore: TimeInterval = 0
     private var compatibilityRetry: DispatchWorkItem?
     private var compatibilityGestureContext: UInt64?
     private var compatibilityWaitingContext: UInt64?
     private var compatibilityToken: SelectionCompatibilityRequestToken?
+    private var copyGestureContext: UInt64?
+    private var copyPreparation: SelectionCapturePreparation?
+    private var copyPreparationWindow: (context: UInt64, window: AXUIElement)?
+    private var actionProofToken: SelectionCompatibilityRequestToken?
+    private var copiedSelection: (context: UInt64, selection: TextSelection, target: SelectionCopyTarget)?
+    private var copyRevalidation = SelectionCopyRevalidation()
+    private let copyUserIntent = SelectionCopyUserIntent()
     private let compatibilityActivator = SelectionCompatibilityActivator()
     private let readQueue = DispatchQueue(label: "org.localaibasetools.capabilities.selection", qos: .userInitiated)
     private var reading = false
     private var dragging = false
+    private var selectionMouseDown: (clickCount: Int, time: TimeInterval)?
     private var commandHeld = false
     private var commandSelectionPending = false
+    private var keyboardSelectionKey: UInt16?
+    private var keyboardSelectionWaitsForKeyUp = false
+    private var cancelledSelectionKeyUps: Set<UInt16> = []
     private var trusted = false
     private var context: UInt64 = 0
     private var selectionPoint = NSEvent.mouseLocation
     private var selectionHitPoint: CGPoint?
     private let ownPID = ProcessInfo.processInfo.processIdentifier
 
+    /// A transient AX failure must not permanently remove editing from a
+    /// supported field. Recovery reads fresh evidence; it never repeats Copy.
+    func recoverAXProof(for original: TextSelection,
+                        accept: @escaping @MainActor (TextSelection) -> Bool) async -> TextSelection? {
+        guard original.isClipboardOnly else { return original }
+        guard let cached = copiedSelection, copyRevalidation.consecutiveTimeouts == 0,
+              cached.context == context, cached.selection == original, trusted, !dragging,
+              cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) else { return nil }
+        let capturedContext = context
+        let token = SelectionCompatibilityRequestToken()
+        compatibilityToken?.invalidate()
+        actionProofToken?.invalidate(); actionProofToken = token
+        let mainTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let point = selectionPoint
+        let hitPoint = selectionHitPoint
+        return await withCheckedContinuation { continuation in
+            readQueue.async { [weak self] in
+                let current = { token.isValid && cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) }
+                var candidate: TextSelection?
+                let initialTargetCurrent = cached.target.isCurrent(continuing: current, allowNewlyExposedAnchors: true)
+                if initialTargetCurrent,
+                   case .selection(let fresh) = AccessibilitySelectionReader().read(sourcePID: original.sourcePID,
+                    mainScreenTop: mainTop, fallbackPoint: point, hitPoint: hitPoint, continuing: current),
+                   fresh.accessibilityOrigin?.isCurrent(continuing: current) == true {
+                    candidate = fresh
+                }
+                let targetCurrent = initialTargetCurrent && cached.target.isCurrent(continuing: current, allowNewlyExposedAnchors: true)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { continuation.resume(returning: nil); return }
+                    defer { if self.actionProofToken === token { self.actionProofToken = nil } }
+                    guard self.context == capturedContext, token.isValid, self.trusted, !self.dragging, targetCurrent,
+                          self.copiedSelection?.selection == original,
+                          cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) else {
+                        continuation.resume(returning: nil); return
+                    }
+                    // A still-current clipboard selection can run a read-only
+                    // preview; replacement requires independent matching proof.
+                    if let candidate, !candidate.text.utf16.elementsEqual(original.text.utf16) {
+                        continuation.resume(returning: nil); return
+                    }
+                    guard let candidate, let verified = SelectionPromotion.verifiedAXSelection(from: original,
+                        candidate: candidate, contextIsCurrent: targetCurrent), accept(verified) else {
+                        continuation.resume(returning: original); return
+                    }
+                    self.copiedSelection = nil
+                    continuation.resume(returning: verified)
+                }
+            }
+        }
+    }
+
+    /// The Paste button belongs to the physical selection gesture that supplied
+    /// the preview. A later gesture may select identical text in the same window.
+    func isCurrentMenuPasteSelection(_ selection: TextSelection, context expected: UInt64) -> Bool {
+        guard selection.isClipboardOnly, context == expected,
+              let cached = copiedSelection, cached.context == expected, cached.selection == selection,
+              copyRevalidation.consecutiveTimeouts == 0, trusted, !dragging, !commandHeld,
+              cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication)
+        else { return false }
+        return true
+    }
+
+    func menuPasteTarget(for selection: TextSelection) async -> (target: SelectionMenuPasteTarget, context: UInt64)? {
+        let expected = context
+        guard isCurrentMenuPasteSelection(selection, context: expected), let cached = copiedSelection else { return nil }
+        let token = SelectionCompatibilityRequestToken()
+        actionProofToken?.invalidate()
+        actionProofToken = token
+        let target: SelectionMenuPasteTarget? = await withCheckedContinuation { continuation in
+            readQueue.async {
+                let target = SelectionMenuPasteTarget.capture(from: cached.target) {
+                    token.isValid && cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication)
+                }
+                continuation.resume(returning: target)
+            }
+        }
+        defer { if actionProofToken === token { actionProofToken = nil } }
+        guard token.isValid, isCurrentMenuPasteSelection(selection, context: expected), let target else { return nil }
+        return (target, expected)
+    }
+
     func input(for selection: TextSelection) async -> CapabilitySelectionInput {
-        guard SelectionSentenceContext.isSingleWord(selection.text), selection.sourcePID != ownPID,
+        guard !selection.isClipboardOnly, SelectionSentenceContext.isSingleWord(selection.text), selection.sourcePID != ownPID,
               trusted, !dragging, NSWorkspace.shared.frontmostApplication?.processIdentifier == selection.sourcePID else {
             return CapabilitySelectionInput(text: selection.text)
         }
@@ -359,6 +452,7 @@ final class SelectionMonitor {
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver); self.workspaceObserver = nil }
         commandHeld = false
         invalidateReadContext()
+        cancelledSelectionKeyUps.removeAll()
     }
 
     private func installEventMonitors() {
@@ -367,6 +461,9 @@ final class SelectionMonitor {
         // Inspect only event type/key code/modifier flags. Typed text is not collected.
         commandHeld = NSEvent.modifierFlags.contains(.command)
         commandSelectionPending = false
+        keyboardSelectionKey = nil
+        keyboardSelectionWaitsForKeyUp = false
+        cancelledSelectionKeyUps.removeAll()
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .leftMouseDragged,
                                           .leftMouseUp, .rightMouseUp, .keyDown, .keyUp, .flagsChanged]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
@@ -381,64 +478,141 @@ final class SelectionMonitor {
     // Internal so synthetic event-policy tests can exercise dismissal/rearm
     // without installing monitors or posting events into any application.
     func handle(_ event: NSEvent, local: Bool) {
+        if SelectionCopyEvents.isInternal(event) { return }
+        if event.type == .keyDown, event.modifierFlags.contains(.command), [7, 8].contains(event.keyCode) {
+            copyUserIntent.changed()
+        }
         // AppKit captures a header drag even after the cursor leaves its panel.
         // Ignore that entire pointer sequence; Esc and app changes still dismiss.
         if isInteractingWithOverlay?() == true,
            [.leftMouseDown, .rightMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp].contains(event.type) { return }
         switch event.type {
         case .flagsChanged:
-            let held = event.modifierFlags.contains(.command)
-            guard held != commandHeld else { return }
-            let deferredSelection = commandSelectionPending
-            commandHeld = held
-            invalidateReadContext(preserveHitPoint: true)
-            if held {
-                // Modifier changes are distinct from keyDown/keyUp. A fixed
-                // Command-V paste event pair must not dismiss an active result.
-                onToolbarDismiss?()
-            } else if deferredSelection {
-                registerSelectionGesture(true)
-                scheduleRead()
-            }
+            updateCommandState(event.modifierFlags.contains(.command))
         case .leftMouseDown, .rightMouseDown:
             let point = CapabilityDragPointer.screenPoint(for: event, window: event.window,
                 primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
-            if shouldIgnoreOutsideClick?(point) == true { return }
+            // Only a local event can belong to our panel. Another app may
+            // receive the click at the same coordinates as a covered panel.
+            if local, shouldIgnoreOutsideClick?(point) == true { return }
             invalidateReadContext()
+            dragging = false
+            if !local { updateCommandState(event.modifierFlags.contains(.command)) }
+            if event.type == .leftMouseDown && (event.clickCount >= 2 || event.modifierFlags.contains(.shift)) {
+                selectionMouseDown = (event.clickCount, event.timestamp)
+            }
             onDismiss?()
         case .leftMouseDragged:
             if !local { dragging = true; debounce?.cancel() }
         case .leftMouseUp, .rightMouseUp:
             let selectedByDragging = dragging
+            let mouseDown = selectionMouseDown
+            let clickCount = max(mouseDown?.clickCount ?? 0, event.clickCount)
+            let clickSelection = mouseDown != nil || clickCount >= 2 || event.modifierFlags.contains(.shift)
+            selectionMouseDown = nil
             dragging = false
             if local { return }
+            // A flagsChanged notification can be missed when switching apps.
+            // Use the button event's modifier snapshot for this new gesture.
+            updateCommandState(event.modifierFlags.contains(.command))
             selectionPoint = CapabilityDragPointer.screenPoint(for: event, window: event.window,
                 primaryScreenTop: NSScreen.screens.first?.frame.maxY ?? 0)
             let selecting = event.type == .leftMouseUp &&
-                (selectedByDragging || event.clickCount >= 2 || event.modifierFlags.contains(.shift))
+                (selectedByDragging || clickSelection)
             selectionHitPoint = selecting ? selectionPoint : nil
-            registerSelectionGesture(selecting)
-            scheduleRead()
+            // Keep AX responsive. On editors that require Copy, let the
+            // complete click sequence and other selection tools settle first.
+            let earliestCopy = clickSelection ? SelectionCapturePreparation.clickCopyDeadline(clickCount: clickCount,
+                mouseDown: mouseDown?.time, mouseUp: event.timestamp, doubleClickInterval: NSEvent.doubleClickInterval) : nil
+            registerSelectionGesture(selecting, earliestCopyTime: earliestCopy)
+            scheduleRead(delay: clickSelection ? 0.12 : 0.14)
         case .keyDown:
             if event.keyCode == 53 { invalidateReadContext(); onDismiss?() }
             else if !local {
                 // An older AX query must not publish the selection that existed
                 // before this key changed it. Never inspect event.characters.
+                let selecting = isKeyboardSelection(event)
+                if selecting, event.isARepeat, cancelledSelectionKeyUps.contains(event.keyCode) {
+                    invalidateReadContext()
+                    return
+                }
+                if selecting, event.isARepeat, keyboardSelectionKey == event.keyCode {
+                    // Repeats can change an arrow selection. Invalidate old
+                    // reads while retaining one pending chord, not one Copy
+                    // attempt per autorepeat event.
+                    invalidateReadContext(preserveKeyboardSelection: true)
+                    updateCommandState(event.modifierFlags.contains(.command))
+                    keyboardSelectionWaitsForKeyUp = !event.modifierFlags.contains(.command)
+                    if !keyboardSelectionWaitsForKeyUp { registerSelectionGesture(true) }
+                    return
+                }
                 invalidateReadContext()
+                if selecting {
+                    selectionPoint = NSEvent.mouseLocation
+                    selectionHitPoint = nil
+                    // Latch intent while modifiers still identify the shortcut.
+                    // Command can be released before A/arrow keyUp arrives.
+                    updateCommandState(event.modifierFlags.contains(.command))
+                    cancelledSelectionKeyUps.remove(event.keyCode)
+                    keyboardSelectionKey = event.keyCode
+                    keyboardSelectionWaitsForKeyUp = !event.modifierFlags.contains(.command)
+                    if !keyboardSelectionWaitsForKeyUp { registerSelectionGesture(true) }
+                }
             }
         case .keyUp:
             if !local, event.keyCode != 53 {
+                if cancelledSelectionKeyUps.remove(event.keyCode) != nil { return }
+                if keyboardSelectionKey == event.keyCode {
+                    let waitingForKeyUp = keyboardSelectionWaitsForKeyUp
+                    keyboardSelectionKey = nil
+                    keyboardSelectionWaitsForKeyUp = false
+                    // A matching release must not cancel the context rearmed
+                    // by an earlier Command release, or dispatch a second Copy.
+                    updateCommandState(event.modifierFlags.contains(.command))
+                    if waitingForKeyUp { registerSelectionGesture(true) }
+                    scheduleRead()
+                    return
+                }
                 invalidateReadContext()
-                let shiftSelection = event.modifierFlags.contains(.shift) && [123, 124, 125, 126, 115, 119, 116, 121].contains(event.keyCode)
-                let selectAll = event.keyCode == 0 && event.modifierFlags.contains(.command)
-                registerSelectionGesture(shiftSelection || selectAll)
+                // Preserve recovery for a missed keyDown, while cancelled
+                // latched key releases above can never resurrect an old gesture.
+                let selecting = isKeyboardSelection(event)
+                if selecting {
+                    selectionPoint = NSEvent.mouseLocation
+                    selectionHitPoint = nil
+                    updateCommandState(event.modifierFlags.contains(.command))
+                }
+                registerSelectionGesture(selecting)
                 scheduleRead()
             }
         default: break
         }
     }
 
-    private func registerSelectionGesture(_ selecting: Bool) {
+    private func isKeyboardSelection(_ event: NSEvent) -> Bool {
+        let shiftSelection = event.modifierFlags.contains(.shift) &&
+            [123, 124, 125, 126, 115, 119, 116, 121].contains(event.keyCode)
+        let selectAll = event.keyCode == 0 && event.modifierFlags.contains(.command)
+        return shiftSelection || selectAll
+    }
+
+    private func updateCommandState(_ held: Bool) {
+        guard held != commandHeld else { return }
+        let deferredSelection = commandSelectionPending
+        commandHeld = held
+        invalidateReadContext(preserveHitPoint: true, preserveCopiedSelection: true,
+                              preserveKeyboardSelection: true)
+        if held {
+            // Modifier changes are distinct from arbitrary keyDown/keyUp.
+            // A fixed Command-V Apply pair must not hide an active result.
+            onToolbarDismiss?()
+        } else if deferredSelection {
+            registerSelectionGesture(true)
+            scheduleRead()
+        }
+    }
+
+    private func registerSelectionGesture(_ selecting: Bool, earliestCopyTime: TimeInterval? = nil) {
         if selecting && commandHeld {
             // Cmd+A / Cmd+Shift+arrow can finish while Command is still held.
             // Rearm only when it is released, keeping the toolbar hidden now.
@@ -446,9 +620,24 @@ final class SelectionMonitor {
             return
         }
         commandSelectionPending = false
-        if selecting { compatibilityGestureContext = context }
+        if selecting {
+            // Commit a new gesture context at release. A read started between
+            // mouse/key down and up must not overwrite this gesture's newly
+            // armed preparation state when its older callback returns.
+            invalidateReadContext(preserveHitPoint: true, preserveKeyboardSelection: true)
+            compatibilityGestureContext = context; copyGestureContext = context
+            copyPreparation = SelectionCapturePreparation(context: context, earliestCopyTime: earliestCopyTime)
+        }
         onSelectionGesture?(selecting)
     }
+
+    /// Consumed by a read once, never rearmed by the polling timer.
+    func consumeCopyGesture() -> Bool {
+        defer { copyGestureContext = nil }
+        return copyGestureContext == context
+    }
+
+    func isReadDeferred(at time: TimeInterval) -> Bool { time < readNotBefore }
 
     private func tick() {
         let permission = AXIsProcessTrusted()
@@ -462,15 +651,31 @@ final class SelectionMonitor {
         readSelection()
     }
 
-    private func scheduleRead() {
+    private func scheduleRead(delay: TimeInterval = 0.14) {
         debounce?.cancel()
+        readNotBefore = ProcessInfo.processInfo.systemUptime + delay
         let work = DispatchWorkItem { [weak self] in self?.readSelection() }
         debounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    private func invalidateReadContext(preserveHitPoint: Bool = false) {
+    private func invalidateReadContext(preserveHitPoint: Bool = false, preserveCopiedSelection: Bool = false,
+                                       preserveKeyboardSelection: Bool = false) {
         context &+= 1
+        readNotBefore = 0
+        selectionMouseDown = nil
+        actionProofToken?.invalidate(); actionProofToken = nil
+        copyPreparation = nil
+        copyPreparationWindow = nil
+        if !preserveKeyboardSelection {
+            if let keyboardSelectionKey { cancelledSelectionKeyUps.insert(keyboardSelectionKey) }
+            keyboardSelectionKey = nil
+            keyboardSelectionWaitsForKeyUp = false
+        }
+        copyGestureContext = nil
+        if preserveCopiedSelection, let cached = copiedSelection {
+            copiedSelection = (context, cached.selection, cached.target)
+        } else { copiedSelection = nil; copyRevalidation = SelectionCopyRevalidation() }
         if !preserveHitPoint { selectionHitPoint = nil }
         commandSelectionPending = false
         compatibilityGestureContext = nil
@@ -479,7 +684,21 @@ final class SelectionMonitor {
         compatibilityToken?.invalidate(); compatibilityToken = nil
     }
 
+    private func finishRead(in completedContext: UInt64) {
+        reading = false
+        // A newer gesture's debounce may have fired while the old AX query
+        // owned the serial reader. Service it as soon as that query releases
+        // the queue, subject to its own deadline and all normal guards.
+        if completedContext != context, timer != nil, copyGestureContext == context {
+            readSelection()
+        }
+    }
+
     private func readSelection() {
+        // The polling timer must not bypass a new gesture's settling delay.
+        // Otherwise it can consume the sole Copy opportunity before a native
+        // editor has committed a double/triple-click selection.
+        guard !isReadDeferred(at: ProcessInfo.processInfo.systemUptime) else { return }
         if compatibilityWaitingContext == context {
             // Do not publish an incomplete focus tree while Electron's delayed
             // mode request is settling. Opt-out stops waiting and future writes.
@@ -488,7 +707,7 @@ final class SelectionMonitor {
             compatibilityRetry?.cancel(); compatibilityRetry = nil
             compatibilityToken?.invalidate(); compatibilityToken = nil
         }
-        guard trusted, !reading, !dragging, !commandHeld, isInteractingWithOverlay?() != true,
+        guard trusted, actionProofToken == nil, !reading, !dragging, !commandHeld, isInteractingWithOverlay?() != true,
               let source = SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication),
               source.processIdentifier != ownPID else { return }
         let pid = source.processIdentifier
@@ -496,6 +715,11 @@ final class SelectionMonitor {
         let capturedContext = context
         let explicitGesture = compatibilityGestureContext == capturedContext
         compatibilityGestureContext = nil
+        let copyGesture = consumeCopyGesture()
+        var preparation = copyPreparation
+        var preparationWindow = copyPreparationWindow?.context == capturedContext ? copyPreparationWindow?.window : nil
+        let cachedCopy = copiedSelection?.context == capturedContext ? copiedSelection : nil
+        let userIntent = copyUserIntent
         let token = SelectionCompatibilityRequestToken()
         compatibilityToken = token
         let point = selectionPoint
@@ -507,16 +731,75 @@ final class SelectionMonitor {
                 token.isValid && source == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication)
             }
             let settlementDelay = activator.delayBeforeRefresh(source: source)
-            let result = outcome.needsDelayedRead ? SelectionReadResult.unavailable :
-                AccessibilitySelectionReader().read(sourcePID: pid, mainScreenTop: mainTop, fallbackPoint: point,
-                    hitPoint: hitPoint, continuing: { token.isValid && source == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) })
+            let current = { token.isValid && source == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) }
+            var capturedCopy: (TextSelection, SelectionCopyTarget)?
+            var cachedValidity: SelectionCopyValidity?
+            var preparationRetry: TimeInterval?
+            var result = SelectionReadResult.unavailable
+            if !outcome.needsDelayedRead {
+                if let cachedCopy {
+                    let validity = cachedCopy.target.validity(continuing: current, allowNewlyExposedAnchors: true)
+                    cachedValidity = validity
+                    result = validity == .current ? .selection(cachedCopy.selection) : .empty
+                } else {
+                    result = AccessibilitySelectionReader().read(sourcePID: pid, mainScreenTop: mainTop, fallbackPoint: point,
+                        hitPoint: hitPoint, continuing: current)
+                    let hasAXSelection: Bool
+                    if case .selection = result { hasAXSelection = true } else { hasAXSelection = false }
+                    if hasAXSelection { preparation?.cancel(context: capturedContext) }
+                    if copyGesture, !hasAXSelection, current(),
+                       preparation?.beginAttempt(context: capturedContext, now: ProcessInfo.processInfo.systemUptime) == true {
+                        var dispatched = false
+                        let currentWindow = AccessibilitySelectionOrigin.window(in: AXUIElementCreateApplication(pid), attribute: .focused)
+                        if preparationWindow == nil { preparationWindow = currentWindow }
+                        let sameWindow = preparationWindow.flatMap { expected in currentWindow.map { CFEqual(expected, $0) } } ?? false
+                        if !sameWindow, preparationWindow != nil { preparation?.cancel(context: capturedContext) }
+                        if sameWindow, let currentWindow, let target = SelectionCopyTarget.capture(process: source,
+                            hitPoint: hitPoint.map { CGPoint(x: $0.x, y: mainTop - $0.y) }, continuing: current),
+                           CFEqual(target.window, currentWindow),
+                           let copyAction = SelectionCopyAction.resolve(application: target.application, pid: pid, continuing: current) {
+                            let transaction = SelectionClipboardTransaction(pasteboard: SystemSelectionClipboard())
+                            if let text = transaction.capture(prepareCopy: {
+                                target.isCurrent(continuing: current) && copyAction.isAvailable()
+                            }, willCopy: { dispatched = true }, copy: { copyAction.perform() }, canCapture: current,
+                               userCopyGeneration: { userIntent.value }) {
+                                let validity = target.validity(continuing: current, allowNewlyExposedAnchors: true)
+                                if validity != .invalid {
+                                    var selection = TextSelection(text: text, sourcePID: pid, rangeLocation: -1,
+                                        rangeLength: text.utf16.count, bounds: CGRect(x: point.x, y: point.y, width: 1, height: 1))
+                                    selection.isClipboardOnly = true
+                                    capturedCopy = (selection, target)
+                                    cachedValidity = validity
+                                    result = validity == .current ? .selection(selection) : .empty
+                                }
+                            }
+                        }
+                        if dispatched { preparation?.copyAttempted(context: capturedContext) }
+                        else if current() {
+                            preparationRetry = preparation?.preparationFailed(context: capturedContext,
+                                now: ProcessInfo.processInfo.systemUptime)
+                        }
+                    } else if copyGesture, !hasAXSelection, current() {
+                        // Bind the deferred Copy to the window seen on the
+                        // first AX read, before waiting for another click.
+                        if preparationWindow == nil {
+                            preparationWindow = AccessibilitySelectionOrigin.window(in: AXUIElementCreateApplication(pid), attribute: .focused)
+                        }
+                        if preparationWindow != nil {
+                            preparationRetry = preparation?.delayBeforeAttempt(context: capturedContext,
+                                now: ProcessInfo.processInfo.systemUptime)
+                        }
+                    }
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.reading = false
+                self.finishRead(in: capturedContext)
                 guard self.context == capturedContext, token.isValid, !self.commandHeld,
                       self.isInteractingWithOverlay?() != true,
                       source == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) else { return }
                 if outcome.needsDelayedRead {
+                    if copyGesture { self.copyGestureContext = capturedContext }
                     let settlement = SelectionCompatibilitySettlement(context: capturedContext, source: source)
                     self.compatibilityWaitingContext = capturedContext
                     let retry = DispatchWorkItem { [weak self] in
@@ -536,7 +819,7 @@ final class SelectionMonitor {
                             }
                             DispatchQueue.main.async { [weak self] in
                                 guard let self else { return }
-                                self.reading = false
+                                self.finishRead(in: capturedContext)
                                 guard settlement.accepts(context: self.context,
                                     source: SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication),
                                     enabled: SelectionCompatibilityPreferences.isEnabled, running: self.timer != nil,
@@ -549,6 +832,23 @@ final class SelectionMonitor {
                     self.compatibilityRetry = retry
                     DispatchQueue.main.asyncAfter(deadline: .now() + max(0, settlementDelay ?? 2.2), execute: retry)
                     return
+                }
+                if let capturedCopy {
+                    self.copiedSelection = (capturedContext, capturedCopy.0, capturedCopy.1)
+                    self.copyRevalidation = SelectionCopyRevalidation()
+                }
+                if let validity = cachedValidity {
+                    if self.copyRevalidation.shouldRetry(after: validity) {
+                        self.scheduleRead(delay: 0.12)
+                    } else if validity != .current {
+                        self.copiedSelection = nil
+                    }
+                }
+                self.copyPreparation = preparation
+                if let preparationWindow { self.copyPreparationWindow = (capturedContext, preparationWindow) }
+                if let preparationRetry {
+                    self.copyGestureContext = capturedContext
+                    self.scheduleRead(delay: preparationRetry)
                 }
                 self.onRead?(result)
             }

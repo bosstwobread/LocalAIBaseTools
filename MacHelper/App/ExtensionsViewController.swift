@@ -91,7 +91,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             guard self != nil else { return false }
             let alert = NSAlert()
             alert.messageText = L("Allow “%@” to replace selected text?", manifest.displayName)
-            alert.informativeText = L("Results appear in a preview first. Only clicking Apply can replace the unchanged original selection in a supported app. Use Copy when direct replacement is unavailable.")
+            alert.informativeText = L("Review the result, then click Apply to replace the verified original selection.")
             alert.addButton(withTitle: L("Allow Apply"))
             alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn
@@ -100,7 +100,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             guard self != nil else { return false }
             let alert = NSAlert()
             alert.messageText = L("Allow “%@” to paste results?", manifest.displayName)
-            alert.informativeText = L("When direct replacement is unavailable, clicking Apply lets MacHelper replace the clipboard with the completed result and paste it into the verified selection. The result stays on the clipboard. Previous clipboard contents are never read or restored.")
+            alert.informativeText = L("Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.")
             alert.addButton(withTitle: L("Allow Paste"))
             alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn

@@ -129,7 +129,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "在 MacHelper → 扩展中选择此工具 → 编辑源码。修改代码、提示词或设置后保存；清单决定运行方式，有效修改仅替换当前扩展的工作进程。",
     "Create or customize with your AI assistant": "使用 AI 助手创建或定制",
     "Download the AI extension guide": "下载 AI 扩展指南",
-    "Read text you select through macOS Accessibility.": "通过 macOS 辅助功能读取你选中的文字。",
     "Legacy clipboard declaration (no shared clipboard reader)": "旧版剪贴板权限声明（不提供共享剪贴板读取功能）",
     "Send text to your shared AI connection for an explicit action.": "只有主动操作时才将文字发送到共享 AI 连接。",
     "Display a nearby floating result panel.": "显示附近的浮动结果面板。",
@@ -203,8 +202,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "MacHelper 统一支持 JavaScript 和原生 Swift 工具。清单自动决定执行和热重载方式；原生源码需要编译工具和执行授权。",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "界面示意：选中文字，预览润色结果，再应用或复制。",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "仅在点击应用后，替换支持的编辑框中内容未变化的选中文字。",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "允许在主动点击应用后，将结果粘贴到支持的编辑器。这会用结果替换剪贴板并保留该结果；不会读取原剪贴板内容。",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "可选，默认关闭：MacHelper → 通用 → 改善与 Electron 应用的兼容性，会请求支持此功能的应用提供完整的辅助功能信息。这可能改变 VS Code 的折叠和缩略图行为。启用后请重新选择文字。"
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "可选，默认关闭：MacHelper → 通用 → 改善与 Electron 应用的兼容性，会请求支持此功能的应用提供完整的辅助功能信息。这可能改变 VS Code 的折叠和缩略图行为。启用后请重新选择文字。",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "通过 macOS 辅助功能读取选中文字，必要时自动临时复制，并在安全时恢复剪贴板。",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "剪贴板快照仅在本次取词期间保存在内存中，不会写入文件、记录日志或发送给 AI。",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "“应用”可将结果粘贴到已核实的选区。如果无法读取选区位置，“粘贴”会使用原窗口中的当前选区。这两种通过剪贴板粘贴的操作都会把结果保留在剪贴板中。",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "如果辅助功能无法读取选区，MacHelper 会临时复制选中文字，并在安全时恢复剪贴板。"
   },
   "zh-Hant": {
     "Skip to content": "跳到正文",
@@ -335,7 +337,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "在 MacHelper → 擴充工具選擇此工具 → 編輯原始碼。修改程式碼、提示詞或設定後儲存；資訊清單決定執行方式，有效修改只替換目前擴充工具的工作程序。",
     "Create or customize with your AI assistant": "使用 AI 助理建立或自訂",
     "Download the AI extension guide": "下載 AI 擴充工具指南",
-    "Read text you select through macOS Accessibility.": "透過 macOS 輔助使用讀取你選取的文字。",
     "Legacy clipboard declaration (no shared clipboard reader)": "舊版剪貼簿權限宣告（不提供共用剪貼簿讀取功能）",
     "Send text to your shared AI connection for an explicit action.": "只有主動操作時才將文字傳送至共用 AI 連線。",
     "Display a nearby floating result panel.": "顯示附近的浮動結果面板。",
@@ -409,8 +410,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "MacHelper 統一支援 JavaScript 和原生 Swift 工具。清單自動決定執行和熱重載方式；原生原始碼需要編譯工具和執行授權。",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "介面示意：選取文字，預覽潤飾結果，再套用或複製。",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "僅在點擊套用後，取代支援的編輯欄位中內容未變的選取文字。",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "允許在主動點擊套用後，將結果貼入支援的編輯器。這會以結果取代剪貼簿並保留該結果；不會讀取原剪貼簿內容。",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "可選，預設關閉：MacHelper → 一般 → 改善與 Electron 應用程式的相容性，會要求支援此功能的應用程式提供完整的輔助使用資訊。這可能改變 VS Code 的摺疊和縮圖行為。啟用後請重新選取文字。"
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "可選，預設關閉：MacHelper → 一般 → 改善與 Electron 應用程式的相容性，會要求支援此功能的應用程式提供完整的輔助使用資訊。這可能改變 VS Code 的摺疊和縮圖行為。啟用後請重新選取文字。",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "透過 macOS 輔助使用讀取選取文字，必要時自動暫時複製，並在安全時還原剪貼簿。",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "剪貼簿快照僅在本次取詞期間保留於記憶體中，不會寫入檔案、記錄日誌或傳送給 AI。",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "「套用」可將結果貼到已確認的選取範圍。如果無法取得選取位置，「貼上」會使用原視窗目前的選取範圍。這兩種透過剪貼簿貼上的操作都會將結果留在剪貼簿中。",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "若輔助使用無法讀取選取範圍，MacHelper 會暫時複製所選文字，並在安全時還原剪貼簿。"
   },
   "es": {
     "Skip to content": "Saltar al contenido",
@@ -541,7 +545,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "En MacHelper → Extensiones, elige esta herramienta → Editar código. Cambia el código, instrucciones o ajustes y guarda. El manifiesto determina la ejecución; un cambio válido reemplaza solo su proceso.",
     "Create or customize with your AI assistant": "Crear o personalizar con tu asistente de IA",
     "Download the AI extension guide": "Descargar la guía de extensiones de IA",
-    "Read text you select through macOS Accessibility.": "Leer el texto seleccionado mediante Accesibilidad de macOS.",
     "Legacy clipboard declaration (no shared clipboard reader)": "Permiso de portapapeles heredado (sin lector de portapapeles compartido)",
     "Send text to your shared AI connection for an explicit action.": "Enviar texto a tu conexión compartida de IA para una acción explícita.",
     "Display a nearby floating result panel.": "Mostrar un panel flotante cercano con el resultado.",
@@ -615,8 +618,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "Una interfaz de MacHelper admite JavaScript y Swift. El manifiesto elige ejecución y recarga; Swift requiere compilador y autorización.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "Vista previa: selecciona texto, revisa la mejora y aplica o copia.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "Reemplazar el texto seleccionado sin cambios en un campo editable compatible solo al pulsar Aplicar.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "Permitir pegar en un editor compatible al pulsar Aplicar. El resultado sustituye el portapapeles y permanece allí; nunca se lee su contenido anterior.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Opcional y desactivado de forma predeterminada: MacHelper → General → Mejorar la compatibilidad con aplicaciones Electron solicita toda la información de accesibilidad a las aplicaciones compatibles. Puede cambiar el plegado de código y el minimapa de VS Code. Vuelve a seleccionar el texto tras activarlo."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Opcional y desactivado de forma predeterminada: MacHelper → General → Mejorar la compatibilidad con aplicaciones Electron solicita toda la información de accesibilidad a las aplicaciones compatibles. Puede cambiar el plegado de código y el minimapa de VS Code. Vuelve a seleccionar el texto tras activarlo.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "Leer el texto seleccionado mediante Accesibilidad de macOS, con copia temporal automática y restauración del portapapeles cuando sea seguro.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "Las copias del portapapeles se conservan en memoria solo durante el intento de captura. Nunca se guardan en archivos, se registran ni se envían a la IA.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Aplicar puede pegar en una selección verificada. Si no se puede obtener su posición, Pegar usa la selección actual de la ventana original. Ambas acciones dejan el resultado en el portapapeles.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "Si Accesibilidad no puede leer una selección, MacHelper la copia temporalmente y restaura el portapapeles cuando es seguro."
   },
   "pt": {
     "Skip to content": "Ir para o conteúdo",
@@ -747,7 +753,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "No MacHelper → Extensões, escolha a ferramenta → Editar código. Altere código, prompts ou definições e guarde. O manifesto escolhe a execução; uma alteração válida substitui apenas o seu processo.",
     "Create or customize with your AI assistant": "Criar ou personalizar com o assistente de IA",
     "Download the AI extension guide": "Transferir o guia de extensões de IA",
-    "Read text you select through macOS Accessibility.": "Ler o texto selecionado através da Acessibilidade do macOS.",
     "Legacy clipboard declaration (no shared clipboard reader)": "Permissão antiga da área de transferência (sem leitor compartilhado)",
     "Send text to your shared AI connection for an explicit action.": "Enviar texto à conexão de IA partilhada numa ação explícita.",
     "Display a nearby floating result panel.": "Apresentar um painel flutuante próximo com o resultado.",
@@ -821,8 +826,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "Uma interface do MacHelper atende JavaScript e Swift. O manifesto escolhe execução e recarga; código nativo exige compilador e autorização.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "Prévia: selecione texto, revise o resultado e aplique ou copie.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "Substituir a seleção inalterada num campo editável compatível apenas ao clicar em Aplicar.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "Permitir colar num editor compatível ao clicar em Aplicar. O resultado substitui a área de transferência e permanece nela; seu conteúdo anterior nunca é lido.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Opcional e desativado por predefinição: MacHelper → Geral → Melhorar a compatibilidade com aplicações Electron solicita toda a informação de acessibilidade às aplicações compatíveis. Pode alterar a dobragem de código e o minimapa do VS Code. Volte a selecionar o texto após ativar."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Opcional e desativado por predefinição: MacHelper → Geral → Melhorar a compatibilidade com aplicações Electron solicita toda a informação de acessibilidade às aplicações compatíveis. Pode alterar a dobragem de código e o minimapa do VS Code. Volte a selecionar o texto após ativar.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "Ler o texto selecionado através da Acessibilidade do macOS, com cópia temporária automática e restauro da área de transferência quando for seguro.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "As cópias da área de transferência ficam apenas na memória durante a tentativa de captura. Nunca são guardadas em ficheiros, registadas em logs ou enviadas para a IA.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Aplicar pode colar numa seleção verificada. Se a posição estiver indisponível, Colar usa a seleção atual da janela original. Ambas as ações deixam o resultado na área de transferência.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "Se a Acessibilidade não conseguir ler uma seleção, o MacHelper copia-a temporariamente e restaura a área de transferência quando for seguro."
   },
   "it": {
     "Skip to content": "Vai al contenuto",
@@ -953,7 +961,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "In MacHelper → Estensioni scegli questo strumento → Modifica codice. Cambia codice, prompt o impostazioni e salva. Il manifesto determina l’esecuzione; una modifica valida sostituisce solo il suo processo.",
     "Create or customize with your AI assistant": "Crea o personalizza con il tuo assistente IA",
     "Download the AI extension guide": "Scarica la guida alle estensioni IA",
-    "Read text you select through macOS Accessibility.": "Leggere il testo selezionato tramite Accessibilità di macOS.",
     "Legacy clipboard declaration (no shared clipboard reader)": "Permesso appunti precedente (senza lettore condiviso)",
     "Send text to your shared AI connection for an explicit action.": "Inviare testo alla connessione IA condivisa per un’azione esplicita.",
     "Display a nearby floating result panel.": "Mostrare un pannello fluttuante vicino con il risultato.",
@@ -1027,8 +1034,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "Un’unica interfaccia MacHelper supporta JavaScript e Swift. Il manifesto sceglie esecuzione e ricarica; il codice nativo richiede compilatore e autorizzazione.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "Anteprima: seleziona il testo, controlla il risultato e applica o copia.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "Sostituire il testo selezionato invariato in un campo compatibile solo facendo clic su Applica.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "Consenti di incollare in un editor supportato solo facendo clic su Applica. Il risultato sostituisce gli appunti e vi rimane; il contenuto precedente non viene mai letto.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Facoltativo e disattivato per impostazione predefinita: MacHelper → Generali → Migliora la compatibilità con le app Electron richiede tutte le informazioni di accessibilità alle app compatibili. Può modificare la compressione del codice e la minimappa di VS Code. Seleziona di nuovo il testo dopo l’attivazione."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Facoltativo e disattivato per impostazione predefinita: MacHelper → Generali → Migliora la compatibilità con le app Electron richiede tutte le informazioni di accessibilità alle app compatibili. Può modificare la compressione del codice e la minimappa di VS Code. Seleziona di nuovo il testo dopo l’attivazione.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "Leggere il testo selezionato tramite Accessibilità di macOS, con copia temporanea automatica e ripristino degli appunti quando è sicuro.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "Le copie degli appunti restano in memoria solo durante il tentativo di acquisizione. Non vengono mai salvate in file, registrate nei log o inviate all’IA.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Applica può incollare in una selezione verificata. Quando la posizione non è disponibile, Incolla usa la selezione corrente della finestra originale. Entrambe le azioni lasciano il risultato negli appunti.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "Se Accessibilità non riesce a leggere una selezione, MacHelper la copia temporaneamente e ripristina gli appunti quando è sicuro farlo."
   },
   "fr": {
     "Skip to content": "Aller au contenu",
@@ -1159,7 +1169,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "Dans MacHelper → Extensions, choisissez cet outil → Modifier le code. Modifiez code, instructions ou réglages et enregistrez. Le manifeste détermine l’exécution ; une modification valide remplace seulement son processus.",
     "Create or customize with your AI assistant": "Créer ou personnaliser avec votre assistant IA",
     "Download the AI extension guide": "Télécharger le guide des extensions IA",
-    "Read text you select through macOS Accessibility.": "Lire le texte sélectionné via Accessibilité de macOS.",
     "Legacy clipboard declaration (no shared clipboard reader)": "Ancienne déclaration du presse-papiers (sans lecteur partagé)",
     "Send text to your shared AI connection for an explicit action.": "Envoyer du texte à la connexion IA partagée pour une action explicite.",
     "Display a nearby floating result panel.": "Afficher un panneau flottant à proximité.",
@@ -1233,8 +1242,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "Une interface MacHelper prend en charge JavaScript et Swift. Le manifeste choisit exécution et rechargement ; Swift exige compilateur et autorisation.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "Aperçu : sélectionnez, relisez le résultat puis appliquez ou copiez.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "Remplacer la sélection inchangée dans un champ modifiable compatible uniquement au clic sur Appliquer.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "Autoriser le collage dans un éditeur compatible au clic sur Appliquer. Le résultat remplace le presse-papiers et y reste ; son contenu précédent n’est jamais lu.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Facultatif et désactivé par défaut : MacHelper → Général → Améliorer la compatibilité avec les applications Electron demande toutes les informations d’accessibilité aux applications compatibles. Cela peut modifier le repliage du code et la minicarte de VS Code. Sélectionnez de nouveau le texte après l’activation."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Facultatif et désactivé par défaut : MacHelper → Général → Améliorer la compatibilité avec les applications Electron demande toutes les informations d’accessibilité aux applications compatibles. Cela peut modifier le repliage du code et la minicarte de VS Code. Sélectionnez de nouveau le texte après l’activation.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "Lire le texte sélectionné via Accessibilité de macOS, avec copie temporaire automatique et restauration du presse-papiers lorsque cela est sûr.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "Les copies du presse-papiers restent en mémoire uniquement pendant la tentative de capture. Elles ne sont jamais enregistrées dans des fichiers ou des journaux, ni envoyées à l’IA.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Appliquer peut coller dans une sélection vérifiée. Si sa position est indisponible, Coller utilise la sélection actuelle de la fenêtre d’origine. Les deux actions laissent le résultat dans le presse-papiers.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "Si Accessibilité ne peut pas lire une sélection, MacHelper la copie temporairement et restaure le presse-papiers lorsque c’est possible en toute sécurité."
   },
   "de": {
     "Skip to content": "Zum Inhalt springen",
@@ -1365,7 +1377,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "Wähle in MacHelper → Erweiterungen dieses Werkzeug → Quellcode bearbeiten. Ändere Code, Prompts oder Einstellungen und speichere. Das Manifest bestimmt die Ausführung; gültige Änderungen ersetzen nur dessen Prozess.",
     "Create or customize with your AI assistant": "Mit deinem KI-Assistenten erstellen oder anpassen",
     "Download the AI extension guide": "KI-Erweiterungsleitfaden herunterladen",
-    "Read text you select through macOS Accessibility.": "Markierten Text über macOS-Bedienungshilfen lesen.",
     "Legacy clipboard declaration (no shared clipboard reader)": "Alte Zwischenablage-Berechtigung (kein gemeinsamer Lesezugriff)",
     "Send text to your shared AI connection for an explicit action.": "Text für eine ausdrückliche Aktion an die gemeinsame KI-Verbindung senden.",
     "Display a nearby floating result panel.": "Ein schwebendes Ergebnisfenster in der Nähe anzeigen.",
@@ -1439,8 +1450,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "Eine MacHelper-Oberfläche unterstützt JavaScript und Swift. Das Manifest wählt Ausführung und Neuladen. Nativer Code braucht Compiler und Freigabe.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "Vorschau: Text markieren, Ergebnis prüfen, übernehmen oder kopieren.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "Unveränderten markierten Text in einem unterstützten Eingabefeld erst mit Übernehmen ersetzen.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "Einfügen in unterstützte Editoren erst mit Übernehmen erlauben. Das Ergebnis ersetzt den Inhalt der Zwischenablage und bleibt dort; der vorherige Inhalt wird nie gelesen.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Optional und standardmäßig deaktiviert: MacHelper → Allgemein → Kompatibilität mit Electron-Apps verbessern fordert vollständige Bedienungshilfen-Informationen von unterstützten Apps an. Dies kann Codefaltung und Minimap in VS Code verändern. Wählen Sie den Text nach dem Aktivieren erneut aus."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Optional und standardmäßig deaktiviert: MacHelper → Allgemein → Kompatibilität mit Electron-Apps verbessern fordert vollständige Bedienungshilfen-Informationen von unterstützten Apps an. Dies kann Codefaltung und Minimap in VS Code verändern. Wählen Sie den Text nach dem Aktivieren erneut aus.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "Markierten Text über macOS-Bedienungshilfen lesen, bei Bedarf automatisch vorübergehend kopieren und die Zwischenablage wiederherstellen, sofern dies sicher ist.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "Kopien der Zwischenablage bleiben nur während des Erfassungsversuchs im Arbeitsspeicher. Sie werden niemals in Dateien oder Protokollen gespeichert oder an KI gesendet.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Anwenden kann das Ergebnis in eine geprüfte Auswahl einfügen. Ist deren Position unbekannt, verwendet Einfügen die aktuelle Auswahl im ursprünglichen Fenster. Bei beiden Einfügevorgängen bleibt das Ergebnis in der Zwischenablage.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "Wenn die Bedienungshilfen eine Auswahl nicht lesen können, kopiert MacHelper sie vorübergehend und stellt die Zwischenablage wieder her, sobald dies sicher möglich ist."
   },
   "ja": {
     "Skip to content": "本文へ移動",
@@ -1571,7 +1585,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "MacHelper → 拡張機能でこのツール → ソースを編集。コード・プロンプト・設定を変更して保存します。マニフェストが実行方式を選び、有効な変更はこの拡張のプロセスだけを置き換えます。",
     "Create or customize with your AI assistant": "AI アシスタントで作成・カスタマイズ",
     "Download the AI extension guide": "AI 拡張ガイドをダウンロード",
-    "Read text you select through macOS Accessibility.": "macOS のアクセシビリティを通して選択テキストを読み取ります。",
     "Legacy clipboard declaration (no shared clipboard reader)": "旧形式のクリップボード権限（共有の読み取り機能はありません）",
     "Send text to your shared AI connection for an explicit action.": "明示的な操作に対し、共通の AI 接続へテキストを送ります。",
     "Display a nearby floating result panel.": "近くに結果のフローティングパネルを表示します。",
@@ -1645,8 +1658,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "JavaScript と Swift を同じ MacHelper 画面で管理。実行・再読み込み方式はマニフェストが選びます。ネイティブソースにはコンパイラーと実行許可が必要です。",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "画面例：文章を選び、推敲結果を確認して適用またはコピー。",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "「適用」をクリックした場合のみ、対応する入力欄の変更されていない選択テキストを置換します。",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "「適用」をクリックした場合に対応エディターへの貼り付けを許可します。クリップボードは結果に置き換わり、そのまま残ります。以前の内容は読み取りません。",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "任意の設定で、初期状態ではオフです。MacHelper → 一般 → Electron アプリとの互換性を改善は、対応アプリに完全なアクセシビリティ情報を要求します。VS Code の折りたたみやミニマップの動作が変わる場合があります。有効にした後はテキストを選択し直してください。"
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "任意の設定で、初期状態ではオフです。MacHelper → 一般 → Electron アプリとの互換性を改善は、対応アプリに完全なアクセシビリティ情報を要求します。VS Code の折りたたみやミニマップの動作が変わる場合があります。有効にした後はテキストを選択し直してください。",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "macOS のアクセシビリティで選択テキストを読み取ります。必要に応じて自動で一時コピーし、安全な場合にクリップボードを復元します。",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "クリップボードのスナップショットは取得処理中のみメモリに保持します。ファイルやログへの保存、AI への送信は行いません。",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "「適用」では確認済みの選択範囲にペーストできます。位置が取得できない場合、「ペースト」は元のウインドウの現在の選択範囲を使用します。どちらのペースト操作でも結果はクリップボードに残ります。",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "アクセシビリティで選択範囲を読み取れない場合、MacHelper は一時的にコピーし、安全に戻せる場合はクリップボードを復元します。"
   },
   "ko": {
     "Skip to content": "본문으로 이동",
@@ -1777,7 +1793,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "MacHelper → 확장 도구에서 이 도구 → 소스 편집을 선택하세요. 코드, 프롬프트, 설정을 바꾸고 저장하세요. 매니페스트가 실행 방식을 결정하며 유효한 변경은 해당 확장의 프로세스만 교체합니다.",
     "Create or customize with your AI assistant": "AI 도우미로 만들거나 맞춤 설정",
     "Download the AI extension guide": "AI 확장 가이드 다운로드",
-    "Read text you select through macOS Accessibility.": "macOS 손쉬운 사용을 통해 선택한 텍스트를 읽습니다.",
     "Legacy clipboard declaration (no shared clipboard reader)": "이전 클립보드 권한 선언(공유 클립보드 읽기 기능 없음)",
     "Send text to your shared AI connection for an explicit action.": "명시적인 작업에서 공통 AI 연결로 텍스트를 전송합니다.",
     "Display a nearby floating result panel.": "근처에 결과를 보여 주는 플로팅 패널을 표시합니다.",
@@ -1851,8 +1866,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "MacHelper는 JavaScript와 Swift를 같은 인터페이스에서 관리합니다. 매니페스트가 실행과 다시 로드를 선택하며 네이티브 코드는 컴파일러와 실행 승인이 필요합니다.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "화면 예시: 텍스트 선택, 결과 검토, 적용 또는 복사.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "적용을 누를 때만 지원되는 입력란에서 변경되지 않은 선택 텍스트를 바꿉니다.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "적용을 클릭할 때만 지원되는 편집기에 붙여넣기를 허용합니다. 클립보드는 결과로 바뀌고 그대로 유지되며, 이전 내용은 읽지 않습니다.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "선택 사항이며 기본값은 꺼짐입니다. MacHelper → 일반 → Electron 앱과의 호환성 개선은 지원 앱에 전체 손쉬운 사용 정보를 요청합니다. VS Code의 코드 접기와 미니맵 동작이 바뀔 수 있습니다. 켠 후 텍스트를 다시 선택하세요."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "선택 사항이며 기본값은 꺼짐입니다. MacHelper → 일반 → Electron 앱과의 호환성 개선은 지원 앱에 전체 손쉬운 사용 정보를 요청합니다. VS Code의 코드 접기와 미니맵 동작이 바뀔 수 있습니다. 켠 후 텍스트를 다시 선택하세요.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "macOS 손쉬운 사용으로 선택 텍스트를 읽고, 필요하면 자동으로 일시 복사한 후 안전할 때 클립보드를 복원합니다.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "클립보드 스냅샷은 읽기 시도 중에만 메모리에 보관됩니다. 파일이나 로그에 저장되거나 AI로 전송되지 않습니다.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "적용은 확인된 선택 영역에 붙여넣을 수 있습니다. 위치를 확인할 수 없으면 붙여넣기는 원래 창에서 현재 선택한 영역을 사용합니다. 두 붙여넣기 작업 모두 클립보드에 결과를 남깁니다.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "손쉬운 사용으로 선택 영역을 읽을 수 없으면 MacHelper가 임시로 복사한 뒤 안전할 때 클립보드를 복원합니다."
   },
   "ar": {
     "Skip to content": "الانتقال إلى المحتوى",
@@ -1983,7 +2001,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "في MacHelper ← الإضافات، اختر هذه الأداة ← تحرير المصدر. عدّل الشيفرة أو التعليمات أو الإعدادات واحفظ. يحدد البيان طريقة التنفيذ، وتستبدل التغييرات الصالحة عملية هذه الإضافة فقط.",
     "Create or customize with your AI assistant": "أنشئ أو خصّص بمساعدة الذكاء الاصطناعي",
     "Download the AI extension guide": "تنزيل دليل إضافات الذكاء الاصطناعي",
-    "Read text you select through macOS Accessibility.": "قراءة النص المحدد عبر تسهيلات الاستخدام في macOS.",
     "Legacy clipboard declaration (no shared clipboard reader)": "إذن حافظة قديم (لا تتوفر وظيفة مشتركة لقراءة الحافظة)",
     "Send text to your shared AI connection for an explicit action.": "إرسال النص إلى اتصال الذكاء الاصطناعي المشترك لإجراء تختاره صراحةً.",
     "Display a nearby floating result panel.": "عرض لوحة نتائج عائمة قريبة.",
@@ -2057,8 +2074,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "تدعم واجهة MacHelper أدوات JavaScript وSwift. يحدد البيان التنفيذ وإعادة التحميل، ويتطلب المصدر الأصلي مترجمًا وإذن تنفيذ.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "معاينة: حدّد النص وراجع التحسين ثم طبّقه أو انسخه.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "استبدال النص المحدد الذي لم يتغير في حقل مدعوم فقط عند النقر على تطبيق.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "السماح باللصق في محرر مدعوم فقط عند النقر على تطبيق. تحل النتيجة محل محتوى الحافظة وتبقى فيها؛ ولا يُقرأ محتواها السابق مطلقًا.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "خيار اختياري ومتوقف افتراضيًا: يطلب MacHelper ← عام ← تحسين التوافق مع تطبيقات Electron معلومات تسهيلات الاستخدام كاملة من التطبيقات الداعمة. قد يغيّر سلوك طيّ التعليمات البرمجية والخريطة المصغّرة في VS Code. أعد تحديد النص بعد التفعيل."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "خيار اختياري ومتوقف افتراضيًا: يطلب MacHelper ← عام ← تحسين التوافق مع تطبيقات Electron معلومات تسهيلات الاستخدام كاملة من التطبيقات الداعمة. قد يغيّر سلوك طيّ التعليمات البرمجية والخريطة المصغّرة في VS Code. أعد تحديد النص بعد التفعيل.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "قراءة النص المحدد عبر تسهيلات الاستخدام في macOS، مع نسخه مؤقتًا تلقائيًا واستعادة الحافظة عندما يكون ذلك آمنًا.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "تبقى لقطات الحافظة في الذاكرة خلال محاولة الالتقاط فقط. لا تُحفظ في ملفات أو سجلات ولا تُرسل إلى الذكاء الاصطناعي مطلقًا.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "يمكن لخيار تطبيق اللصق في تحديد تم التحقق منه. إذا تعذر تحديد موقعه، يستخدم خيار لصق التحديد الحالي في النافذة الأصلية. تبقى النتيجة في الحافظة بعد كلتا عمليتي اللصق.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "إذا تعذرت قراءة التحديد عبر تسهيلات الاستخدام، ينسخه MacHelper مؤقتًا ويستعيد الحافظة عندما يكون ذلك آمنًا."
   },
   "hi": {
     "Skip to content": "मुख्य सामग्री पर जाएँ",
@@ -2189,7 +2209,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "MacHelper → एक्सटेंशन में यह टूल → सोर्स संपादित करें चुनें। कोड, प्रॉम्प्ट या सेटिंग बदलकर सहेजें। मैनिफ़ेस्ट चलाने की विधि चुनता है और सही बदलाव केवल इस एक्सटेंशन की प्रक्रिया बदलता है।",
     "Create or customize with your AI assistant": "AI सहायक से बनाएँ या अनुकूलित करें",
     "Download the AI extension guide": "AI एक्सटेंशन गाइड डाउनलोड करें",
-    "Read text you select through macOS Accessibility.": "macOS सुगम्यता से चुना हुआ टेक्स्ट पढ़ें।",
     "Legacy clipboard declaration (no shared clipboard reader)": "पुरानी क्लिपबोर्ड अनुमति (साझा क्लिपबोर्ड पढ़ने की सुविधा नहीं)",
     "Send text to your shared AI connection for an explicit action.": "स्पष्ट कार्रवाई के लिए टेक्स्ट को साझा AI कनेक्शन पर भेजें।",
     "Display a nearby floating result panel.": "पास में फ़्लोटिंग परिणाम पैनल दिखाएँ।",
@@ -2263,8 +2282,11 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "एक MacHelper इंटरफ़ेस JavaScript और Swift टूल संभालता है। मैनिफ़ेस्ट चलाने और रीलोड की विधि चुनता है; नेटिव स्रोत को कंपाइलर और अनुमति चाहिए।",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "इंटरफ़ेस उदाहरण: पाठ चुनें, सुधार देखें, फिर लागू या कॉपी करें।",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "लागू करें पर क्लिक करने के बाद ही समर्थित संपादन फ़ील्ड में अपरिवर्तित चयन बदलें।",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "लागू करें पर क्लिक करने पर ही समर्थित संपादक में पेस्ट की अनुमति दें। परिणाम क्लिपबोर्ड की जगह लेता है और वहीं रहता है; पिछली सामग्री कभी नहीं पढ़ी जाती।",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "वैकल्पिक और डिफ़ॉल्ट रूप से बंद: MacHelper → सामान्य → Electron ऐप के साथ संगतता बेहतर करें से समर्थित ऐप की पूरी एक्सेसिबिलिटी जानकारी का अनुरोध होता है। इससे VS Code में कोड फ़ोल्डिंग और मिनीमैप का व्यवहार बदल सकता है। चालू करने के बाद पाठ दोबारा चुनें।"
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "वैकल्पिक और डिफ़ॉल्ट रूप से बंद: MacHelper → सामान्य → Electron ऐप के साथ संगतता बेहतर करें से समर्थित ऐप की पूरी एक्सेसिबिलिटी जानकारी का अनुरोध होता है। इससे VS Code में कोड फ़ोल्डिंग और मिनीमैप का व्यवहार बदल सकता है। चालू करने के बाद पाठ दोबारा चुनें।",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "macOS एक्सेसिबिलिटी से चुना हुआ पाठ पढ़ें; जरूरत होने पर स्वचालित रूप से अस्थायी कॉपी करें और सुरक्षित होने पर क्लिपबोर्ड बहाल करें।",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "क्लिपबोर्ड की प्रतियां केवल चयन पढ़ने के प्रयास के दौरान मेमोरी में रहती हैं। उन्हें कभी फ़ाइलों या लॉग में सहेजा नहीं जाता और न ही AI को भेजा जाता है।",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "लागू करें सत्यापित चयन में पेस्ट कर सकता है। जब चयन की स्थिति उपलब्ध न हो, तो पेस्ट मूल विंडो के मौजूदा चयन का उपयोग करता है। दोनों पेस्ट क्रियाएँ परिणाम को क्लिपबोर्ड पर छोड़ती हैं।",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "यदि एक्सेसिबिलिटी चयन को नहीं पढ़ पाती, तो MacHelper उसे अस्थायी रूप से कॉपी करता है और सुरक्षित होने पर क्लिपबोर्ड बहाल करता है।"
   },
   "ru": {
     "Skip to content": "Перейти к содержимому",
@@ -2395,7 +2417,6 @@ window.MARKET_TRANSLATIONS = {
     "In MacHelper → Extensions, choose this installed tool → Edit Source. Change its code, prompts, or settings, then save. MacHelper chooses the runtime from the manifest; a valid saved edit replaces only that extension’s worker.": "В MacHelper → Расширения выберите инструмент → Изменить код. Измените код, промпты или настройки и сохраните. Манифест определяет запуск; корректное изменение заменяет только процесс этого расширения.",
     "Create or customize with your AI assistant": "Создать или настроить с ИИ-помощником",
     "Download the AI extension guide": "Скачать руководство по ИИ-расширениям",
-    "Read text you select through macOS Accessibility.": "Читать выделенный текст через Универсальный доступ macOS.",
     "Legacy clipboard declaration (no shared clipboard reader)": "Устаревшее разрешение буфера обмена (без общего доступа на чтение)",
     "Send text to your shared AI connection for an explicit action.": "Отправлять текст в общее подключение к ИИ для выбранного действия.",
     "Display a nearby floating result panel.": "Показывать плавающую панель результатов рядом.",
@@ -2469,7 +2490,10 @@ window.MARKET_TRANSLATIONS = {
     "One MacHelper interface supports JavaScript and native Swift tools. The manifest selects execution and reload automatically. Native source needs compiler tools and native execution approval.": "Один интерфейс MacHelper поддерживает JavaScript и Swift. Манифест выбирает запуск и перезагрузку; нативному коду нужны компилятор и разрешение.",
     "Interface preview — select text, review the polished result, then Apply or Copy.": "Пример: выделите текст, проверьте результат и примените или скопируйте.",
     "Replace unchanged selected text in a supported editable field only when you click Apply.": "Заменять неизменённый выделенный текст в поддерживаемом поле только после нажатия Применить.",
-    "Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.": "Разрешить вставку в поддерживаемый редактор только по нажатию Применить. Результат заменяет содержимое буфера обмена и остаётся там; прежнее содержимое никогда не читается.",
-    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Необязательно, по умолчанию выключено: MacHelper → Основные → Улучшить совместимость с приложениями Electron запрашивает полную информацию универсального доступа у поддерживаемых приложений. Это может изменить сворачивание кода и мини-карту VS Code. После включения выделите текст заново."
+    "Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.": "Необязательно, по умолчанию выключено: MacHelper → Основные → Улучшить совместимость с приложениями Electron запрашивает полную информацию универсального доступа у поддерживаемых приложений. Это может изменить сворачивание кода и мини-карту VS Code. После включения выделите текст заново.",
+    "Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe.": "Читать выделенный текст через Универсальный доступ macOS с автоматическим временным копированием и восстановлением буфера обмена, когда это безопасно.",
+    "Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.": "Снимки буфера обмена хранятся в памяти только во время попытки захвата. Они никогда не сохраняются в файлы или журналы и не отправляются ИИ.",
+    "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Кнопка «Применить» может вставить результат в проверенное выделение. Когда его позиция неизвестна, кнопка «Вставить» использует текущее выделение в исходном окне. После обеих операций вставки результат остаётся в буфере обмена.",
+    "If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.": "Если Универсальный доступ не может прочитать выделение, MacHelper временно копирует его и восстанавливает буфер обмена, когда это безопасно."
   }
 };

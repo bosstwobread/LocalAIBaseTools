@@ -179,7 +179,7 @@ final class AccessibilitySelectionEditTarget {
     static func capture(_ selection: TextSelection, allowsPaste: Bool = false) -> AccessibilitySelectionEditTarget? {
         let trusted = AXIsProcessTrusted()
         let currentApplication = NSWorkspace.shared.frontmostApplication
-        guard trusted, selection.rangeLocation >= 0,
+        guard trusted, !selection.isClipboardOnly, selection.rangeLocation >= 0,
               let sourceApplication = currentApplication,
               sourceApplication.processIdentifier == selection.sourcePID,
               let identity = SelectionSourceApplicationIdentity(processIdentifier: selection.sourcePID, bundleIdentifier: sourceApplication.bundleIdentifier) else { return nil }

@@ -112,6 +112,121 @@ class InstallAppsTests(unittest.TestCase):
         self.assertTrue(self.legacy.is_dir())
         self.assertEqual((self.destination / "MacHelper.app/Contents/MacOS/MacHelperApp").read_bytes(), b"old-helper")
 
+    def prepare_update(self):
+        source = self.project / "dist/MacHelper.app"
+        target = self.destination / "MacHelper.app"
+        self.make_app(source, installer.MAC_HELPER_ID, "MacHelperApp", b"new")
+        self.make_app(target, installer.MAC_HELPER_ID, "MacHelperApp", b"old")
+        return source, target
+
+    def test_stages_then_quits_running_application_and_reopens_new_bundle(self):
+        source, target = self.prepare_update()
+        events = []
+
+        def quit(bundle):
+            events.append(("quit", (bundle / installer.MAC_HELPER_EXECUTABLE).read_bytes()))
+            staged = list(self.destination.glob(".install-*/MacHelper.app"))
+            self.assertEqual(len(staged), 1)
+            self.assertEqual((staged[0] / installer.MAC_HELPER_EXECUTABLE).read_bytes(), b"new")
+            return True
+
+        def reopen(bundle):
+            events.append(("open", (bundle / installer.MAC_HELPER_EXECUTABLE).read_bytes()))
+
+        with patch.object(installer, "quit_installed_mac_helper", side_effect=quit), \
+                patch.object(installer, "reopen_mac_helper", side_effect=reopen):
+            self.assertEqual(installer.install_app(source, self.destination), target)
+        self.assertEqual(events, [("quit", b"old"), ("open", b"new")])
+
+    def test_update_keeps_closed_helper_closed(self):
+        source, target = self.prepare_update()
+        with patch.object(installer, "quit_installed_mac_helper", return_value=False), \
+                patch.object(installer, "reopen_mac_helper") as reopen:
+            installer.install_app(source, self.destination)
+        reopen.assert_not_called()
+        self.assertEqual((target / installer.MAC_HELPER_EXECUTABLE).read_bytes(), b"new")
+
+    def test_quit_failure_preserves_original_installation(self):
+        source, target = self.prepare_update()
+        with patch.object(installer, "quit_installed_mac_helper", side_effect=RuntimeError("still running")), \
+                patch.object(installer, "reopen_mac_helper") as reopen:
+            with self.assertRaisesRegex(RuntimeError, "still running"):
+                installer.install_app(source, self.destination)
+        reopen.assert_not_called()
+        self.assertEqual((target / installer.MAC_HELPER_EXECUTABLE).read_bytes(), b"old")
+        self.assertEqual(list(self.destination.glob(".install-*")), [])
+
+    def test_failed_swap_restores_and_reopens_running_original(self):
+        source, target = self.prepare_update()
+        rename = Path.rename
+
+        def fail_staged_move(path, dest):
+            if path.name == "MacHelper.app" and path.parent.name.startswith(".install-"):
+                raise OSError("injected swap failure")
+            return rename(path, dest)
+
+        def reopen(bundle):
+            self.assertEqual((bundle / installer.MAC_HELPER_EXECUTABLE).read_bytes(), b"old")
+
+        with patch.object(installer, "quit_installed_mac_helper", return_value=True), \
+                patch.object(Path, "rename", fail_staged_move), \
+                patch.object(installer, "reopen_mac_helper", side_effect=reopen) as opened:
+            with self.assertRaisesRegex(OSError, "injected swap failure"):
+                installer.install_app(source, self.destination)
+        opened.assert_called_once_with(target)
+        self.assertEqual(list(self.destination.glob(".install-*")), [])
+
+    def test_failed_restore_keeps_recoverable_prior_bundle(self):
+        source, target = self.prepare_update()
+        rename = Path.rename
+
+        def fail_after_backup(path, dest):
+            if path.parent.name.startswith(".install-"):
+                raise OSError("injected failure")
+            return rename(path, dest)
+
+        with patch.object(installer, "quit_installed_mac_helper", return_value=True), \
+                patch.object(Path, "rename", fail_after_backup), patch.object(installer, "reopen_mac_helper") as reopen:
+            with self.assertRaisesRegex(RuntimeError, "prior MacHelper is preserved"):
+                installer.install_app(source, self.destination)
+        reopen.assert_not_called()
+        self.assertFalse(target.exists())
+        backup = next(self.destination.glob(".install-*/previous.app"))
+        self.assertEqual((backup / installer.MAC_HELPER_EXECUTABLE).read_bytes(), b"old")
+
+    def test_similarly_named_unrelated_application_is_neither_quit_nor_replaced(self):
+        source = self.project / "dist/MacHelper.app"
+        target = self.destination / "MacHelper.app"
+        self.make_app(source, installer.MAC_HELPER_ID, "MacHelperApp", b"new")
+        self.make_app(target, "com.example.unrelated", "MacHelperApp", b"keep")
+        with patch.object(installer, "quit_installed_mac_helper") as quit:
+            with self.assertRaisesRegex(RuntimeError, "not the expected MacHelper"):
+                installer.install_app(source, self.destination)
+        quit.assert_not_called()
+        self.assertEqual((target / installer.MAC_HELPER_EXECUTABLE).read_bytes(), b"keep")
+
+    def test_ordinary_quit_request_targets_just_the_exact_installed_process(self):
+        bundle = self.destination / "MacHelper.app"
+        executable = bundle / installer.MAC_HELPER_EXECUTABLE
+        output = f"43001 {os.getuid()} {executable}\n43002 {os.getuid()} {executable}Worker\n43003 {os.getuid()+1} {executable}\n"
+        replies = [subprocess.CompletedProcess([], 0, output), subprocess.CompletedProcess([], 0),
+                   subprocess.CompletedProcess([], 0, "")]
+        with patch.object(installer.subprocess, "run", side_effect=replies) as run:
+            self.assertTrue(installer.quit_installed_mac_helper(bundle))
+        request = run.call_args_list[1].args[0]
+        self.assertEqual(request, ["/usr/bin/osascript", "-l", "JavaScript", "-e", installer.QUIT_INSTALLED_APP,
+                                   "43001", installer.MAC_HELPER_ID, str(executable)])
+
+    def test_background_relaunch_waits_for_the_exact_process(self):
+        bundle = self.destination / "MacHelper.app"
+        with patch.object(installer.subprocess, "run") as run, \
+                patch.object(installer, "processes_at", side_effect=[[], [43001]]) as running, \
+                patch.object(installer.time, "sleep"):
+            installer.reopen_mac_helper(bundle)
+        run.assert_called_once_with(["/usr/bin/open", "-g", str(bundle)], check=True)
+        self.assertEqual(running.call_count, 2)
+        running.assert_called_with(bundle / installer.MAC_HELPER_EXECUTABLE)
+
     def test_only_same_user_exact_legacy_executable_receives_sigterm(self):
         executable = self.home / "Applications/LocalAIBaseTools/Translation.app/Contents/MacOS/Translation"
         uid = os.getuid()

@@ -412,7 +412,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = L("Install %@?", preview.manifest.displayName)
         let permissionNames = ["selection.read": "Read selected text across apps", "selection.replace": "Replace selected text only when you click Apply", "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
-                               "selection.paste": "Use the clipboard to paste completed results after Apply",
+                               "selection.paste": "Paste completed results into the original window",
                                "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
                                "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
         let permissions = preview.manifest.permissions.map { "• " + L(permissionNames[$0] ?? $0) }.joined(separator: "\n")

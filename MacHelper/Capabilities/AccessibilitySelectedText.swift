@@ -135,6 +135,13 @@ enum AccessibilitySelectedText {
         return range
     }
 
+    /// Copy capture distinguishes absent selection attributes from an explicit
+    /// caret or malformed range; absence is not permission to edit.
+    static func rangeEvidence(of element: AXUIElement, continuing: () -> Bool,
+                              onTimeout: () -> Void = {}) -> SelectedNumericRangeRead {
+        rangeAttribute(element, continuing: continuing, onTimeout: onTimeout)
+    }
+
     /// Singular range errors cannot silently become plural range evidence.
     /// Only an absent/unsupported singular attribute permits the plural probe.
     static func decodeRange(singular: AccessibilityAttributeRead,
@@ -164,13 +171,14 @@ enum AccessibilitySelectedText {
         return SelectionSpanReader.validRange(result) ? .value(result) : .invalid
     }
 
-    private static func rangeAttribute(_ element: AXUIElement, continuing: () -> Bool) -> SelectedNumericRangeRead {
+    private static func rangeAttribute(_ element: AXUIElement, continuing: () -> Bool,
+                                       onTimeout: () -> Void = {}) -> SelectedNumericRangeRead {
         guard continuing() else { return .invalid }
-        let singular = attribute(kAXSelectedTextRangeAttribute, element)
+        let singular = attribute(kAXSelectedTextRangeAttribute, element, onTimeout: onTimeout)
         guard continuing() else { return .invalid }
         let result = decodeRange(singular: singular) {
             guard continuing() else { return .invalid }
-            return attribute(kAXSelectedTextRangesAttribute, element)
+            return attribute(kAXSelectedTextRangesAttribute, element, onTimeout: onTimeout)
         }
         return continuing() ? result : .invalid
     }
@@ -214,16 +222,16 @@ enum AccessibilitySelectedText {
         return .text(text)
     }
 
-    static func isProtected(_ element: AXUIElement) -> Bool {
+    static func isProtected(_ element: AXUIElement, onTimeout: () -> Void = {}) -> Bool {
         AXUIElementSetMessagingTimeout(element, 0.10)
-        switch attribute(kAXSubroleAttribute, element) {
+        switch attribute(kAXSubroleAttribute, element, onTimeout: onTimeout) {
         case .invalid: return true
         case .missing: break
         case .value(let value):
             guard CFGetTypeID(value) == CFStringGetTypeID(), let subrole = value as? String else { return true }
             if subrole == kAXSecureTextFieldSubrole { return true }
         }
-        switch attribute("AXProtectedContent", element) {
+        switch attribute("AXProtectedContent", element, onTimeout: onTimeout) {
         case .missing: return false
         case .invalid: return true
         case .value(let value):
@@ -232,9 +240,11 @@ enum AccessibilitySelectedText {
         }
     }
 
-    private static func attribute(_ name: String, _ element: AXUIElement) -> AccessibilityAttributeRead {
+    private static func attribute(_ name: String, _ element: AXUIElement,
+                                  onTimeout: () -> Void = {}) -> AccessibilityAttributeRead {
         var value: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        if status == .cannotComplete { onTimeout() }
         if status == .attributeUnsupported || status == .noValue { return .missing }
         guard status == .success, let value else { return .invalid }
         return .value(value)

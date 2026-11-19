@@ -22,7 +22,7 @@ struct CapabilityOperationGate {
         let operation: UInt64
         let selection: UInt64
     }
-    private var generation: UInt64 = 0
+    private(set) var generation: UInt64 = 0
     private var active: Ticket?
 
     mutating func begin(selectionGeneration: UInt64) -> Ticket {
@@ -119,7 +119,17 @@ public final class SelectionActionCapability {
     private var operationGate = CapabilityOperationGate()
     private var actions: [CapabilitySelectionAction] = []
     private var routing = SelectionActionRouting()
-    private var editTarget: AccessibilitySelectionEditTarget?
+    private enum EditTarget {
+        case exact(AccessibilitySelectionEditTarget)
+        case menu(SelectionMenuPasteTarget, original: TextSelection, context: UInt64)
+
+        var usesMenu: Bool {
+            if case .menu = self { return true }
+            return false
+        }
+    }
+
+    private var editTarget: EditTarget?
     private var completedSelectionGeneration: UInt64?
 
     public init(title: String, systemSymbolName: String = "character.bubble") {
@@ -217,13 +227,31 @@ public final class SelectionActionCapability {
         }
         operationTask?.cancel()
         let ticket = operationGate.begin(selectionGeneration: state.generation)
-        editTarget = action?.allowsReplacement == true ? AccessibilitySelectionEditTarget.capture(selection, allowsPaste: action?.allowsPaste == true) : nil
+        editTarget = nil
         completedSelectionGeneration = nil
         panels.configureReplacement(allowed: action?.allowsReplacement == true, available: editTarget != nil)
         panels.showLoading(near: selection.bounds)
         operationTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let selection = await self.monitor.recoverAXProof(for: selection) { [weak self] candidate in
+                    guard let self, self.operationGate.accepts(ticket, selection: self.state,
+                        running: self.isRunning, cancelled: Task.isCancelled) else { return false }
+                    return self.state.promoteAXProof(from: selection, to: candidate, contextIsCurrent: true)
+                }
+                guard self.operationGate.accepts(ticket, selection: self.state,
+                    running: self.isRunning, cancelled: Task.isCancelled) else { return }
+                guard let selection else { self.dismiss(); return }
+                if action?.allowsReplacement == true {
+                    if let exact = AccessibilitySelectionEditTarget.capture(selection, allowsPaste: action?.allowsPaste == true) {
+                        self.editTarget = .exact(exact)
+                    } else if action?.allowsPaste == true, selection.isClipboardOnly {
+                        let menu = await self.monitor.menuPasteTarget(for: selection)
+                        guard self.operationGate.accepts(ticket, selection: self.state,
+                            running: self.isRunning, cancelled: Task.isCancelled) else { return }
+                        if let menu { self.editTarget = .menu(menu.target, original: selection, context: menu.context) }
+                    }
+                }
                 let input = await self.monitor.input(for: selection)
                 guard self.operationGate.accepts(ticket, selection: self.state,
                                                 running: self.isRunning, cancelled: Task.isCancelled) else { return }
@@ -249,6 +277,12 @@ public final class SelectionActionCapability {
                 guard result.text.utf8.count <= CapabilityFrame.maximumBytes else {
                     throw CapabilityError.invalid(L("The tool returned too much text to display."))
                 }
+                if case let .menu(_, original, context) = self.editTarget,
+                   !self.monitor.isCurrentMenuPasteSelection(original, context: context) {
+                    self.editTarget = nil
+                }
+                self.panels.configureReplacement(allowed: action?.allowsReplacement == true, available: self.editTarget != nil,
+                                                 usesMenuPaste: self.editTarget?.usesMenu == true)
                 self.operationGate.finish(ticket)
                 self.completedSelectionGeneration = selection == self.state.selection ? self.state.generation : nil
                 self.panels.showResult(result, near: selection.bounds)
@@ -268,15 +302,27 @@ public final class SelectionActionCapability {
             panels.replacementFailed(L("The original selection changed. Select the text again, or use Copy."))
             return
         }
+        // Consume the completed preview before any OS operation. An ambiguous
+        // editor response or another click must never dispatch a second paste.
+        let operation = operationGate.generation
+        editTarget = nil
+        completedSelectionGeneration = nil
         do {
-            let outcome = try target.replace(with: text) { [weak self, weak target] in
-                guard let self, let target else { return false }
-                return self.isRunning && self.state.acceptsResult(for: generation) && self.completedSelectionGeneration == generation && self.editTarget === target
+            let isCurrent = { [weak self] in
+                guard let self else { return false }
+                return self.isRunning && self.operationGate.generation == operation && self.state.acceptsResult(for: generation)
             }
-            editTarget = nil; completedSelectionGeneration = nil
+            let outcome: SelectionReplacementOutcome
+            switch target {
+            case .exact(let exact):
+                outcome = try exact.replace(with: text, validateInvocation: isCurrent)
+            case let .menu(menu, original, context):
+                outcome = try menu.paste(text, originalText: original.text) { [weak self] in
+                    isCurrent() && self?.monitor.isCurrentMenuPasteSelection(original, context: context) == true
+                }
+            }
             panels.replacementSucceeded(outcome)
         } catch {
-            editTarget = nil; completedSelectionGeneration = nil
             panels.replacementFailed(error.localizedDescription)
         }
     }

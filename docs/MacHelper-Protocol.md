@@ -30,7 +30,7 @@ When `systemPrompt` is supplied, `text` is opaque extension-prepared data and ma
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"6.6.2","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.7.3","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -38,7 +38,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"6.6.2","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.7.3","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.
@@ -49,7 +49,7 @@ Browser clients need explicit extension-ID registration. Native clients omit the
 
 The source-worker bridge uses its own framed process connection and generation identifiers. Source changes create a replacement worker after candidate validation; the host cancels stopped generations and ignores their stale responses. Extension JavaScript only receives declared capabilities and frozen package resources, not the helper executable path or this native-client authority. Browsing a catalog, enabling a source tool, and selecting text do not authorize AI inference; an explicit tool action is required.
 
-Do not auto-send, paste without an explicit approved Apply action, collect entire documents, or log private content. Clipboard-assisted Apply belongs to the source host’s separately approved `selection.paste` capability, not this framed AI transport; it provides no general clipboard or keyboard endpoint. Treat all selected/source text as untrusted input; display it as text, not executable HTML. Keep provider settings UI in MacHelper so more tools can share one configuration.
+Do not auto-send, paste without an explicit approved Apply or Paste action, collect entire documents, or log private content. Clipboard-assisted Apply and current-selection Paste belong to the source host’s separately approved `selection.paste` capability, not this framed AI transport; it provides no general clipboard or keyboard endpoint. Treat all selected/source text as untrusted input; display it as text, not executable HTML. Keep provider settings UI in MacHelper so more tools can share one configuration.
 
 ## Extension discovery (MacHelper 6.3)
 
@@ -65,7 +65,7 @@ This native action remains available for compatible local clients, including his
 {
   "id": "discovery-example",
   "ok": true,
-  "version": "6.6.2",
+  "version": "6.7.3",
   "search": {
     "revision": "<64 lowercase hexadecimal characters>",
     "updatedAt": "2026-11-17T00:00:00Z",
@@ -92,9 +92,9 @@ The website’s AI search action is **Find with AI**. First validate the need lo
 
 | Request | Authentication and body | Success response |
 | --- | --- | --- |
-| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.6.2",protocolVersion:1}` |
+| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.7.3",protocolVersion:1}` |
 | `POST /v1/session` | Client/Origin/Host headers; `{}` | `{ok:true,token:"<opaque random token>",expiresIn:1800}` |
-| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.6.2",search:<discovery result>}` |
+| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.7.3",search:<discovery result>}` |
 | `POST /v1/cancel` | `Authorization: Bearer <token>`; `{requestId}` | `{ok:true,cancelled:<boolean>}` |
 
 `requestId` is 1–80 ASCII letters, digits, `_`, or `-`. Search `query` has the native discovery bounds above: nonblank, no NUL, at most 2,000 UTF-16 units and 8,000 UTF-8 bytes. `language` uses the supported interface codes above. Additional fields are rejected. The `search` object follows the revision/model/matches contract above; results are terminal, rather than streamed. Only an explicit **Find with AI** action may start ranking.

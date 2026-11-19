@@ -78,14 +78,18 @@ enum AccessibilityFocusResolver {
         return path
     }
 
-    static func resolve(application: AXUIElement, systemWide: Bool = false) -> SelectionFocusResolution<AXUIElement> {
+    static func resolve(application: AXUIElement, systemWide: Bool = false,
+                        onTimeout: @escaping () -> Void = {}) -> SelectionFocusResolution<AXUIElement> {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.8
-        func withinBudget() -> Bool { ProcessInfo.processInfo.systemUptime < deadline }
+        func withinBudget() -> Bool {
+            if ProcessInfo.processInfo.systemUptime >= deadline { onTimeout(); return false }
+            return true
+        }
         let root = systemWide ? AXUIElementCreateSystemWide() : application
-        let reader = SelectionFocusReader<AXUIElement>(focusedChild: focusLink,
-            isProtected: { AccessibilitySelectedText.isProtected($0) },
+        let reader = SelectionFocusReader<AXUIElement>(focusedChild: { focusLink($0, onTimeout: onTimeout) },
+            isProtected: { AccessibilitySelectedText.isProtected($0, onTimeout: onTimeout) },
             sameElement: { CFEqual($0, $1) }, canRead: withinBudget)
-        let result = reader.resolveRoot(focusLink(root), validAnchor: { anchor in
+        let result = reader.resolveRoot(focusLink(root, onTimeout: onTimeout), validAnchor: { anchor in
             guard withinBudget() else { return false }
             guard systemWide else { return true }
             // The system focus is useful only when it belongs to this exact
@@ -105,10 +109,11 @@ enum AccessibilityFocusResolver {
         captured.matches(read(application: application, systemWide: captured.systemWide), sameElement: { CFEqual($0, $1) })
     }
 
-    private static func focusLink(_ element: AXUIElement) -> SelectionFocusLink<AXUIElement> {
+    private static func focusLink(_ element: AXUIElement, onTimeout: () -> Void) -> SelectionFocusLink<AXUIElement> {
         AXUIElementSetMessagingTimeout(element, 0.10)
         var value: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &value)
+        if status == .cannotComplete { onTimeout() }
         if status == .attributeUnsupported || status == .noValue { return .leaf }
         guard status == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return .invalid }
         return .element(value as! AXUIElement)

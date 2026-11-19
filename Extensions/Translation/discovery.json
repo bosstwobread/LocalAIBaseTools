@@ -28,7 +28,8 @@
   ],
   "limitations": [
     "Requires macOS Accessibility permission and selectable text.",
-    "Cannot translate text inside images or protected fields."
+    "Cannot translate text inside images or protected fields.",
+    "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort."
   ],
   "platforms": [
     "macOS"
@@ -59,7 +60,8 @@
       "Translate text while I read in a Mac app.": "在 Mac 应用阅读时翻译文字。",
       "Show a Chinese translation beside selected text.": "在所选文字旁显示中文翻译。",
       "Requires macOS Accessibility permission and selectable text.": "需要 macOS 辅助功能权限和可选中的文字。",
-      "Cannot translate text inside images or protected fields.": "无法翻译图片内或受保护字段中的文字。"
+      "Cannot translate text inside images or protected fields.": "无法翻译图片内或受保护字段中的文字。",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "辅助功能无法读取选区时，MacHelper 6.7+ 可自动临时复制并恢复剪贴板。仅通过剪贴板取得的文字只提供预览和复制；会尽力恢复剪贴板，但不能保证完全还原。"
     },
     "zh-Hant": {
       "Translate selected text with editable local scripts and prompts.": "用可編輯的本機指令碼及提示詞翻譯選取文字。",
@@ -80,7 +82,8 @@
       "Translate text while I read in a Mac app.": "在 Mac App 閱讀時翻譯文字。",
       "Show a Chinese translation beside selected text.": "在所選文字旁顯示中文翻譯。",
       "Requires macOS Accessibility permission and selectable text.": "需要 macOS 輔助使用權限和可選取的文字。",
-      "Cannot translate text inside images or protected fields.": "無法翻譯圖片內或受保護欄位中的文字。"
+      "Cannot translate text inside images or protected fields.": "無法翻譯圖片內或受保護欄位中的文字。",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "輔助使用無法讀取選取範圍時，MacHelper 6.7+ 可自動暫時複製並還原剪貼簿。僅透過剪貼簿取得的文字只提供預覽與複製；會盡力還原剪貼簿，但無法保證完整還原。"
     },
     "es": {
       "Translate selected text with editable local scripts and prompts.": "Traduce texto seleccionado con scripts e instrucciones locales editables.",
@@ -101,7 +104,8 @@
       "Translate text while I read in a Mac app.": "Traduce texto mientras leo en una app de Mac.",
       "Show a Chinese translation beside selected text.": "Muestra una traducción al chino junto al texto seleccionado.",
       "Requires macOS Accessibility permission and selectable text.": "Requiere permiso de Accesibilidad de macOS y texto seleccionable.",
-      "Cannot translate text inside images or protected fields.": "No traduce texto dentro de imágenes ni campos protegidos."
+      "Cannot translate text inside images or protected fields.": "No traduce texto dentro de imágenes ni campos protegidos.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 o posterior puede copiar y restaurar automáticamente el portapapeles cuando Accesibilidad no puede leer una selección. Las capturas obtenidas solo del portapapeles permiten previsualizar y copiar; la restauración no está garantizada."
     },
     "fr": {
       "Translate selected text with editable local scripts and prompts.": "Traduisez le texte sélectionné avec des scripts et instructions locaux modifiables.",
@@ -122,7 +126,8 @@
       "Translate text while I read in a Mac app.": "Traduire du texte pendant ma lecture dans une app Mac.",
       "Show a Chinese translation beside selected text.": "Afficher une traduction chinoise à côté du texte sélectionné.",
       "Requires macOS Accessibility permission and selectable text.": "Nécessite l’autorisation Accessibilité de macOS et du texte sélectionnable.",
-      "Cannot translate text inside images or protected fields.": "Ne traduit pas le texte dans les images ou les champs protégés."
+      "Cannot translate text inside images or protected fields.": "Ne traduit pas le texte dans les images ou les champs protégés.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 ou ultérieur peut copier temporairement une sélection et restaurer automatiquement le presse-papiers si Accessibilité ne peut pas la lire. Les captures obtenues uniquement par le presse-papiers permettent un aperçu et une copie ; la restauration reste sans garantie."
     },
     "de": {
       "Translate selected text with editable local scripts and prompts.": "Markierten Text mit bearbeitbaren lokalen Skripten und Prompts übersetzen.",
@@ -143,7 +148,8 @@
       "Translate text while I read in a Mac app.": "Text beim Lesen in einer Mac-App übersetzen.",
       "Show a Chinese translation beside selected text.": "Eine chinesische Übersetzung neben dem markierten Text anzeigen.",
       "Requires macOS Accessibility permission and selectable text.": "Erfordert macOS-Bedienungshilfen und auswählbaren Text.",
-      "Cannot translate text inside images or protected fields.": "Übersetzt keinen Text in Bildern oder geschützten Feldern."
+      "Cannot translate text inside images or protected fields.": "Übersetzt keinen Text in Bildern oder geschützten Feldern.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 oder neuer kann automatisch vorübergehend kopieren und die Zwischenablage wiederherstellen, wenn die Bedienungshilfen eine Auswahl nicht lesen können. Nur über die Zwischenablage erfasste Inhalte erlauben Vorschau und Kopieren; die Wiederherstellung ist nicht garantiert."
     },
     "ja": {
       "Translate selected text with editable local scripts and prompts.": "編集可能なローカルスクリプトとプロンプトで選択テキストを翻訳。",
@@ -164,7 +170,8 @@
       "Translate text while I read in a Mac app.": "Macアプリで読みながらテキストを翻訳する。",
       "Show a Chinese translation beside selected text.": "選択したテキストの横に中国語訳を表示する。",
       "Requires macOS Accessibility permission and selectable text.": "macOSのアクセシビリティ権限と選択可能なテキストが必要です。",
-      "Cannot translate text inside images or protected fields.": "画像内や保護されたフィールドの文字は翻訳できません。"
+      "Cannot translate text inside images or protected fields.": "画像内や保護されたフィールドの文字は翻訳できません。",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 以降は、アクセシビリティで選択範囲を読み取れない場合に自動で一時コピーし、クリップボードの復元を試みます。クリップボードのみで取得したテキストは、プレビューとコピーを利用できます。完全な復元は保証されません。"
     },
     "ko": {
       "Translate selected text with editable local scripts and prompts.": "편집 가능한 로컬 스크립트와 프롬프트로 선택 텍스트를 번역합니다.",
@@ -185,7 +192,8 @@
       "Translate text while I read in a Mac app.": "Mac 앱에서 읽는 동안 텍스트를 번역해 주세요.",
       "Show a Chinese translation beside selected text.": "선택한 텍스트 옆에 중국어 번역을 표시해 주세요.",
       "Requires macOS Accessibility permission and selectable text.": "macOS 손쉬운 사용 권한과 선택 가능한 텍스트가 필요합니다.",
-      "Cannot translate text inside images or protected fields.": "이미지나 보호된 필드 안의 텍스트는 번역할 수 없습니다."
+      "Cannot translate text inside images or protected fields.": "이미지나 보호된 필드 안의 텍스트는 번역할 수 없습니다.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 이상은 손쉬운 사용으로 선택 영역을 읽을 수 없을 때 자동으로 일시 복사한 후 클립보드 복원을 시도할 수 있습니다. 클립보드로만 읽은 텍스트에는 미리보기와 복사만 제공되며, 복원이 보장되지는 않습니다."
     },
     "pt": {
       "Translate selected text with editable local scripts and prompts.": "Traduza texto selecionado com scripts e prompts locais editáveis.",
@@ -206,7 +214,8 @@
       "Translate text while I read in a Mac app.": "Traduza texto enquanto leio em um app do Mac.",
       "Show a Chinese translation beside selected text.": "Mostre uma tradução em chinês ao lado do texto selecionado.",
       "Requires macOS Accessibility permission and selectable text.": "Requer permissão de Acessibilidade do macOS e texto selecionável.",
-      "Cannot translate text inside images or protected fields.": "Não traduz texto em imagens ou campos protegidos."
+      "Cannot translate text inside images or protected fields.": "Não traduz texto em imagens ou campos protegidos.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "O MacHelper 6.7 ou posterior pode copiar temporariamente e restaurar automaticamente a área de transferência quando a Acessibilidade não consegue ler uma seleção. As capturas obtidas apenas pela área de transferência permitem pré-visualizar e copiar; o restauro não é garantido."
     },
     "ar": {
       "Translate selected text with editable local scripts and prompts.": "ترجمة النص المحدد بسكربتات وتعليمات محلية قابلة للتحرير.",
@@ -227,7 +236,8 @@
       "Translate text while I read in a Mac app.": "ترجم النص أثناء قراءتي في تطبيق على Mac.",
       "Show a Chinese translation beside selected text.": "اعرض ترجمة صينية بجانب النص المحدد.",
       "Requires macOS Accessibility permission and selectable text.": "يتطلب إذن تسهيلات الاستخدام في macOS ونصًا قابلاً للتحديد.",
-      "Cannot translate text inside images or protected fields.": "لا يترجم النص داخل الصور أو الحقول المحمية."
+      "Cannot translate text inside images or protected fields.": "لا يترجم النص داخل الصور أو الحقول المحمية.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "يمكن لـ MacHelper 6.7 أو أحدث النسخ مؤقتًا واستعادة الحافظة تلقائيًا عندما تتعذر قراءة التحديد عبر تسهيلات الاستخدام. تتيح النصوص الملتقطة عبر الحافظة فقط المعاينة والنسخ؛ والاستعادة تتم بأفضل جهد دون ضمان."
     },
     "hi": {
       "Translate selected text with editable local scripts and prompts.": "संपादन योग्य स्थानीय स्क्रिप्ट और प्रॉम्प्ट से चुना टेक्स्ट अनुवाद करें।",
@@ -248,7 +258,8 @@
       "Translate text while I read in a Mac app.": "Mac ऐप में पढ़ते समय पाठ का अनुवाद करें।",
       "Show a Chinese translation beside selected text.": "चुने हुए पाठ के पास चीनी अनुवाद दिखाएँ।",
       "Requires macOS Accessibility permission and selectable text.": "macOS की एक्सेसिबिलिटी अनुमति और चयन योग्य पाठ आवश्यक हैं।",
-      "Cannot translate text inside images or protected fields.": "छवियों या सुरक्षित फ़ील्ड के अंदर का पाठ अनुवाद नहीं कर सकता।"
+      "Cannot translate text inside images or protected fields.": "छवियों या सुरक्षित फ़ील्ड के अंदर का पाठ अनुवाद नहीं कर सकता।",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "एक्सेसिबिलिटी चयन न पढ़ पाए तो MacHelper 6.7 या नया संस्करण उसे अपने-आप अस्थायी रूप से कॉपी करके क्लिपबोर्ड बहाल करने का प्रयास कर सकता है। केवल क्लिपबोर्ड से मिले पाठ में पूर्वावलोकन और कॉपी ही उपलब्ध हैं; बहाली की गारंटी नहीं है।"
     },
     "ru": {
       "Translate selected text with editable local scripts and prompts.": "Перевод выделенного текста с редактируемыми локальными скриптами и промптами.",
@@ -269,7 +280,8 @@
       "Translate text while I read in a Mac app.": "Переводить текст при чтении в приложении Mac.",
       "Show a Chinese translation beside selected text.": "Показать перевод на китайский рядом с выделенным текстом.",
       "Requires macOS Accessibility permission and selectable text.": "Требуется разрешение универсального доступа macOS и выделяемый текст.",
-      "Cannot translate text inside images or protected fields.": "Не переводит текст внутри изображений или защищённых полей."
+      "Cannot translate text inside images or protected fields.": "Не переводит текст внутри изображений или защищённых полей.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 или новее может автоматически временно копировать выделение и восстанавливать буфер обмена, если Универсальный доступ не может его прочитать. Для текста, полученного только через буфер обмена, доступны предпросмотр и копирование; восстановление не гарантируется."
     },
     "it": {
       "Translate selected text with editable local scripts and prompts.": "Traduci testo selezionato con script e prompt locali modificabili.",
@@ -290,7 +302,8 @@
       "Translate text while I read in a Mac app.": "Traduci il testo mentre leggo in un’app Mac.",
       "Show a Chinese translation beside selected text.": "Mostra una traduzione cinese accanto al testo selezionato.",
       "Requires macOS Accessibility permission and selectable text.": "Richiede l’autorizzazione Accessibilità di macOS e testo selezionabile.",
-      "Cannot translate text inside images or protected fields.": "Non traduce il testo nelle immagini o nei campi protetti."
+      "Cannot translate text inside images or protected fields.": "Non traduce il testo nelle immagini o nei campi protetti.",
+      "MacHelper 6.7+ can automatically copy and restore the clipboard when Accessibility cannot read a selection. Clipboard-only captures offer preview and Copy; restoration is best effort.": "MacHelper 6.7 o successivo può copiare temporaneamente e ripristinare automaticamente gli appunti quando Accessibilità non riesce a leggere una selezione. I testi acquisiti solo dagli appunti consentono anteprima e copia; il ripristino non è garantito."
     }
   }
 }

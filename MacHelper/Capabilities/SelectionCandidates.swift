@@ -115,18 +115,23 @@ struct AccessibilitySelectionOrigin: @unchecked Sendable, Equatable {
         return continuing() && process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication)
     }
 
-    static func hit(in application: AXUIElement, at point: CGPoint) -> AXUIElement? {
+    static func hit(in application: AXUIElement, at point: CGPoint, onTimeout: () -> Void = {}) -> AXUIElement? {
         guard point.x.isFinite, point.y.isFinite else { return nil }
         AXUIElementSetMessagingTimeout(application, 0.12)
         var result: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(application, Float(point.x), Float(point.y), &result) == .success else { return nil }
+        let status = AXUIElementCopyElementAtPosition(application, Float(point.x), Float(point.y), &result)
+        if status == .cannotComplete { onTimeout() }
+        guard status == .success else { return nil }
         return result
     }
 
-    static func window(in application: AXUIElement, attribute: SelectionWindowAttribute) -> AXUIElement? {
+    static func window(in application: AXUIElement, attribute: SelectionWindowAttribute,
+                       onTimeout: () -> Void = {}) -> AXUIElement? {
         AXUIElementSetMessagingTimeout(application, 0.10)
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(application, attribute.rawValue as CFString, &value) == .success,
+        let status = AXUIElementCopyAttributeValue(application, attribute.rawValue as CFString, &value)
+        if status == .cannotComplete { onTimeout() }
+        guard status == .success,
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }

@@ -151,7 +151,7 @@ test('clipboard-assisted Apply access is explained in every language without tou
       writeText: async () => { clipboardWrites++; }
     } });
   } });
-  const label = 'Allow explicit Apply to paste into a supported editor. This replaces your clipboard with the result and keeps it there; previous clipboard contents are never read.';
+  const label = 'Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.';
   try {
     view.window.location.hash = '#extension/polish-input';
     await until(() => view.document.querySelector('#tool-dialog').open);

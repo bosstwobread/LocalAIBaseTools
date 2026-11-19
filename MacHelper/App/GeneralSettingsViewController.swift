@@ -84,7 +84,19 @@ final class GeneralSettingsViewController: NSViewController {
         compatibility.orientation = .vertical
         compatibility.alignment = .leading
         compatibility.spacing = 10
-        let stack = NSStackView(views: [header, language, startup, compatibility])
+        let fallbackTitle = NSTextField(labelWithString: L("Automatic selection fallback"))
+        fallbackTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        let fallbackNote = NSTextField(wrappingLabelWithString: L("If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe."))
+        let fallbackPrivacy = NSTextField(wrappingLabelWithString: L("Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI."))
+        for label in [fallbackNote, fallbackPrivacy] {
+            label.font = .systemFont(ofSize: 12)
+            label.textColor = .secondaryLabelColor
+        }
+        let fallback = NSStackView(views: [fallbackTitle, fallbackNote, fallbackPrivacy])
+        fallback.orientation = .vertical
+        fallback.alignment = .leading
+        fallback.spacing = 10
+        let stack = NSStackView(views: [header, language, startup, compatibility, fallback])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 28
@@ -113,6 +125,9 @@ final class GeneralSettingsViewController: NSViewController {
             compatibilityNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
             compatibilityEffects.widthAnchor.constraint(equalTo: stack.widthAnchor),
             compatibilityReset.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            fallback.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            fallbackNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            fallbackPrivacy.widthAnchor.constraint(equalTo: stack.widthAnchor),
             subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor),
             status.widthAnchor.constraint(equalTo: stack.widthAnchor),
             note.widthAnchor.constraint(equalTo: stack.widthAnchor)

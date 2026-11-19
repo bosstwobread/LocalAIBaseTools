@@ -29,16 +29,37 @@ repeat install clicks. Both current tools run through MacHelper without a
 browser extension. MacHelper 6.6 adds a shared Translate/Polish selection toolbar;
 6.6.1 presents separate icons with nonoverlapping click areas, localized tooltips,
 and an ellipsis menu when more than five actions are enabled.
-MacHelper 6.6.2 also hides the waiting toolbar while Command is held; releasing
+MacHelper also hides the waiting toolbar while Command is held; releasing
 Command alone does not reopen it, while an existing result panel stays open.
+Keyboard selections such as Command-A are latched at key-down and wait for both
+keys to be released, in either order. MacHelper 6.7.2 reads the Command flag on
+the next mouse gesture even if a prior key release was missed. A timed-out
+Accessibility source check after Copy gets a bounded recheck of the same
+selection context without another clipboard operation.
 Its bounded Accessibility reader checks the selected mouse location, fixed
 application/system-focus routes, and focused/main window or application selection
 providers. It reads only verified selected numeric or marker spans, including
 same-range attributed-text fallback; it never crawls arbitrary descendants or
-reads an entire document to find a selection. Apps without usable Accessibility
-selection data remain unsupported. There is no simulated Copy, macOS Services,
-or OCR capture fallback and no screen-reading permission request. These shared
-host changes need no extension source update.
+reads an entire document to find a selection. MacHelper 6.7 adds an automatic
+fixed Copy fallback after recognized selection gestures when Accessibility cannot
+read the selection. It snapshots bounded, stable, fully readable clipboard data
+in memory, reads only newly copied text, then restores only while that clipboard
+state still belongs to the attempt. Before Copy, at most three bounded preparation
+checks allow the same gesture’s menu/clipboard to settle, with 60 milliseconds
+of clipboard quiet and a 0.5-second snapshot budget. Once Copy is attempted, it
+is never retried. No manual switch is required; ordinary clicks,
+activation, and polling never trigger Copy. Protected fields, explicit carets,
+invalid/stale contexts, and unreadable or oversized clipboards skip the fallback.
+Text obtained solely by Copy has no numeric editing proof or sentence context.
+At tool click, a fresh matching Accessibility read can recover the original
+control’s numeric range and origin only while the original context is unchanged;
+all normal editing checks still apply. When neither exact Apply nor a separately approved current-selection Paste is available, the completed preview offers Copy and explains why replacement is unavailable.
+Coverage and restoration are best effort, and clipboard-history tools may see the
+temporary change. There is no macOS Services or OCR capture fallback and no
+screen-reading permission request. These shared host changes need no extension
+behavior change.
+MacHelper 6.7.3 can offer **Paste** for a clipboard-captured selection in the original editable window when its standard Cut and Paste commands are available. Paste targets the current selection and leaves the result on the clipboard. **Copy** remains available.
+
 Polish-input streams a preview; **Apply** replaces only a still-unchanged selection
 in a supported editable field, while **Copy** is available for other selections.
 MacHelper identifies supported web editors through a bounded Accessibility
@@ -46,14 +67,13 @@ parent-chain check, including editors embedded in desktop apps. These select
 approved paste before any write because an advertised selected-text setter may
 ignore direct edits. Verified native controls prefer direct selected-text editing;
 if the bounded check cannot determine the editor type, only approved paste is
-eligible with the same strict editable-field and selection checks. Fields without
-that evidence keep Copy. Every paste route still needs approval and sufficient
-editable-field evidence. A tool with separately approved
+eligible with the same strict editable-field and selection checks. That Apply route requires numeric selection evidence. A tool with separately approved
 `selection.paste` access may use clipboard-assisted Apply in a supported editor:
 only after you click **Apply**, MacHelper rechecks the original app, focused field,
 selection range, and exact text, writes the completed result to the clipboard,
 and sends the fixed Paste shortcut to that app. This replaces the clipboard and
-leaves the result there; previous clipboard contents are never read or restored.
+leaves the result there; this Apply transaction never reads or restores previous
+clipboard contents. Automatic selection capture is a separate guarded operation.
 It does not retry a failed direct edit by pasting, or press Enter or Send. Changed, protected, read-only, or unsupported
 targets retain **Copy** for manual use. Previewing or selecting text never applies
 an edit. The illustration shows one fully selected example field. Editor support
@@ -97,7 +117,7 @@ guarantee that an editor supports Apply.
   automatic. The no-JavaScript hero displays the completed example. All
   placements omit the progress bar and duration/example-content footer;
   the accessible summary still identifies the illustration as an example.
-- `marketplace.config.json`: public URL, MacHelper 6.6 release metadata, visual display metadata (categories, artwork, and screenshots), and explicitly retired source folders.
+- `marketplace.config.json`: public URL, MacHelper download metadata, visual display metadata (categories, artwork, and screenshots), and explicitly retired source folders.
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
   while the current catalog lists only the latest versions. This includes the

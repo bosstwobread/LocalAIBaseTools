@@ -126,10 +126,13 @@ struct TextSelection: Equatable, Sendable {
     /// AppKit global coordinates, in screen points.
     let bounds: CGRect
     var accessibilityOrigin: AccessibilitySelectionOrigin? = nil
+    /// Copy fallback proves readable content, never an editable numeric span.
+    var isClipboardOnly = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.sourcePID == rhs.sourcePID && lhs.rangeLocation == rhs.rangeLocation && lhs.rangeLength == rhs.rangeLength &&
-            lhs.bounds == rhs.bounds && lhs.text.utf16.elementsEqual(rhs.text.utf16) && lhs.accessibilityOrigin == rhs.accessibilityOrigin
+            lhs.bounds == rhs.bounds && lhs.text.utf16.elementsEqual(rhs.text.utf16) &&
+            lhs.accessibilityOrigin == rhs.accessibilityOrigin && lhs.isClipboardOnly == rhs.isClipboardOnly
     }
 }
 
@@ -167,6 +170,17 @@ struct SelectionState {
     /// preview/Copy through those polling updates; a deliberate gesture or
     /// outside dismissal ends this retention, without permitting another Apply.
     mutating func retainPreviewAfterApply() { retainsAppliedPreview = true }
+
+    /// Refresh independent proof for the same action without treating it as
+    /// another user selection or cancelling the operation that requested it.
+    mutating func promoteAXProof(from original: TextSelection, to candidate: TextSelection,
+                                contextIsCurrent: Bool) -> Bool {
+        guard !dismissed, selection == original,
+              let verified = SelectionPromotion.verifiedAXSelection(from: original,
+                  candidate: candidate, contextIsCurrent: contextIsCurrent) else { return false }
+        selection = verified
+        return true
+    }
 
     /// Only real selection gestures rearm a dismissed selection. Timer reads,
     /// geometry changes, and intermittent AX availability cannot bring it back.

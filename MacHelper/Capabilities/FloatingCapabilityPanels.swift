@@ -167,6 +167,7 @@ final class FloatingCapabilityPanels {
     private var toolbarSize = CGSize(width: 34, height: 34)
     private var replacementAllowed = false
     private var replacementAvailable = false
+    private var usesMenuPaste = false
     private let menuTracking = CapabilityMenuTracking()
     private var closeButton: NSButton?
     private var iconButton: NSButton?
@@ -286,10 +287,12 @@ final class FloatingCapabilityPanels {
         footer.stringValue = presentation.model ?? L("MacHelper · shared AI settings")
         footer.toolTip = presentation.model
         copyButton.isEnabled = presentation.copyText != nil
-        applyButton.isHidden = !replacementAllowed || !replacementAvailable
-        applyButton.isEnabled = presentation.copyText != nil
-        applyButton.title = L("Apply")
-        if replacementAllowed && !replacementAvailable {
+        applyButton.isHidden = !replacementAllowed
+        applyButton.isEnabled = replacementAvailable && presentation.copyText != nil
+        applyButton.title = usesMenuPaste ? L("Paste") : L("Apply")
+        if usesMenuPaste {
+            setActionStatus(L("Paste into the current selection in the original window. The result stays on the clipboard."))
+        } else if replacementAllowed && !replacementAvailable {
             setActionStatus(L("Use Copy; safe replacement could not be verified for this selection."))
         } else { setActionStatus(nil) }
         output.isSelectable = true
@@ -323,7 +326,8 @@ final class FloatingCapabilityPanels {
 
     func setToolTitle(_ value: String) { toolTitle = value }
 
-    func configureReplacement(allowed: Bool, available: Bool) {
+    func configureReplacement(allowed: Bool, available: Bool, usesMenuPaste: Bool = false) {
+        self.usesMenuPaste = usesMenuPaste
         replacementAllowed = allowed; replacementAvailable = available
         applyButton.isHidden = true
     }
@@ -337,7 +341,7 @@ final class FloatingCapabilityPanels {
             applyButton.title = L("Apply")
             setActionStatus(L("Edit requested. Check the original app before continuing."))
         case .pasteRequested:
-            applyButton.title = L("Apply")
+            applyButton.title = usesMenuPaste ? L("Paste") : L("Apply")
             setActionStatus(L("Paste requested. The result is on the clipboard."))
         }
     }
