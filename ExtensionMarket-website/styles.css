@@ -55,6 +55,7 @@
   .main-nav a:hover { color:var(--blue); }
   .hero { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:center; gap:38px; padding-top:68px; padding-bottom:65px; }
   #hero-preview { display:contents; }
+  #hero-preview > img { width:100%; height:auto; border-radius:20px; }
   .hero>*, .developer-section>*, .get-panel>*, .detail-grid>*, .steps>* { min-width:0; }
   .hero-copy .eyebrow { display:flex; align-items:center; gap:9px; margin-bottom:26px; }
   .eyebrow-line { display:inline-block; height:1px; width:25px; background:var(--blue); }
@@ -197,7 +198,7 @@
   .extension-card:hover { border-color:#b8c3ae; box-shadow:0 8px 24px #34422e08; }
   .card-visual { position:relative; display:block; background:#e9edf0; border-bottom:1px solid #e6e9df; }
   .card-visual img { width:100%; height:auto; aspect-ratio:1160/720; object-fit:cover; }
-  .card-visual .card-visual-icon, .card-visual .artwork-unavailable, .detail-preview .artwork-unavailable { object-fit:contain; padding:clamp(24px, 8vw, 88px); }
+  .card-visual .card-visual-icon, .card-visual .artwork-unavailable, .detail-preview .artwork-unavailable, #hero-preview > .artwork-unavailable { object-fit:contain; padding:clamp(24px, 8vw, 88px); }
   .card-visual .artwork-unavailable + .preview-label { display:none; }
   .preview-label { position:absolute; bottom:12px; left:15px; color:#536454; background:#fffffff0; border:1px solid #fff; border-radius:20px; padding:3px 8px; font-size:7px; letter-spacing:.1em; text-transform:uppercase; }
   .card-content { padding:23px 25px 22px; }

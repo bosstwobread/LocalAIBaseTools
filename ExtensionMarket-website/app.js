@@ -30,13 +30,16 @@
     const resolved = url(value);
     if (!resolved) return null;
     const artwork = new URL(resolved);
-    return !artwork.username && !artwork.password
-      && [base.origin, 'https://raw.githubusercontent.com'].includes(artwork.origin) ? resolved : null;
+    if (artwork.username || artwork.password) return null;
+    if (artwork.origin === base.origin) return resolved;
+    const pinned = artwork.origin === 'https://raw.githubusercontent.com' && !artwork.search && !artwork.hash
+      && /^\/[^/]+\/[^/]+\/[a-f0-9]{40}\/.+/.test(artwork.pathname);
+    return pinned ? resolved : null;
   }
   function image(src, alt, attrs = {}) {
     const fallback = new URL('assets/mac-helper.png', base).href;
-    const source = artworkURL(i18n?.previewSource(src) || src) || fallback;
-    const node = h('img', { src: source, alt: i18n?.previewAlt(src, alt) || alt, loading: 'lazy', referrerpolicy: 'no-referrer', ...attrs });
+    const source = artworkURL(src) || fallback;
+    const node = h('img', { src: source, alt, loading: 'lazy', referrerpolicy: 'no-referrer', ...attrs });
     if (source !== fallback) node.addEventListener('error', () => {
       node.src = fallback;
       node.alt = '';
@@ -238,9 +241,7 @@
       if (tools.length !== data.extensions.length) throw new Error('Invalid extension metadata');
       state.data = data;
       state.tools = tools;
-      const featured = tools.find(tool => tool.id === data.featuredExtension);
-      const heroDemo = extensionDemos.create(featured, 'hero');
-      $('#hero-preview').replaceChildren(...(heroDemo ? [heroDemo] : []));
+      renderHeroPreview();
       populateFilters();
       renderDiscovery();
       renderCards();
@@ -254,6 +255,13 @@
       state.loading = false;
       $('#extension-grid').setAttribute('aria-busy', 'false');
     }
+  }
+  function renderHeroPreview() {
+    const featured = state.tools.find(tool => tool.id === state.data.featuredExtension);
+    const preview = $('#hero-preview');
+    const demo = extensionDemos.create(featured, 'hero');
+    const shot = featured && !demo ? authoredImagePreview(featured) : null;
+    preview.replaceChildren(...(demo ? [demo] : shot ? [previewArtwork(featured, shot)] : []));
   }
   function populateFilters() {
     for (const [selector, values, all] of [
@@ -494,8 +502,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { node.hidden = true; }, 3500);
   }
-  function previewCopy(preview, field) {
-    const locale = i18n?.locale || 'en';
+  function previewCopy(preview, field, locale = i18n?.locale || 'en') {
     const localized = preview.strings?.[locale]?.[field];
     if (typeof localized === 'string') return { text: localized, lang: locale };
     const english = preview.strings?.en?.[field];
@@ -503,10 +510,15 @@
   }
   function authoredImagePreview(tool) {
     const preview = tool.preview;
-    if (preview?.schemaVersion !== 1 || preview.layout !== 'image' || !artworkURL(preview.image)) return null;
-    const description = previewCopy(preview, 'description');
+    if (preview?.schemaVersion !== 1) return null;
+    const artwork = preview.layout === 'image' ? preview.image : preview.fallbackImage;
+    const locale = i18n?.locale || 'en';
+    const localSource = artworkURL(typeof artwork === 'string' ? artwork : artwork?.[locale]);
+    const src = localSource || artworkURL(artwork?.en);
+    if (!src) return null;
+    const description = previewCopy(preview, 'description', localSource ? locale : 'en');
     const caption = previewCopy(preview, 'caption');
-    return { src: preview.image, alt: description.text, altLang: description.lang, caption: caption.text, captionLang: caption.text ? caption.lang : null };
+    return { src, alt: description.text, altLang: description.lang, caption: caption.text, captionLang: caption.text ? caption.lang : null };
   }
   function previewArtwork(tool, shot) {
     const alt = (shot.altLang ? shot.alt : t(shot.alt)) || t('{name} interface preview', { name: tool.name });
@@ -594,7 +606,8 @@
     function create(tool, placement) {
       const preview = tool?.preview;
       const render = layouts.get(preview?.layout);
-      if (!render || preview.schemaVersion !== 1 || !preview.strings?.en) return null;
+      if (!render || preview.schemaVersion !== 1 || !preview.strings?.en
+        || window.CSS?.supports?.('animation-name', 'none') === false) return null;
       const id = `extension-demo-${++sequence}`;
       const steps = ['selectStep', 'reviewStep', 'resultStep'].map((field, index) =>
         h('li', {}, h('span', { 'aria-hidden': 'true' }, `0${index + 1}`), fieldNode('span', field)));
@@ -668,6 +681,7 @@
   window.addEventListener('market-language-change', () => {
     if (state.data) {
       const returnHref = state.returnFocus?.getAttribute('href') || state.returnFocus?.closest('.extension-card')?.querySelector('a')?.getAttribute('href');
+      if (!$('#hero-preview .demo-hero')) renderHeroPreview();
       populateFilters(); renderDiscovery(); renderCards(); updateHelperLinks();
       if (dialog.open && returnHref) state.returnFocus = [...document.querySelectorAll('.extension-card a')].find(link => link.getAttribute('href') === returnHref) || $('#search');
       if (dialog.open && state.activeSlug) openTool(state.activeSlug, state.activeTab);

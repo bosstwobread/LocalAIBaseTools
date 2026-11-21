@@ -13,7 +13,6 @@ from discovery import build_discovery_index, discovery_documents, read_descripto
 from build import PUBLIC_DOCUMENTS, PUBLIC_SDK_FILES, historical_files, source_runtime, validate_registered_files
 from github_publication import collect_publications
 from github_registry import read_registry
-from preview_assets import LANGUAGES, PREVIEWS, load_catalog, render_preview
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -25,12 +24,6 @@ def main():
     parser.add_argument("--local-sources", action="store_true", help="Check an explicit first-party developer build.")
     args = parser.parse_args()
     site = args.dist
-    preview_catalog = load_catalog(HERE / 'preview-locales.json')
-    for locale in LANGUAGES:
-        for name in PREVIEWS:
-            assert (site / 'assets/localized' / locale / name).read_bytes() == render_preview(HERE / 'assets' / name, locale, preview_catalog), 'Stale localized image: ' + locale + '/' + name
-    assert 'window.MARKET_PREVIEW_TRANSLATIONS' in (site / 'preview-locales.js').read_text()
-    print('PASS all 26 localized SVG previews match their current 13-language source catalog')
     data = json.loads((site / "data/extensions.json").read_text())
     catalog = json.loads((site / "catalog.json").read_text())
     config = json.loads((HERE / "marketplace.config.json").read_text())

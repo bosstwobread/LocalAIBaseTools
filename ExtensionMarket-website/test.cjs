@@ -7,7 +7,9 @@ const { JSDOM } = require('jsdom');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const localesScript = fs.readFileSync(path.join(__dirname, 'locales.js'), 'utf8');
 const i18nScript = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
-const previewCatalogs = JSON.parse(fs.readFileSync(path.join(__dirname, 'preview-locales.json'), 'utf8')).locales;
+const localeContext = { window: {} };
+require('node:vm').runInNewContext(localesScript, localeContext);
+const interfaceLocales = ['en', ...Object.keys(localeContext.window.MARKET_TRANSLATIONS)];
 const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const catalogPath = path.join(__dirname, 'dist/data/extensions.json');
 if (!fs.existsSync(catalogPath)) throw new Error('Build the static fixture first: python3 ExtensionMarket-website/build.py --without-app');
@@ -48,7 +50,6 @@ async function page({ base = 'https://market.example/extension-market/', data = 
     return { ok: true, json: async () => data };
   };
   window.eval(localesScript);
-  window.MARKET_PREVIEW_TRANSLATIONS = clone(previewCatalogs);
   window.eval(i18nScript);
   beforeApp?.(window);
   window.eval(script);
@@ -158,7 +159,7 @@ test('clipboard-assisted Apply access is explained in every language without tou
   try {
     view.window.location.hash = '#extension/polish-input';
     await until(() => view.document.querySelector('#tool-dialog').open);
-    for (const code of Object.keys(previewCatalogs)) {
+    for (const code of interfaceLocales) {
       input(view, '#site-language', code, 'change');
       const expected = code === 'en' ? label : view.window.MARKET_TRANSLATIONS[code][label];
       assert.ok(expected, `${code}: clipboard Apply permission is translated`);
@@ -260,7 +261,7 @@ test('metadata is rendered as text and unsafe links never become executable DOM'
     assert.match(view.document.querySelector('.extension-grid').textContent, /<img id=/);
     view.window.location.hash = `#extension/${tool.slug}`;
     await until(() => view.document.querySelector('#tool-dialog').open);
-    assert.deepEqual([...view.document.querySelectorAll('script')].map(node => node.getAttribute('src')), ['./locales.js', './preview-locales.js', './i18n.js', './app.js'], 'Only the allowlisted static localization and application scripts should exist');
+    assert.deepEqual([...view.document.querySelectorAll('script')].map(node => node.getAttribute('src')), ['./locales.js', './i18n.js', './app.js'], 'Only the allowlisted static localization and application scripts should exist');
     assert.match(view.document.querySelector('.detail-description').textContent, /<script>/);
     assert.ok([...view.document.querySelectorAll('a')].every(node => !node.href.startsWith('javascript:')));
     assert.ok([...view.document.querySelectorAll('img')].every(node => !node.src.startsWith('javascript:')));
@@ -454,12 +455,11 @@ test('authored interface copy and first-party catalog text have translations in 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-      if (!node.textContent.trim() || node.parentElement.closest('script,style,code,noscript,[aria-hidden="true"],[data-preview-key]')) continue;
+      if (!node.textContent.trim() || node.parentElement.closest('script,style,code,noscript,[aria-hidden="true"]')) continue;
       keys.add(node.textContent.replace(/\s+/g, ' ').trim());
     }
     for (const element of document.querySelectorAll('[aria-label],[placeholder],[title],[alt],meta[name="description"]')) {
       for (const attribute of ['aria-label', 'placeholder', 'title', 'alt', 'content']) {
-        if (attribute === 'alt' && /(?:translation|polish-input)-preview\.svg$/.test(element.getAttribute('src') || '')) continue;
         const text = element.getAttribute(attribute);
         if (text) keys.add(text);
       }
@@ -471,7 +471,7 @@ test('authored interface copy and first-party catalog text have translations in 
       keys.add(Function(`return ${match[1]}`)().trim());
     }
     for (const tool of catalog.extensions) {
-      for (const value of [tool.category, ...tool.screenshots.flatMap(shot => /(?:translation|polish-input)-preview\.svg$/.test(shot.src) ? [shot.caption] : [shot.alt, shot.caption])]) keys.add(value);
+      keys.add(tool.category);
     }
     const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', 'Translation/', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
     const translations = {};
@@ -784,7 +784,7 @@ test('minimal search and conditional recovery messages follow every interface la
     'Could not renew the MacHelper connection. Try Find with AI again.'
   ];
   const translations={};require('node:vm').runInNewContext(localesScript,{window:translations});
-  for(const code of Object.keys(previewCatalogs)){
+  for(const code of interfaceLocales){
     if(code!=='en')for(const message of messages)assert.ok(Object.hasOwn(translations.MARKET_TRANSLATIONS[code],message),`${code}: ${message}`);
     const view=await page({storedLanguage:code});
     try{
@@ -802,9 +802,10 @@ test('minimal search and conditional recovery messages follow every interface la
 test('illustration copy and every preview location follow all interface languages without AI or changing a query', async () => {
   const data = clone(catalog);
   const staticTool = clone(data.extensions.find(tool => tool.slug === 'polish-input'));
+  const artworkRoot = 'https://raw.githubusercontent.com/independent/example/' + 'a'.repeat(40) + '/marketplace/';
+  const fallbackImage = Object.fromEntries(interfaceLocales.map(locale => [locale, `${artworkRoot}preview-${locale}.svg`]));
   Object.assign(staticTool, { id: 'example.static', slug: 'static-example', name: 'Static example',
-    screenshots: [{ src: 'assets/polish-input-preview.svg' }] });
-  delete staticTool.preview;
+    preview: { ...staticTool.preview, layout: 'future-layout', fallbackImage } });
   data.extensions.push(staticTool);
   let inferenceCalls = 0;
   const view = await page({ data, service: localService(() => { inferenceCalls++; return {ok:true,search:{matches:[],noMatchReason:'No match'}}; }) });
@@ -814,7 +815,7 @@ test('illustration copy and every preview location follow all interface language
     input(view, '#need-query', draft);
     view.window.location.hash = '#extension/translation';
     await until(() => view.document.querySelector('#tool-dialog').open);
-    for (const code of Object.keys(previewCatalogs)) {
+    for (const code of interfaceLocales) {
       input(view, '#site-language', code, 'change');
       for (const element of view.document.querySelectorAll('[data-preview-field]')) {
         const table = element.closest('.lookup-demo') ? lookupCopy : revisionCopy;
@@ -822,8 +823,9 @@ test('illustration copy and every preview location follow all interface language
       }
       assert.equal(view.document.querySelector('.popover-header strong').textContent, 'Translation');
       const staticPreview = view.document.querySelector('a.card-visual[href="#extension/static-example"] img');
-      assert.ok(staticPreview.src.endsWith(`/extension-market/assets/localized/${code}/polish-input-preview.svg`));
-      assert.equal(staticPreview.alt, previewCatalogs[code]['polish.description']);
+      assert.equal(staticPreview.src, fallbackImage[code]);
+      assert.equal(staticPreview.alt, revisionCopy[code].description);
+      assert.equal(staticPreview.lang, code);
       assert.equal(view.document.querySelector('#need-query').value, draft);
       assert.equal(inferenceCalls, 0);
       assert.equal(view.requests.length, 1);
@@ -831,20 +833,36 @@ test('illustration copy and every preview location follow all interface language
   } finally { view.close(); }
 });
 
-test('localized assets preserve mounted prefixes and never rewrite icons or external screenshots', async () => {
+test('a browser without CSS animation uses the extension image for hero, card and details', async () => {
   const data = clone(catalog);
-  data.extensions.find(tool => tool.slug === 'translation').screenshots = [{ src: '/assets/translation-preview.svg' }];
-  const view = await page({data, storedLanguage:'es'});
+  const translation = data.extensions.find(tool => tool.slug === 'translation');
+  const base = 'https://raw.githubusercontent.com/independent/example/' + 'a'.repeat(40) + '/marketplace/';
+  translation.preview.fallbackImage = { en: base + 'en.svg', es: base + 'es.svg' };
+  const polish = data.extensions.find(tool => tool.slug === 'polish-input');
+  polish.preview.fallbackImage = base + 'polish.svg';
+  const view = await page({ data, storedLanguage: 'es', beforeApp(window) {
+    window.CSS = { supports: () => false };
+  } });
   try {
-    assert.equal(view.document.querySelector('.extension-card img[src$="translation-preview.svg"]'), null);
-    const api = view.window.MarketI18n;
-    assert.equal(api.previewSource('/assets/translation-preview.svg'), 'https://market.example/extension-market/assets/localized/es/translation-preview.svg');
-    for (const source of ['assets/mac-helper.png', 'https://external.example/assets/translation-preview.svg', '//external.example/assets/translation-preview.svg', 'assets/third-party-preview.svg', 'assets/translation-preview.svg?other=1']) {
-      assert.equal(api.previewSource(source), source);
+    const selectors = ['#hero-preview img', 'a.card-visual[href="#extension/translation"] img', '#overview-panel figure img'];
+    view.window.location.hash = '#extension/translation';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    for (const selector of selectors) {
+      const node = view.document.querySelector(selector);
+      assert.equal(node.src, translation.preview.fallbackImage.es);
+      assert.equal(node.alt, lookupCopy.es.description);
+      assert.equal(node.lang, 'es');
     }
+    assert.equal(view.document.querySelector('a.card-visual[href="#extension/polish-input"] img').src, polish.preview.fallbackImage);
     input(view, '#site-language', 'ar', 'change');
-    assert.equal(api.previewSource('assets/localized/es/translation-preview.svg'), 'https://market.example/extension-market/assets/localized/ar/translation-preview.svg');
-    assert.equal(view.document.querySelector('.get-identity img').getAttribute('src'), './assets/mac-helper.png');
+    for (const selector of selectors) {
+      const node = view.document.querySelector(selector);
+      assert.equal(node.src, translation.preview.fallbackImage.en);
+      assert.equal(node.alt, lookupCopy.en.description);
+      assert.equal(node.lang, 'en');
+    }
+    assert.equal(view.requests.length, 1);
+    assert.deepEqual(view.localRequests, []);
   } finally { view.close(); }
 });
 
@@ -962,10 +980,10 @@ test('all Translation showcases share the contextual-word demo, localized conten
     await until(() => view.document.querySelector('#tool-dialog').open);
     assert.ok(view.document.querySelector('#overview-panel .lookup-demo'));
     assert.equal(view.document.querySelectorAll('.lookup-demo').length, 3);
-    assert.equal(view.document.querySelector('img[src$="translation-preview.svg"]'), null, 'No Translation showcase should retain the former static illustration.');
+    assert.equal(view.document.querySelector('#hero-preview > img, .detail-preview img'), null);
     const ids = [...view.document.querySelectorAll('[id]')].map(node => node.id);
     assert.equal(new Set(ids).size, ids.length, 'Cloning the demo must not duplicate IDs.');
-    for (const code of Object.keys(previewCatalogs)) {
+    for (const code of interfaceLocales) {
       input(view, '#site-language', code, 'change');
       for (const demo of view.document.querySelectorAll('.lookup-demo')) {
         assert.equal(demo.querySelector('button, [role="button"]'), null, 'Previews play automatically without playback buttons.');
@@ -999,7 +1017,7 @@ test('Polish-input previews illustrate selection, review and Apply in the collec
     assert.ok(card.querySelector('.revision-demo'));
     card.click();
     await until(() => view.document.querySelector('#tool-dialog').open);
-    for (const code of Object.keys(previewCatalogs)) {
+    for (const code of interfaceLocales) {
       input(view, '#site-language', code, 'change');
       const previews = view.document.querySelectorAll('.revision-demo');
       assert.equal(previews.length, 2);
@@ -1015,7 +1033,8 @@ test('Polish-input previews illustrate selection, review and Apply in the collec
           assert.equal(value, revisionCopy[code][key], `${code}: ${key}`);
         }
       }
-      assert.equal(view.document.querySelector('img[src$="polish-input-preview.svg"]'), null);
+      assert.equal(card.querySelector('img'), null);
+      assert.equal(view.document.querySelector('.detail-preview img'), null);
     }
     assert.equal(view.requests.length, 1);
     assert.deepEqual(view.localRequests, []);

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "extensions": [
-    "https://github.com/bosstwobread/LocalAIBaseTools/tree/04f3917df0c99488878d9d77a084a412d4b2e816/Extensions/Polish-input",
-    "https://github.com/bosstwobread/LocalAIBaseTools/tree/04f3917df0c99488878d9d77a084a412d4b2e816/Extensions/Translation"
+    "https://github.com/bosstwobread/LocalAIBaseTools/tree/63d0580bd20c73d2bec6ed401215a75f19e39175/Extensions/Polish-input",
+    "https://github.com/bosstwobread/LocalAIBaseTools/tree/63d0580bd20c73d2bec6ed401215a75f19e39175/Extensions/Translation"
   ]
 }

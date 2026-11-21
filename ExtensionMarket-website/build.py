@@ -19,7 +19,6 @@ from urllib.parse import quote, urlsplit
 from discovery import discovery_documents, read_descriptor, write_discovery_documents, write_discovery_index
 from github_publication import collect_publications
 from github_registry import read_registry
-from preview_assets import build_previews
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -353,7 +352,6 @@ def build(output, app, without_app=False, allow_legacy_discovery=False, local_so
         for filename in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js"]:
             shutil.copy2(HERE / filename, stage / filename)
         shutil.copytree(HERE / "assets", stage / "assets")
-        build_previews(HERE, stage)
         shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")
         copy_public_documents(stage)
         registry = HERE / "registry.json"

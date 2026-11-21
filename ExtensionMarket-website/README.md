@@ -100,10 +100,9 @@ app may need restarting. Apply still requires a verified edit target.
   commits. `github_registry.py` validates the links and reads the source during
   publication.
 - `marketplace/preview.json` in each extension: optional preview layout,
-  localized sample text, and related artwork references.
-- `preview-locales.json`, `preview_assets.py`: text and build tooling for
-  retained localized SVG illustrations.
-- `assets/`: app/tool artwork and clearly labelled illustrative previews.
+  localized sample text, and links to the extension’s artwork, including icons
+  and still illustrations.
+- `assets/`: shared MacHelper artwork.
 - Translation and Polish-input each have an animated preview on their collection
   card and in the **Overview** tab of their details. The homepage hero also shows
   Translation. Its example selects **hand** in “Could you give me a hand with
@@ -175,8 +174,9 @@ uses its English text when it has no translation for the current language.
 Each animated instance has its own accessible IDs and updates on language
 changes. The examples use authored samples without accessing AI, apps, user
 drafts, or the clipboard. Use localized copy and check long strings and Arabic
-layout. For images, keep any essential text in the localized caption or
-description so readers can understand the preview in their language.
+layout. For still illustrations, provide language-specific files when the
+artwork contains visible text. Translate captions and accessible descriptions
+in the preview descriptor.
 The frontend checks exercise all 13 languages, language detection/persistence,
 RTL, accessible labels, dynamic dialogs, localized images, localized search,
 and unchanged installation/download URLs.
@@ -268,9 +268,17 @@ strings as text. Publishers supply data and image assets.
 | `revision` | `description`, `editorTitle`, `draft`, `result`, `resultLabel`, `settings`, `copy`, `apply`, `selectStep`, `reviewStep`, `resultStep` |
 | `image` | `description` and optional `caption`. This layout also requires an `image` path. |
 
-Optional `category` and `icon` fields customize the listing. The `icon` and
-`image` paths are relative to the extension’s `marketplace/` folder. The site
-loads this artwork from the pinned GitHub revision. Set `slug` to choose a stable detail URL. The default uses the extension
+Optional `category` and `icon` fields customize the listing. Animated
+layouts can also declare `fallbackImage` for use when the animated preview
+cannot render. Set it to a single filename for language-independent artwork
+or to a language-to-filename map with an `en` entry. The site uses the matching
+file or the English file when a language is missing.
+
+Paths in `icon`, `image`, and `fallbackImage` are relative to the extension’s
+`marketplace/` folder. The publisher resolves them to URLs at the approved
+GitHub commit. The browser loads the illustrated asset from GitHub.
+
+Set `slug` to choose a stable detail URL. The default uses the extension
 identifier with dots replaced by hyphens. For a separate manual ZIP download,
 set `releaseZip` to the exact `.macsource.zip` asset name under the GitHub
 release tag `v<VERSION>`. The author publishes and retains that ZIP. MacHelper

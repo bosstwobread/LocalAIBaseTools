@@ -6,8 +6,10 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
+
+from github_publication import PREVIEW_FIELDS, presentation
 
 SOURCE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("market_build", SOURCE / "build.py")
@@ -22,7 +24,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.site = self.root / "ExtensionMarket-website"
         self.site.mkdir()
-        for name in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js", "preview-locales.json"]:
+        for name in ["index.html", "styles.css", "locales.js", "i18n.js", "app.js"]:
             shutil.copy2(SOURCE / name, self.site / name)
         shutil.copytree(SOURCE / "assets", self.site / "assets")
         (self.root / "MacHelper/Assets").mkdir(parents=True)
@@ -58,6 +60,28 @@ class NativeSourcePackagingTests(unittest.TestCase):
     def build(self):
         with patch.object(market, "ROOT", self.root), patch.object(market, "HERE", self.site):
             return market.build(self.site / "dist", self.root / "unused.app", without_app=True)
+
+    def test_fallback_artwork_comes_from_approved_extension_files(self):
+        activation = "https://raw.githubusercontent.com/independent/example/approved/"
+        source = Mock()
+        source.raw_url.side_effect = lambda path: activation + path
+        preview = {
+            "schemaVersion": 1,
+            "layout": "revision",
+            "strings": {locale: dict.fromkeys(PREVIEW_FIELDS["revision"], "Example") for locale in ("en", "es")},
+            "fallbackImage": {"en": "preview.svg", "es": "localized/es/preview.svg"},
+        }
+        listing, _ = presentation(source, json.dumps(preview))
+        self.assertEqual(listing["fallbackImage"], {
+            "en": activation + "marketplace/preview.svg",
+            "es": activation + "marketplace/localized/es/preview.svg",
+        })
+        self.assertEqual([call.args[0] for call in source.read.call_args_list],
+                         ["marketplace/preview.svg", "marketplace/localized/es/preview.svg"])
+        for invalid in ({}, {"es": "preview.svg"}, {"en": "../preview.svg"},
+                        {"en": "https://other.example/preview.svg"}, {"en": "preview.svg", "ar": "preview.svg"}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                presentation(source, json.dumps({**preview, "fallbackImage": invalid}))
 
     def test_standalone_github_extension_is_indexed_without_hosting_its_source(self):
         commit = "1234567890abcdef1234567890abcdef12345678"

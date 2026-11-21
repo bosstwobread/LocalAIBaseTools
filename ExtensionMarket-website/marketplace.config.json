@@ -8,32 +8,6 @@
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
   },
-  "tools": {
-    "Translation": {
-      "slug": "translation",
-      "category": "Translation",
-      "icon": "assets/translation-icon.svg",
-      "screenshots": [
-        {
-          "src": "assets/translation-preview.svg",
-          "alt": "Illustrated document with selected Chinese text and a nearby English translation. Example content.",
-          "caption": "Interface preview \u2014 selected text, a nearby translation, and streaming output."
-        }
-      ]
-    },
-    "Polish-input": {
-      "slug": "polish-input",
-      "category": "Writing",
-      "icon": "assets/polish-input-icon.svg",
-      "screenshots": [
-        {
-          "src": "assets/polish-input-preview.svg",
-          "alt": "Illustrated editor with selected text, a shared Translate and Polish toolbar, and a polished preview with Apply and Copy. Example content.",
-          "caption": "Interface preview \u2014 select text, review the polished result, then Apply or Copy."
-        }
-      ]
-    }
-  },
   "retiredTools": [
     "MessageHelper-Upwork"
   ],

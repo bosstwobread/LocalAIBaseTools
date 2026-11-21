@@ -2,7 +2,6 @@
 import hashlib
 import json
 import re
-from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from discovery import LOCALE, MAX_DESCRIPTOR, discovery_entry, text, validate_descriptor
@@ -32,7 +31,7 @@ def presentation(source, raw):
     value = json.loads(raw)
     if not isinstance(value, dict) or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
         raise ValueError("Unsupported marketplace preview schema.")
-    if set(value) - {"schemaVersion", "layout", "strings", "image", "icon", "category", "slug", "releaseZip"}:
+    if set(value) - {"schemaVersion", "layout", "strings", "image", "fallbackImage", "icon", "category", "slug", "releaseZip"}:
         raise ValueError("Unknown marketplace preview fields.")
     layout, strings = value.get("layout"), value.get("strings")
     if not isinstance(layout, str) or layout not in PREVIEW_FIELDS:
@@ -55,6 +54,16 @@ def presentation(source, raw):
         preview["image"] = image_url(source, value.get("image"))
     elif "image" in value:
         raise ValueError("Only the image preview layout accepts an image.")
+    if "fallbackImage" in value:
+        if layout == "image":
+            raise ValueError("An image preview does not need an animation fallback.")
+        fallback = value["fallbackImage"]
+        if isinstance(fallback, dict):
+            if "en" not in fallback or not fallback.keys() <= strings.keys():
+                raise ValueError("Localized fallback images require English and matching preview locale tables.")
+            preview["fallbackImage"] = {locale: image_url(source, filename) for locale, filename in fallback.items()}
+        else:
+            preview["fallbackImage"] = image_url(source, fallback)
     listing = {}
     if "category" in value:
         listing["category"] = text(value["category"], "marketplace category", 64, 256)
