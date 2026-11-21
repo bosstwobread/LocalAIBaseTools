@@ -7,9 +7,5 @@
     "minimumOS": "macOS 14+",
     "architecture": "Apple Silicon",
     "releaseChannel": "Developer preview"
-  },
-  "retiredTools": [
-    "MessageHelper-Upwork"
-  ],
-  "featuredExtension": "com.localaibasetools.translation"
+  }
 }

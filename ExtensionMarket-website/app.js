@@ -257,11 +257,17 @@
     }
   }
   function renderHeroPreview() {
-    const featured = state.tools.find(tool => tool.id === state.data.featuredExtension);
     const preview = $('#hero-preview');
-    const demo = extensionDemos.create(featured, 'hero');
-    const shot = featured && !demo ? authoredImagePreview(featured) : null;
-    preview.replaceChildren(...(demo ? [demo] : shot ? [previewArtwork(featured, shot)] : []));
+    for (const tool of state.tools) {
+      const demo = extensionDemos.create(tool, 'hero');
+      const shot = demo ? null : authoredImagePreview(tool);
+      const artwork = demo ?? (shot ? previewArtwork(tool, shot) : null);
+      if (artwork) {
+        preview.replaceChildren(artwork);
+        return;
+      }
+    }
+    preview.replaceChildren();
   }
   function populateFilters() {
     for (const [selector, values, all] of [

@@ -2,10 +2,11 @@
 
 Public marketplace: **https://local-ai-extension.nelson007.com/**
 
-The website lists every current tool under `Extensions` (excluding explicit
-`retiredTools` entries in its public config), with search, category
-and platform filters, interface previews, details, source links, and complete
-source downloads. JavaScript and native Swift tools share the same catalog, install review, and editable package format. It is a static website served from its own Docker container.
+The marketplace lists the extensions registered in `registry.json`, with
+search, category and platform filters, interface previews, details, source
+links, and complete source downloads. JavaScript and native Swift tools share
+the same catalog, install review, and editable package format. The website is
+static and served from its own Docker container.
 Keyword search reads only public metadata and does not call AI. The optional
 **Describe your need → Find with AI** flow connects
 directly to the visitor’s running MacHelper 6.5 or later and configured AI. No
@@ -97,27 +98,25 @@ app may need restarting. Apply still requires a verified edit target.
   and authored shared interface translations. Extension descriptions and their
   translations live in each extension’s `discovery.json`.
 - `registry.json`: approved public GitHub extension-folder links pinned to full
-  commits. `github_registry.py` validates the links and reads the source during
-  publication.
+  commits. This file holds the marketplace's active extension entries.
+  `github_registry.py` validates the links and reads the source during publication.
 - `marketplace/preview.json` in each extension: optional preview layout,
   localized sample text, and links to the extension’s artwork, including icons
   and still illustrations.
 - `assets/`: shared MacHelper artwork.
-- Translation and Polish-input each have an animated preview on their collection
-  card and in the **Overview** tab of their details. The homepage hero also shows
-  Translation. Its example selects **hand** in “Could you give me a hand with
-  this report?”, explains the meaning of the word, and translates the sentence.
-  Polish-input shows the writer selecting a draft, choosing **Polish**, reading
-  the proposed edit, and clicking **Apply** to replace the selected text.
+- The collection cards and the **Overview** tabs render previews supplied by
+  their extensions. The homepage hero uses the first usable preview in registry
+  order. The setup steps and source-folder illustration apply to any extension.
 - Both previews loop in CSS over nine seconds. A shared visibility observer
   starts each at 20% visibility and suspends it offscreen, in hidden tabs, or
   behind a dialog. Each preview has an accessible summary. Visitors who prefer
   reduced motion see the completed example immediately.
 - `marketplace.config.json`: site-wide settings, including the public URL,
-  MacHelper download metadata, and the featured extension.
-- `historical-packages/packages/`: immutable published source files and ZIPs.
-  Builds retain these paths for older pinned catalogs and existing download links,
-  while the current catalog lists only the latest versions. This includes the
+  and MacHelper download metadata.
+- [Legacy marketplace packages](../legacy/MarketplacePackages/packages/) contain
+  immutable published source files and ZIPs outside the website source. The
+  build serves the archived bytes at their original `/packages/` URLs for old
+  catalogs and existing download links. This includes the
   original Translation 4.1.0, 4.2.0, 4.3.0, and 4.4.0 source/ZIP inventories and the
   MessageHelper-Upwork 1.3.0, 1.3.1, and 1.4.0 ZIPs. Translation 4.1.0's
   retained ZIP SHA-256 is `3f2f881578751ddcf445fc868212db96819c068369d786c29f72acd3c602be75`.
@@ -249,10 +248,11 @@ served from `/data/extensions.json` and changes only after a successful rollout.
 For a tool update, submit the new commit URL. Increment the manifest version
 when installable files change. Update an illustrated preview independently
 when the source inventory has the same paths and bytes. Keep earlier source
-revisions and release assets available. The marketplace keeps already
-published `packages/` links available. New registry entries use GitHub for
-source downloads. A temporary GitHub outage can delay new installs while the
-last published listings remain available.
+revisions and release assets available. To retire a listing, remove its
+registry entry. The marketplace keeps already published `/packages/` links
+available. New registry entries use GitHub for source downloads. A temporary
+GitHub outage can delay new installs while the last published listings remain
+available.
 
 ### Author a preview
 

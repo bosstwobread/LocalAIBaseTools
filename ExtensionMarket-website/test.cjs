@@ -473,7 +473,7 @@ test('authored interface copy and first-party catalog text have translations in 
     for (const tool of catalog.extensions) {
       keys.add(tool.category);
     }
-    const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', 'Translation/', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
+    const unchanged = new Set(['LocalAI', 'BaseTools', 'GitHub', '01', '02', '03', 'macOS 14+ · Apple Silicon', '{ }', 'JS', 'Aa']);
     const translations = {};
     // The translation asset is trusted application source, never remote data.
     require('node:vm').runInNewContext(localesScript, { window: translations });
@@ -881,8 +881,7 @@ test('third-party lookup, image and icon-only previews render from catalog data'
     } }, screenshots: [] };
   const iconTool = { id: 'example.icon', slug: 'example-icon', name: 'Icon only',
     preview: { ...imageTool.preview, image: 'https://unapproved.example/preview.webp' }, screenshots: [] };
-  data.extensions.push(...[lookup, imageTool, iconTool].map(tool => ({ ...sampleTool, ...tool })));
-  data.featuredExtension = lookup.id;
+  data.extensions.unshift(...[iconTool, lookup, imageTool].map(tool => ({ ...sampleTool, ...tool })));
   const view = await page({ data, storedLanguage: 'es' });
   try {
     const hero = view.document.querySelector('#hero-preview .lookup-demo');
@@ -914,7 +913,7 @@ test('extension preview copy and markup come from the catalog renderer', () => {
     const { document } = dom.window;
     assert.equal(document.querySelector('#hero-preview')?.children.length, 0);
     assert.equal(document.querySelector('.hero-stage, template'), null);
-    assert.doesNotMatch(html, /Could you give me a hand|I finished update/);
+    assert.doesNotMatch(html, /Translation|Polish-input|prompts\/translate\.txt|Could you give me a hand|I finished update/);
   } finally { dom.window.close(); }
 });
 

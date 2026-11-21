@@ -167,7 +167,7 @@ def json_file(path, value):
 
 def historical_files(folder=None):
     """Retain bounded public package bytes; never import arbitrary release files."""
-    folder = folder or HERE / "historical-packages"
+    folder = folder or ROOT / "legacy" / "MarketplacePackages"
     if folder.is_symlink():
         raise ValueError("Historical packages cannot be a symbolic link.")
     if not folder.exists():
@@ -377,8 +377,6 @@ def build(output, app, without_app=False, allow_legacy_discovery=False, local_so
             mac["downloadUrl"] = None
         json_file(stage / "catalog.json", catalog)
         data = {"schemaVersion": 1, "name": config["name"], "extensions": tools, "macHelper": mac}
-        if config.get("featuredExtension"):
-            data["featuredExtension"] = config["featuredExtension"]
         if local_sources:
             data["developmentSources"] = True
         json_file(stage / "data/extensions.json", data)

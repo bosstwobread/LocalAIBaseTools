@@ -38,7 +38,6 @@ def main():
         sources = read_registry(registry, local_root=ROOT if args.local_sources else None)
         expected_tools, expected_catalog, expected_entries = collect_publications(sources, validate_registered_files)
         assert data["extensions"] == expected_tools and catalog == expected_catalog, "The published data does not match the approved source revisions."
-        assert data.get("featuredExtension") == config.get("featuredExtension")
         expected_index, _ = discovery_documents(expected_entries)
     else:
         assert len(folders) == len(data["extensions"]), "The website must list every current extension directory."

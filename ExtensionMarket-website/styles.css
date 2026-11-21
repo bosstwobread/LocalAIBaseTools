@@ -232,8 +232,7 @@
   .step-number { display:block; font-family:var(--serif); color:#82977a; font-size:28px; margin-bottom:21px; }
   .steps h3 { font-size:18px; }
   .steps p { margin:13px 0 18px; color:var(--muted); font-size:12px; line-height:1.9; max-width:270px; }
-  .steps .text-link, .step-footnote { font-size:10px; }
-  .step-footnote { display:inline-block; margin-top:5px; color:#637357; }
+  .steps .text-link { font-size:10px; }
   .get-section { padding-bottom:77px; }
   .get-panel { display:grid; grid-template-columns:100px minmax(0,1fr) auto; align-items:center; gap:30px; padding:42px 43px; border-radius:16px; color:#f4f7ed; background:#273a2e; background-image:radial-gradient(ellipse at 0% 90%,#3e6344aa 0%,transparent 55%); }
   .get-identity img { margin-bottom:12px; }
