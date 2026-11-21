@@ -33,9 +33,8 @@
   "Allow “%@” to paste results?": "「%@」による結果の貼り付けを許可しますか？",
   "Allow “%@” to replace selected text?": "「%@」による選択したテキストの置換を許可しますか？",
   "App compatibility": "アプリの互換性",
-  "Applied": "適用済み",
   "Apply": "適用",
-  "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "「適用」では確認済みの選択範囲にペーストできます。位置が取得できない場合、「ペースト」は元のウインドウの現在の選択範囲を使用します。どちらのペースト操作でも結果はクリップボードに残ります。",
+  "Apply pastes into the current selection in the original window. The result stays on the clipboard.": "「適用」をクリックすると、元のウインドウで現在選択されている箇所に結果をペーストします。結果はクリップボードに残ります。",
   "Apply status": "適用の状態",
   "Automatic (service default)": "自動（サービスの既定）",
   "Automatic selection fallback": "選択テキストの自動代替取得",
@@ -175,7 +174,6 @@
   "Paste": "貼り付け",
   "Paste completed results into the original window": "完成した結果を元のウインドウにペースト",
   "Paste could not be requested. The preview is still available to copy.": "貼り付けを要求できませんでした。プレビューは引き続きコピーできます。",
-  "Paste into the current selection in the original window. The result stays on the clipboard.": "元のウインドウで現在選択されている箇所にペーストします。結果はクリップボードに残ります。",
   "Paste requested. The result is on the clipboard.": "貼り付けを要求しました。結果はクリップボードにあります。",
   "Provider and model are shared across your tools.": "プロバイダーとモデルはすべてのツールで共有されます。",
   "Quit MacHelper": "MacHelper を終了",
@@ -281,6 +279,7 @@
   "Website connection": "ウェブサイト接続",
   "Website connection could not start. Quit other copies of MacHelper and try again.": "接続を開始できませんでした。他の MacHelper を終了して、もう一度お試しください。",
   "Website connection is stopped.": "ウェブサイト接続は停止しています。",
+  "When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard.": "「適用」をクリックすると、エディタから選択位置を取得できない場合でも、MacHelper は元のウインドウで現在選択されている箇所に結果をペーストできます。ペースト後も結果はクリップボードに残ります。",
   "Working…": "処理中…",
   "Working… · %@": "処理中… · %@"
 }

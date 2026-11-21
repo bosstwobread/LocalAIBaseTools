@@ -33,9 +33,8 @@
   "Allow “%@” to paste results?": "क्या “%@” को परिणाम पेस्ट करने दें?",
   "Allow “%@” to replace selected text?": "क्या “%@” को चुना गया टेक्स्ट बदलने दें?",
   "App compatibility": "ऐप संगतता",
-  "Applied": "लागू किया गया",
   "Apply": "लागू करें",
-  "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "लागू करें सत्यापित चयन में पेस्ट कर सकता है। जब चयन की स्थिति उपलब्ध न हो, तो पेस्ट मूल विंडो के मौजूदा चयन का उपयोग करता है। दोनों पेस्ट क्रियाएँ परिणाम को क्लिपबोर्ड पर छोड़ती हैं।",
+  "Apply pastes into the current selection in the original window. The result stays on the clipboard.": "“लागू करें” पर क्लिक करने से परिणाम मूल विंडो के मौजूदा चयन में पेस्ट होता है। परिणाम क्लिपबोर्ड पर रहता है।",
   "Apply status": "लागू करने की स्थिति",
   "Automatic (service default)": "स्वचालित (सेवा का डिफ़ॉल्ट)",
   "Automatic selection fallback": "चयन पढ़ने का स्वचालित वैकल्पिक तरीका",
@@ -175,7 +174,6 @@
   "Paste": "चिपकाएँ",
   "Paste completed results into the original window": "पूरा परिणाम मूल विंडो में पेस्ट करें",
   "Paste could not be requested. The preview is still available to copy.": "पेस्ट का अनुरोध नहीं किया जा सका। पूर्वावलोकन अब भी कॉपी किया जा सकता है।",
-  "Paste into the current selection in the original window. The result stays on the clipboard.": "मूल विंडो के मौजूदा चयन में पेस्ट करें। परिणाम क्लिपबोर्ड पर रहेगा।",
   "Paste requested. The result is on the clipboard.": "पेस्ट का अनुरोध किया गया। परिणाम क्लिपबोर्ड पर है।",
   "Provider and model are shared across your tools.": "प्रदाता और मॉडल आपके सभी टूल में साझा हैं।",
   "Quit MacHelper": "MacHelper से बाहर निकलें",
@@ -281,6 +279,7 @@
   "Website connection": "वेबसाइट कनेक्शन",
   "Website connection could not start. Quit other copies of MacHelper and try again.": "कनेक्शन शुरू नहीं हो सका। MacHelper की दूसरी प्रतियाँ बंद करके फिर कोशिश करें।",
   "Website connection is stopped.": "वेबसाइट कनेक्शन बंद है।",
+  "When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard.": "“लागू करें” पर क्लिक करने पर MacHelper मूल विंडो के मौजूदा चयन में परिणाम पेस्ट कर सकता है, भले ही संपादक चयन का स्थान न बताए। पेस्ट करने के बाद परिणाम क्लिपबोर्ड पर रहता है।",
   "Working…": "प्रक्रिया जारी है…",
   "Working… · %@": "प्रक्रिया जारी है… · %@"
 }

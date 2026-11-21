@@ -11,6 +11,49 @@ final class SelectionReplacementTests: XCTestCase {
             currentRange: range, currentText: text, protected: protected, settable: settable)
     }
 
+    @MainActor
+    func testMissingFocusRechecksOnceBeforeAnEdit() async throws {
+        var checks = 0
+        var waits = 0
+        let outcome = try await SelectionApplyPreflight.perform(isCurrent: { true }, waitForFocus: { waits += 1 }) {
+            checks += 1
+            if checks == 1 { throw SelectionReplacementPreflightError.focusUnavailable }
+            return .pasteRequested
+        }
+        XCTAssertEqual(outcome, .pasteRequested)
+        XCTAssertEqual(checks, 2)
+        XCTAssertEqual(waits, 1)
+    }
+
+    @MainActor
+    func testFocusWaitCannotApplyAnInvalidatedPreview() async {
+        var current = true
+        var checks = 0
+        do {
+            _ = try await SelectionApplyPreflight.perform(isCurrent: { current }, waitForFocus: { current = false }) {
+                checks += 1
+                throw SelectionReplacementPreflightError.focusUnavailable
+            }
+            XCTFail("The original preview must still be current after waiting")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(checks, 1)
+    }
+
+    @MainActor
+    func testChangedTargetAndPasteFailuresAreFinal() async {
+        for failure in [SelectionPasteFailure.changedTarget, .clipboardChanged, .eventUnavailable] {
+            var checks = 0
+            do {
+                _ = try await SelectionApplyPreflight.perform(isCurrent: { true }, waitForFocus: { XCTFail("Unexpected wait") }) {
+                    checks += 1
+                    throw failure
+                }
+                XCTFail("A rejected transaction must stay rejected")
+            } catch { XCTAssertEqual(error as? SelectionPasteFailure, failure) }
+            XCTAssertEqual(checks, 1)
+        }
+    }
+
     func testExactOriginalEditableSelectionIsRequired() {
         XCTAssertTrue(accepts())
         XCTAssertFalse(accepts(pid: 43))

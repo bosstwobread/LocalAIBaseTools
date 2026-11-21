@@ -76,4 +76,46 @@ final class SelectionFocusTests: XCTestCase {
         XCTAssertFalse(leaf.accepts(processIdentifier: 42, sameFocusedElement: true,
             currentRange: NSRange(location: 400, length: 5), currentText: "draft", protected: false, settable: true))
     }
+    func testVerifiedEditorCanUseFreshWrappersOrAnotherAvailableFocusRoot() {
+        let expected = SelectionFocusPath(elements: [1, 9])
+        var roots: [Bool] = []
+        func status(_ app: SelectionFocusResolution<Int>, _ system: SelectionFocusResolution<Int>,
+                    allowSameEditor: Bool = true) -> SelectionEditFocusStatus {
+            roots.removeAll()
+            return expected.editStatus(allowSameEditor: allowSameEditor, resolve: { systemWide in
+                roots.append(systemWide)
+                return systemWide ? system : app
+            }, sameElement: ==)
+        }
+        let sameLeaf = SelectionFocusResolution.path(SelectionFocusPath(elements: [2, 9]))
+        let other = SelectionFocusResolution.path(SelectionFocusPath(elements: [2, 7]))
+        let system = SelectionFocusResolution.path(SelectionFocusPath(elements: [9], systemWide: true))
+        XCTAssertEqual(status(sameLeaf, .unavailable), .current)
+        XCTAssertEqual(status(.unavailable, system), .current)
+        XCTAssertEqual(roots, [false, true])
+        XCTAssertEqual(status(.unavailable, .unavailable), .unavailable)
+        XCTAssertEqual(status(.unavailable, .blocked), .changed)
+        XCTAssertEqual(status(.unavailable, other), .changed)
+        XCTAssertEqual(status(other, system), .changed)
+        XCTAssertEqual(roots, [false])
+        XCTAssertEqual(status(.blocked, system), .changed)
+        XCTAssertEqual(roots, [false])
+        XCTAssertEqual(status(sameLeaf, system, allowSameEditor: false), .changed)
+    }
+
+    func testOnlyAnOtherwiseUnchangedSelectionCanWaitForMissingFocus() {
+        let range = NSRange(location: 27, length: 5)
+        let evidence = SelectionReplacementEvidence(processIdentifier: 42, range: range, text: "draft")
+        func readiness(_ location: Int = 27, text: String = "draft", writable: Bool = true,
+                       protected: Bool = false) -> SelectionEditFocusStatus {
+            evidence.readiness(processIdentifier: 42, focus: .unavailable, currentRange: NSRange(location: location, length: 5),
+                               currentText: text, protected: protected, settable: writable, enabled: true)
+        }
+        XCTAssertEqual(readiness(), .unavailable)
+        XCTAssertEqual(readiness(30), .changed)
+        XCTAssertEqual(readiness(text: "other"), .changed)
+        XCTAssertEqual(readiness(writable: false), .changed)
+        XCTAssertEqual(readiness(protected: true), .changed)
+    }
+
 }

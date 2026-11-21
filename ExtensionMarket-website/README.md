@@ -53,15 +53,15 @@ invalid/stale contexts, and unreadable or oversized clipboards skip the fallback
 Text obtained solely by Copy has no numeric editing proof or sentence context.
 At tool click, a fresh matching Accessibility read can recover the original
 control’s numeric range and origin only while the original context is unchanged;
-all normal editing checks still apply. When neither exact Apply nor a separately approved current-selection Paste is available, the completed preview offers Copy and explains why replacement is unavailable.
+all normal editing checks still apply. If MacHelper cannot verify either an exact edit target or an eligible Paste menu target, Apply stays disabled. The completed preview offers Copy and explains why.
 Coverage and restoration are best effort, and clipboard-history tools may see the
 temporary change. There is no macOS Services or OCR capture fallback and no
 screen-reading permission request. These shared host changes need no extension
 behavior change.
-MacHelper 6.7.3 can offer **Paste** for a clipboard-captured selection in the original editable window when its standard Cut and Paste commands are available. Paste targets the current selection and leaves the result on the clipboard. **Copy** remains available.
+For a clipboard-captured selection, **Apply** can use the original editor’s standard Paste command when MacHelper can verify the window and its editing commands. Keep the text selected while reviewing the preview. This method leaves the result on the clipboard. **Copy** remains available.
 
-Polish-input streams a preview; **Apply** replaces only a still-unchanged selection
-in a supported editable field, while **Copy** is available for other selections.
+Polish-input streams a preview. **Apply** updates a supported editable selection,
+and **Copy** is available for manual use.
 MacHelper identifies supported web editors through a bounded Accessibility
 parent-chain check, including editors embedded in desktop apps. These select
 approved paste before any write because an advertised selected-text setter may
@@ -76,20 +76,19 @@ leaves the result there; this Apply transaction never reads or restores previous
 clipboard contents. Automatic selection capture is a separate guarded operation.
 It does not retry a failed direct edit by pasting, or press Enter or Send. Changed, protected, read-only, or unsupported
 targets retain **Copy** for manual use. Previewing or selecting text never applies
-an edit. The illustration shows one fully selected example field. Editor support
-varies.
+an edit. The illustrated example uses a supported editable selection.
 Polishing preserves the input language by default. Prompt editing and hot reload
 remain part of the independent extension source. MessageHelper-Upwork is retired
 from current listings; its published ZIPs remain immutable historical downloads.
 
 MacHelper’s **General → Improve compatibility with Electron apps** setting is off
-by default. After a new selection, enabling it lets the host ask supporting apps
-for full Accessibility information. This can change app behavior: VS Code may
-enter Screen Reader Optimized mode, affecting folding and the minimap. Turning
-it off stops new requests; already affected apps may need restarting. It does
-not turn on VoiceOver or change macOS permissions. Reselect text after changing
-it. This host option is not a website or extension permission and does not
-guarantee that an editor supports Apply.
+by default. With it enabled, an unreadable selection can prompt MacHelper to
+request full Accessibility from the supporting editor. In a newly opened VS Code
+window, wait a few seconds and select the text again if the toolbar has yet to
+appear. VS Code may enter Screen Reader Optimized mode, affecting folding and
+the minimap. MacHelper leaves your VS Code settings files, VoiceOver and macOS
+permissions alone. Turning the option off stops future requests. An affected
+app may need restarting. Apply still requires a verified edit target.
 
 ## Files
 
@@ -97,26 +96,23 @@ guarantee that an editor supports Apply.
 - `i18n.js`, `locales.js`: language detection, saved selection, safe text rendering,
   and authored shared interface translations. Extension descriptions and their
   translations live in each extension’s `discovery.json`.
-- `preview-locales.json`: authored text for all 13 languages inside the hero and
-  SVG interface illustrations, including synthetic translation results.
+- `preview-locales.json`: text for the animated previews and SVG illustrations
+  in all 13 website languages, including sample drafts and results.
 - `preview_assets.py`: validates preview catalogs and SVG templates, then emits
   escaped locale-specific SVGs under `assets/localized/<locale>/` and the
-  generated `preview-locales.js` data for the HTML hero during the site build.
+  generated `preview-locales.js` data for the HTML previews during the site build.
 - `assets/`: app/tool artwork and clearly labelled illustrative previews.
-- Translation uses one shared HTML/CSS demo in the homepage hero, catalog card,
-  spotlight, and overview dialog. Every placement automatically loops a
-  nine-second selection → click → contextual word meaning → full sentence
-  translation illustration. Only **hand** is selected in “Could you give me a
-  hand with this report?”; the result explains help rather than the body part.
-  There is no video, GIF, animation library, extra font, AI call, or per-cycle
-  JavaScript timer. A shared visibility observer starts each instance when at
-  least 20% visible and stops it offscreen, in hidden tabs, behind a dialog, or
-  in a hidden dialog tab. Stop holds the completed example until Replay;
-  reduced-motion visitors see the same completed example. Removed instances
-  are unobserved. Without IntersectionObserver, visible-page playback remains
-  automatic. The no-JavaScript hero displays the completed example. All
-  placements omit the progress bar and duration/example-content footer;
-  the accessible summary still identifies the illustration as an example.
+- Translation and Polish-input each have an animated preview on their collection
+  card and in the **Overview** tab of their details. The homepage hero also shows
+  Translation. Its example selects **hand** in “Could you give me a hand with
+  this report?”, explains the meaning of the word, and translates the sentence.
+  Polish-input shows the writer selecting a draft, choosing **Polish**, reading
+  the proposed edit, and clicking **Apply** to replace the selected text.
+- Both previews loop in CSS over nine seconds. A shared visibility observer
+  starts each at 20% visibility and suspends it offscreen, in hidden tabs, or
+  behind a dialog. Each preview has an accessible summary. Visitors who prefer
+  reduced motion see the completed example immediately. The homepage hero also
+  shows its completed example when JavaScript is disabled.
 - `marketplace.config.json`: public URL, MacHelper download metadata, visual display metadata (categories, artwork, and screenshots), and explicitly retired source folders.
 - `historical-packages/packages/`: immutable published source files and ZIPs.
   Builds retain these paths for older pinned catalogs and existing download links,
@@ -163,11 +159,10 @@ Changing language updates navigation, explanations, search/filter labels, curren
 first-party tool descriptions, access notices, installation steps, errors, and
 an open detail dialog. Search matches both translated and original metadata;
 category/platform values, filter selections, package URLs, and tool names stay
-stable. Arabic uses right-to-left reading order. Text inside the hero illustration
-and SVG previews follows the selected language too: labels, buttons, captions,
-accessible descriptions, and synthetic translation results change together.
-Foreign source sentences and English polishing samples remain appropriate to
-the demonstration. No AI call or translation service is used.
+stable. Arabic uses right-to-left reading order. Text inside animated and SVG
+previews follows the selected language, including the labels, captions,
+accessible descriptions, and sample results. The Polish-input example uses
+a draft and a revision in the same language.
 
 The technical AI guide and its downloadable reference documents remain English
 and are labelled accordingly. Source code, prompts, model IDs, and user data are
@@ -177,21 +172,17 @@ metadata translations to that tool's `discovery.json`. `i18n.js` supplies shared
 fallback and placeholder interpolation. Tool metadata falls back to its original
 source text when an extension does not provide the requested language.
 Preview copy belongs in `preview-locales.json`, outside MacHelper source.
-The `demo.*` entries localize the demo's captions, controls, accessible summary,
-and synthetic content in all 13 languages. The floating panel reflects the
-actual Translation title, result, shared settings, and completion-only Copy
-control; it has no target-language selector. Arabic, Hindi, and Russian demo
-versions explain the English example in English, with localized captions, because
-those three languages are not target choices in the current extension settings.
-The example Copy/close/icon controls are illustrations and cannot affect a
-visitor's clipboard, apps, settings, or drafts. The title is always Translation;
-all instances share the same nine-second CSS loop and localized text catalog.
-The build generates image variants from SVG text templates instead of editing
-generated files. HTML hero nodes use explicit `data-preview-key` values even
-inside decorative `aria-hidden` containers; cloned Translation demos get unique
-accessible IDs and localize every authored node on creation and language changes.
-Other tools continue selecting locale-specific SVG preview URLs. Keep product names, model IDs, code, actual user
-text, and AI answers unchanged. When adding artwork with visible text, supply
+The `demo.*` entries include the Translation example and `polish.*` includes
+the Polish-input draft, revision, and step captions. The Arabic, Hindi, and
+Russian versions of Translation explain the English example in English, with
+localized captions, to reflect its supported target languages. Both demos
+use authored examples and illustrate the controls without accessing AI, apps,
+user drafts, or the clipboard. The build generates image variants from SVG
+text templates. HTML previews use `data-preview-key` values even inside
+decorative `aria-hidden` containers. Each instance gets unique accessible IDs
+and localized strings on creation and language changes. Listings without an
+animated preview use their catalog artwork. Keep product names, model IDs, code,
+actual user text, and AI answers unchanged. When adding artwork with visible text, supply
 all supported locales and verify that long translations and Arabic fit.
 The frontend checks exercise all 13 languages, language detection/persistence,
 RTL, accessible labels, dynamic dialogs, localized images, localized search,

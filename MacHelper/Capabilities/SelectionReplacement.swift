@@ -12,10 +12,19 @@ struct SelectionReplacementEvidence {
     func accepts(processIdentifier: Int32?, sameFocusedElement: Bool,
                  currentRange: NSRange?, currentText: String?, protected: Bool,
                  settable: Bool, enabled: Bool = true) -> Bool {
-        guard processIdentifier == self.processIdentifier, sameFocusedElement,
+        readiness(processIdentifier: processIdentifier, focus: sameFocusedElement ? .current : .changed,
+                  currentRange: currentRange, currentText: currentText, protected: protected,
+                  settable: settable, enabled: enabled) == .current
+    }
+
+    func readiness(processIdentifier: Int32?, focus: SelectionEditFocusStatus,
+                   currentRange: NSRange?, currentText: String?, protected: Bool,
+                   settable: Bool, enabled: Bool) -> SelectionEditFocusStatus {
+        guard processIdentifier == self.processIdentifier, focus != .changed,
               !protected, enabled, settable, currentRange == range, let currentText,
-              range.location >= 0, range.length > 0, range.length == text.utf16.count else { return false }
-        return currentText.utf16.elementsEqual(text.utf16)
+              range.location >= 0, range.length > 0, range.length == text.utf16.count,
+              currentText.utf16.elementsEqual(text.utf16) else { return .changed }
+        return focus
     }
 }
 
@@ -159,6 +168,15 @@ enum SelectionReplacementOutcome: Equatable {
     }
 }
 
+/// Only the initial, read-only preflight can request another focus check.
+enum SelectionReplacementPreflightError: LocalizedError {
+    case focusUnavailable
+
+    var errorDescription: String? {
+        L("The original selection changed. Select the text again, or use Copy.")
+    }
+}
+
 /// This memory-only target retains actual focused/source AX objects. An
 /// extension cannot access its clipboard or keyboard implementation directly.
 @MainActor
@@ -169,24 +187,25 @@ final class AccessibilitySelectionEditTarget {
     private let evidence: SelectionReplacementEvidence
     private let sourceIdentity: SelectionSourceApplicationIdentity
     private let strategy: SelectionReplacementStrategy
+    private let editorMarkers: AccessibilityEditorMarkers?
 
     private init(application: AXUIElement, focus: SelectionFocusPath<AXUIElement>, source: AXUIElement,
-                 evidence: SelectionReplacementEvidence, sourceIdentity: SelectionSourceApplicationIdentity, strategy: SelectionReplacementStrategy) {
+                 evidence: SelectionReplacementEvidence, sourceIdentity: SelectionSourceApplicationIdentity,
+                 strategy: SelectionReplacementStrategy, editorMarkers: AccessibilityEditorMarkers? = nil) {
         self.application = application; self.focus = focus; self.source = source
         self.evidence = evidence; self.sourceIdentity = sourceIdentity; self.strategy = strategy
+        self.editorMarkers = editorMarkers
     }
 
     static func capture(_ selection: TextSelection, allowsPaste: Bool = false) -> AccessibilitySelectionEditTarget? {
         let trusted = AXIsProcessTrusted()
         let currentApplication = NSWorkspace.shared.frontmostApplication
-        guard trusted, !selection.isClipboardOnly, selection.rangeLocation >= 0,
+        guard trusted, !selection.isClipboardOnly,
               let sourceApplication = currentApplication,
               sourceApplication.processIdentifier == selection.sourcePID,
               let identity = SelectionSourceApplicationIdentity(processIdentifier: selection.sourcePID, bundleIdentifier: sourceApplication.bundleIdentifier) else { return nil }
         let application = AXUIElementCreateApplication(selection.sourcePID)
         AXUIElementSetMessagingTimeout(application, 0.18)
-        guard let focus = AccessibilityFocusResolver.read(application: application) else { return nil }
-        var source = focus.leaf
         let classificationDeadline = ProcessInfo.processInfo.systemUptime + 0.8
         let stillSource = {
             guard AXIsProcessTrusted(), let current = NSWorkspace.shared.frontmostApplication else { return false }
@@ -195,67 +214,101 @@ final class AccessibilitySelectionEditTarget {
         }
         if let origin = selection.accessibilityOrigin,
            !origin.isCurrent(continuing: stillSource) { return nil }
-        for _ in 0..<4 {
-            AXUIElementSetMessagingTimeout(source, 0.18)
-            guard stillSource(), !isProtected(source) else {
-                return nil
-            }
-            // Edit targets remain restricted to the captured focus path's own
-            // ancestry AND the exact selected source node. Identical text/ranges
-            // in another focused control never authorize editing that control.
-            if selection.accessibilityOrigin.map({ $0.matchesSource(source) }) ?? true,
-               case .selected(let span) = AccessibilitySelectedText.read(source, continuing: stillSource),
-               span.text.utf16.elementsEqual(selection.text.utf16), let range = span.range,
-               range == NSRange(location: selection.rangeLocation, length: selection.rangeLength) {
-                let context = providerContext(of: source, deadline: classificationDeadline)
-                let directAvailable = isSettable(kAXSelectedTextAttribute, in: source) && !isDisabled(source)
-                let pasteEditable = canPaste(source)
-                if let strategy = SelectionReplacementStrategy.choose(bundleIdentifier: identity.bundleIdentifier,
-                    providerContext: context, directAvailable: directAvailable,
-                    pasteApproved: allowsPaste, pasteEditable: pasteEditable) {
-                    let target = AccessibilitySelectionEditTarget(application: application, focus: focus, source: source,
-                        evidence: .init(processIdentifier: selection.sourcePID, range: range, text: span.text), sourceIdentity: identity, strategy: strategy)
-                    let current = target.isCurrent
-                    if current { return target }
+        for systemWide in [false, true] {
+            guard stillSource() else { return nil }
+            switch AccessibilityFocusResolver.resolve(application: application, systemWide: systemWide) {
+            case .blocked: return nil
+            case .unavailable: continue
+            case .path(let focus):
+                if let target = capture(selection, application: application, identity: identity, focus: focus,
+                                        allowsPaste: allowsPaste, deadline: classificationDeadline, continuing: stillSource) {
+                    return target
                 }
             }
-            guard stillSource() else { return nil }
-            guard let parent = attribute(kAXParentAttribute, of: source),
-                  CFGetTypeID(parent) == AXUIElementGetTypeID() else {
-                return nil
+        }
+        return nil
+    }
+
+    private static func capture(_ selection: TextSelection, application: AXUIElement,
+                                identity: SelectionSourceApplicationIdentity, focus: SelectionFocusPath<AXUIElement>,
+                                allowsPaste: Bool, deadline: TimeInterval, continuing: @escaping () -> Bool) -> Self? {
+        var source = focus.leaf
+        let origin = selection.accessibilityOrigin
+        for _ in 0..<4 {
+            AXUIElementSetMessagingTimeout(source, 0.18)
+            guard continuing(), !isProtected(source) else { return nil }
+            let sameSource = origin?.matchesSource(source) ?? true
+            let exactOrigin = sameSource && selection.rangeLocation >= 0
+            var markers: AccessibilityEditorMarkers?
+            if !exactOrigin, allowsPaste, CFEqual(source, focus.leaf), let origin, let captured = origin.selectedMarkers,
+               canPaste(source) {
+                let readRange = selection.rangeLocation >= 0 ? NSRange(location: selection.rangeLocation, length: selection.rangeLength) : nil
+                let binding = AccessibilityEditorMarkers(captured: captured, origin: origin.source, originRange: readRange)
+                if binding.matches(focused: source, application: application, continuing: continuing) { markers = binding }
             }
+            // Read only the original source or the editor that owns BOTH ends
+            // of its captured selection. Never probe another control's text.
+            if exactOrigin || markers != nil,
+               case .selected(let span) = AccessibilitySelectedText.read(source, continuing: continuing),
+               let range = span.range, range.length > 0, span.text.utf16.elementsEqual(selection.text.utf16),
+               !exactOrigin || range == NSRange(location: selection.rangeLocation, length: selection.rangeLength) {
+                let context = providerContext(of: source, deadline: deadline)
+                let directAvailable = exactOrigin && isSettable(kAXSelectedTextAttribute, in: source) && !isDisabled(source)
+                if let strategy = SelectionReplacementStrategy.choose(bundleIdentifier: identity.bundleIdentifier,
+                    providerContext: context, directAvailable: directAvailable,
+                    pasteApproved: allowsPaste, pasteEditable: canPaste(source)) {
+                    let target = self.init(application: application, focus: focus, source: source,
+                        evidence: .init(processIdentifier: selection.sourcePID, range: range, text: span.text),
+                        sourceIdentity: identity, strategy: strategy, editorMarkers: markers)
+                    if target.isCurrent { return target }
+                }
+            }
+            guard continuing(), let parent = attribute(kAXParentAttribute, of: source),
+                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
             source = parent as! AXUIElement
         }
         return nil
     }
 
-    var isCurrent: Bool {
+    var isCurrent: Bool { readiness() == .current }
+
+    private func readiness() -> SelectionEditFocusStatus {
         guard AXIsProcessTrusted(), let currentApplication = NSWorkspace.shared.frontmostApplication,
-              sourceIdentity.matches(processIdentifier: currentApplication.processIdentifier, bundleIdentifier: currentApplication.bundleIdentifier) else { return false }
+              sourceIdentity.matches(processIdentifier: currentApplication.processIdentifier, bundleIdentifier: currentApplication.bundleIdentifier) else { return .changed }
         let stillSource = {
             guard AXIsProcessTrusted(), let current = NSWorkspace.shared.frontmostApplication else { return false }
             return self.sourceIdentity.matches(processIdentifier: current.processIdentifier, bundleIdentifier: current.bundleIdentifier)
         }
         guard case .selected(let span) = AccessibilitySelectedText.read(source, continuing: stillSource),
-              let range = span.range else { return false }
+              let range = span.range else { return .changed }
         let deadline = ProcessInfo.processInfo.systemUptime + 0.8
+        if let editorMarkers, !editorMarkers.matches(focused: source, application: application, continuing: {
+            stillSource() && ProcessInfo.processInfo.systemUptime < deadline
+        }) { return .changed }
         let context = Self.providerContext(of: source, deadline: deadline)
-        guard strategy.acceptsCurrentContext(context) else { return false }
+        guard strategy.acceptsCurrentContext(context) else { return .changed }
         let protection = Self.protectionChain(focus.leaf, application: application, deadline: deadline)
         guard protection != .blocked,
-              protection != .unknown || strategy == .pasteShortcut else { return false }
+              protection != .unknown || strategy == .pasteShortcut else { return .changed }
         let writable = strategy == .selectedText ? Self.isSettable(kAXSelectedTextAttribute, in: source) : Self.canPaste(source)
-        return evidence.accepts(processIdentifier: currentApplication.processIdentifier,
-            sameFocusedElement: AccessibilityFocusResolver.matches(focus, application: application),
-            currentRange: range, currentText: span.text,
-            protected: false, settable: writable, enabled: !Self.isDisabled(source)) && stillSource()
+        let focusStatus = focus.editStatus(allowSameEditor: strategy == .pasteShortcut && CFEqual(source, focus.leaf),
+            resolve: { AccessibilityFocusResolver.resolve(application: application, systemWide: $0) },
+            sameElement: { CFEqual($0, $1) })
+        let status = evidence.readiness(processIdentifier: currentApplication.processIdentifier, focus: focusStatus,
+            currentRange: range, currentText: span.text, protected: false, settable: writable, enabled: !Self.isDisabled(source))
+        return stillSource() ? status : .changed
     }
 
     func replace(with text: String, validateInvocation: () -> Bool = { true }) throws -> SelectionReplacementOutcome {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.utf8.count <= 96_000, !text.contains("\0"),
-              evidence.range.location <= Int.max - text.utf16.count, validateInvocation(), isCurrent else {
+              evidence.range.location <= Int.max - text.utf16.count, validateInvocation() else {
             throw CapabilityError.invalid(L("The original selection changed. Select the text again, or use Copy."))
+        }
+        switch readiness() {
+        case .current: break
+        case .unavailable: throw SelectionReplacementPreflightError.focusUnavailable
+        case .changed: throw CapabilityError.invalid(L("The original selection changed. Select the text again, or use Copy."))
         }
         if strategy == .pasteShortcut {
             let transaction = SelectionPasteTransaction(pasteboard: SystemSelectionPasteboard(), eventPoster: SystemSelectionPasteEventPoster())

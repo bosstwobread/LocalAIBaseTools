@@ -100,7 +100,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             guard self != nil else { return false }
             let alert = NSAlert()
             alert.messageText = L("Allow “%@” to paste results?", manifest.displayName)
-            alert.informativeText = L("Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.")
+            alert.informativeText = L("When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard.")
             alert.addButton(withTitle: L("Allow Paste"))
             alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn

@@ -289,9 +289,8 @@ final class FloatingCapabilityPanels {
         copyButton.isEnabled = presentation.copyText != nil
         applyButton.isHidden = !replacementAllowed
         applyButton.isEnabled = replacementAvailable && presentation.copyText != nil
-        applyButton.title = usesMenuPaste ? L("Paste") : L("Apply")
         if usesMenuPaste {
-            setActionStatus(L("Paste into the current selection in the original window. The result stays on the clipboard."))
+            setActionStatus(L("Apply pastes into the current selection in the original window. The result stays on the clipboard."))
         } else if replacementAllowed && !replacementAvailable {
             setActionStatus(L("Use Copy; safe replacement could not be verified for this selection."))
         } else { setActionStatus(nil) }
@@ -333,15 +332,12 @@ final class FloatingCapabilityPanels {
     }
 
     func replacementSucceeded(_ outcome: SelectionReplacementOutcome) {
-        applyButton.title = L("Applied")
         applyButton.isEnabled = false
         switch outcome {
         case .confirmed: setActionStatus(L("Selected text replaced."))
         case .unverified, .changedByEditor:
-            applyButton.title = L("Apply")
             setActionStatus(L("Edit requested. Check the original app before continuing."))
         case .pasteRequested:
-            applyButton.title = usesMenuPaste ? L("Paste") : L("Apply")
             setActionStatus(L("Paste requested. The result is on the clipboard."))
         }
     }
@@ -355,6 +351,7 @@ final class FloatingCapabilityPanels {
     private func setActionStatus(_ message: String?) {
         let value = message ?? ""
         actionStatus.stringValue = value
+        applyButton.setAccessibilityHelp(message)
         actionStatus.isHidden = value.isEmpty
         let width = max(1, resultPanel.frame.width - 36)
         let height = (value as NSString).boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude),
@@ -670,6 +667,7 @@ final class FloatingCapabilityPanels {
     @objc private func applyResult() {
         guard replacementAllowed, replacementAvailable, applyButton.isEnabled,
               let result = presentation.copyText else { return }
+        applyButton.isEnabled = false
         onApply?(result)
     }
     @objc private func dismiss() { onDismiss?() }

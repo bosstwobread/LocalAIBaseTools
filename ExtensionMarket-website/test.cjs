@@ -151,7 +151,7 @@ test('clipboard-assisted Apply access is explained in every language without tou
       writeText: async () => { clipboardWrites++; }
     } });
   } });
-  const label = 'Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.';
+  const label = 'When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard.';
   try {
     view.window.location.hash = '#extension/polish-input';
     await until(() => view.document.querySelector('#tool-dialog').open);
@@ -361,7 +361,8 @@ test('Arabic mirrors reading direction and localizes accessibility, tool permiss
     assert.equal(view.document.documentElement.dir, 'rtl');
     assert.equal(view.document.querySelector('.main-nav').getAttribute('aria-label'), 'التنقل الرئيسي');
     assert.equal(view.document.querySelector('.get-identity img').alt, 'أيقونة تطبيق MacHelper');
-    assert.match(view.document.querySelector('.card-visual img').alt, /معاينة/);
+    const polish = view.document.querySelector('.card-visual .polish-demo');
+    assert.equal(view.document.getElementById(polish.getAttribute('aria-describedby')).textContent, previewCatalogs.ar['polish.description']);
     view.window.location.hash = '#extension/translation';
     await until(() => view.document.querySelector('#tool-dialog').open);
     assert.match(view.document.querySelector('#overview-panel').textContent, /ليست بيئة عزل/);
@@ -793,8 +794,12 @@ test('minimal search and conditional recovery messages follow every interface la
 });
 
 test('illustration copy and every preview location follow all interface languages without AI or changing a query', async () => {
+  const data = clone(catalog);
+  const staticTool = clone(data.extensions.find(tool => tool.slug === 'polish-input'));
+  Object.assign(staticTool, { id: 'example.static', slug: 'static-example', name: 'Static example' });
+  data.extensions.push(staticTool);
   let inferenceCalls = 0;
-  const view = await page({ service: localService(() => { inferenceCalls++; return {ok:true,search:{matches:[],noMatchReason:'No match'}}; }) });
+  const view = await page({ data, service: localService(() => { inferenceCalls++; return {ok:true,search:{matches:[],noMatchReason:'No match'}}; }) });
   try {
     view.document.querySelector('#description-mode').click();
     const draft = 'Keep this request exactly as I typed it.';
@@ -807,11 +812,9 @@ test('illustration copy and every preview location follow all interface language
         assert.equal(element.textContent, previewCatalogs[code][element.dataset.previewKey], `${code}: decorative illustration copy`);
       }
       assert.equal(view.document.querySelector('.preview-popover strong').textContent, previewCatalogs[code]['demo.panelTitle']);
-      for (const image of view.document.querySelectorAll('img[src*="-preview.svg"]')) {
-        assert.ok(image.src.includes(`/extension-market/assets/localized/${code}/`), `${code}: ${image.src}`);
-        const prefix = image.src.endsWith('translation-preview.svg') ? 'translation' : 'polish';
-        assert.equal(image.alt, previewCatalogs[code][`${prefix}.description`]);
-      }
+      const staticPreview = view.document.querySelector('a.card-visual[href="#extension/static-example"] img');
+      assert.ok(staticPreview.src.endsWith(`/extension-market/assets/localized/${code}/polish-input-preview.svg`));
+      assert.equal(staticPreview.alt, previewCatalogs[code]['polish.description']);
       assert.equal(view.document.querySelector('#need-query').value, draft);
       assert.equal(inferenceCalls, 0);
       assert.equal(view.requests.length, 1);
@@ -919,19 +922,19 @@ test('all Translation showcases share the contextual-word demo, localized conten
     const card = [...view.document.querySelectorAll('.extension-card')].find(node => node.querySelector('.card-heading a')?.getAttribute('href') === '#extension/translation');
     assert.ok(hero);
     assert.ok(card.querySelector('.translation-demo'));
-    assert.equal(card.querySelector('.demo-control').closest('a'), null, 'A playback button must not be nested inside a navigation link.');
-    assert.ok(view.document.querySelector('#translation-spotlight .translation-demo'));
-    assert.equal(view.document.querySelectorAll('.translation-demo').length, 3);
+    assert.equal(view.document.querySelector('#spotlight'), null);
+    assert.equal(view.document.querySelectorAll('.translation-demo').length, 2);
     view.window.location.hash = '#extension/translation';
     await until(() => view.document.querySelector('#tool-dialog').open);
     assert.ok(view.document.querySelector('#overview-panel .translation-demo'));
-    assert.equal(view.document.querySelectorAll('.translation-demo').length, 4);
+    assert.equal(view.document.querySelectorAll('.translation-demo').length, 3);
     assert.equal(view.document.querySelector('img[src$="translation-preview.svg"]'), null, 'No Translation showcase should retain the former static illustration.');
     const ids = [...view.document.querySelectorAll('[id]')].map(node => node.id);
     assert.equal(new Set(ids).size, ids.length, 'Cloning the demo must not duplicate IDs.');
     for (const code of Object.keys(previewCatalogs)) {
       input(view, '#site-language', code, 'change');
       for (const demo of view.document.querySelectorAll('.translation-demo')) {
+        assert.equal(demo.querySelector('button, [role="button"]'), null, 'Previews play automatically without playback buttons.');
         for (const element of demo.querySelectorAll('[data-preview-key]')) {
           assert.equal(element.textContent, previewCatalogs[code][element.dataset.previewKey], `${code}: every cloned demo follows the language choice`);
         }
@@ -954,34 +957,53 @@ test('all Translation showcases share the contextual-word demo, localized conten
   } finally { view.close(); }
 });
 
-test('visible Translation demos autoplay repeatedly, support manual stop and replay, and suspend outside the active view without requests or timers', async () => {
+test('Polish-input previews illustrate selection, review and Apply in the collection and overview for every language', async () => {
+  const view = await page();
+  try {
+    assert.equal(view.document.querySelector('.hero .polish-demo'), null);
+    const card = view.document.querySelector('a.card-visual[href="#extension/polish-input"]');
+    assert.ok(card.querySelector('.polish-demo'));
+    card.click();
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    for (const code of Object.keys(previewCatalogs)) {
+      input(view, '#site-language', code, 'change');
+      const previews = view.document.querySelectorAll('.polish-demo');
+      assert.equal(previews.length, 2);
+      assert.ok(view.document.querySelector('#overview-panel .polish-demo'));
+      for (const demo of previews) {
+        assert.equal(demo.querySelector('button, [role="button"], input, textarea, [contenteditable]'), null);
+        for (const attribute of ['aria-labelledby', 'aria-describedby']) {
+          const target = view.document.getElementById(demo.getAttribute(attribute));
+          assert.ok(target && demo.contains(target), `${attribute} describes the correct Polish-input preview`);
+        }
+        for (const key of ['polish.draft', 'polish.result', 'polish.apply', 'polish.selectStep', 'polish.reviewStep', 'polish.applyStep']) {
+          const value = demo.querySelector(`[data-preview-key="${key}"]`).textContent;
+          assert.equal(value, previewCatalogs[code][key], `${code}: ${key}`);
+        }
+      }
+      assert.equal(view.document.querySelector('img[src$="polish-input-preview.svg"]'), null);
+    }
+    assert.equal(view.requests.length, 1);
+    assert.deepEqual(view.localRequests, []);
+  } finally { view.close(); }
+});
+
+test('visible demos autoplay and suspend outside the active view without requests or timers', async () => {
   const environment = demoEnvironment();
   const localCalls = [];
   const view = await page({ beforeApp: environment.install, service: call => localCalls.push(call) });
   try {
     const demo = view.document.querySelector('#translation-demo');
-    const control = demo.querySelector('.demo-control');
     const playing = () => demo.classList.contains('demo-playing');
-    assert.equal(control.hidden, false);
     environment.intersect(demo, 0.19);
     assert.equal(playing(), false);
     environment.intersect(demo, 0.2);
     assert.equal(playing(), true);
-    assert.equal(control.textContent, previewCatalogs.en['demo.stop']);
     assert.equal(environment.pendingTimers, 0, 'CSS playback must not schedule JavaScript completion or loop timers.');
     environment.intersect(demo, 0);
     assert.equal(playing(), false);
     environment.intersect(demo, 1);
     assert.equal(playing(), true, 'Returning to a visible showcase should automatically resume playback.');
-
-    control.click();
-    assert.equal(playing(), false);
-    assert.equal(control.textContent, previewCatalogs.en['demo.replay']);
-    environment.intersect(demo, 0);
-    environment.intersect(demo, 1);
-    assert.equal(playing(), false, 'An explicit Stop must survive visibility changes.');
-    control.click();
-    assert.equal(playing(), true);
 
     environment.visibility(true);
     assert.equal(playing(), false);
@@ -989,25 +1011,27 @@ test('visible Translation demos autoplay repeatedly, support manual stop and rep
     assert.equal(playing(), true);
     input(view, '#site-language', 'ar', 'change');
     assert.equal(view.document.documentElement.dir, 'rtl');
-    assert.equal(control.textContent, previewCatalogs.ar['demo.stop']);
+    assert.equal(playing(), true, 'Changing the language should preserve visible autoplay.');
     assert.equal(demo.querySelector('[data-preview-key="demo.meaning"]').textContent, previewCatalogs.ar['demo.meaning']);
 
-    const oldCard = view.document.querySelector('.extension-card .translation-demo');
-    assert.equal(environment.observed(oldCard), true);
+    const cardPreviews = () => [...view.document.querySelectorAll('.extension-card .translation-demo, .extension-card .polish-demo')];
+    const oldCards = cardPreviews();
+    assert.equal(oldCards.length, 2);
+    assert.ok(oldCards.every(card => environment.observed(card)));
     input(view, '#search', 'no-match-for-cleanup');
-    assert.equal(oldCard.isConnected, false);
-    assert.equal(environment.observed(oldCard), false, 'Filtered-out demos must be unobserved.');
+    assert.ok(oldCards.every(card => !card.isConnected && !environment.observed(card)), 'Filtered-out demos must be unobserved.');
     input(view, '#search', '');
-    const newCard = view.document.querySelector('.extension-card .translation-demo');
-    assert.ok(newCard && newCard !== oldCard);
-    assert.equal(environment.observed(newCard), true);
-    environment.intersect(newCard, 1);
-    assert.equal(newCard.classList.contains('demo-playing'), true);
+    const newCards = cardPreviews();
+    assert.equal(newCards.length, 2);
+    for (const card of newCards) {
+      environment.intersect(card, 1);
+      assert.equal(card.classList.contains('demo-playing'), true);
+    }
 
     view.window.location.hash = '#extension/translation';
     await until(() => view.document.querySelector('#tool-dialog').open);
     assert.equal(playing(), false, 'Background showcases should suspend while a modal is open.');
-    assert.equal(newCard.classList.contains('demo-playing'), false);
+    assert.ok(newCards.every(card => !card.classList.contains('demo-playing')));
     const detail = view.document.querySelector('#overview-panel .translation-demo');
     environment.intersect(detail, 1);
     assert.equal(detail.classList.contains('demo-playing'), true);
@@ -1031,23 +1055,32 @@ test('visible Translation demos autoplay repeatedly, support manual stop and rep
   } finally { view.close(); }
 });
 
-test('every Translation demo respects reduced motion and resumes visible autoplay only when motion is allowed', async () => {
+test('both extensions respect reduced motion and resume visible autoplay only when motion is allowed', async () => {
   const environment = demoEnvironment({ reducedMotion: true });
   const view = await page({ beforeApp: environment.install });
   try {
-    const demos = [...view.document.querySelectorAll('.translation-demo')];
+    const demos = [...view.document.querySelectorAll('.translation-demo, .polish-demo')];
     assert.equal(demos.length, 3);
     for (const demo of demos) {
       environment.intersect(demo, 1);
-      demo.querySelector('.demo-control').click();
       assert.equal(demo.classList.contains('demo-playing'), false);
-      assert.equal(demo.querySelector('[data-preview-key="demo.meaning"]').textContent, previewCatalogs.en['demo.meaning']);
+      const resultKey = demo.classList.contains('polish-demo') ? 'polish.result' : 'demo.meaning';
+      assert.equal(demo.querySelector(`[data-preview-key="${resultKey}"]`).textContent, previewCatalogs.en[resultKey]);
     }
     assert.equal(environment.pendingTimers, 0);
     environment.motion(false);
     for (const demo of demos) assert.equal(demo.classList.contains('demo-playing'), true);
     environment.motion(true);
     for (const demo of demos) assert.equal(demo.classList.contains('demo-playing'), false);
+    view.window.location.hash = '#extension/polish-input';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    const detail = view.document.querySelector('#overview-panel .polish-demo');
+    environment.intersect(detail, 1);
+    assert.equal(detail.classList.contains('demo-playing'), false);
+    environment.motion(false);
+    assert.equal(detail.classList.contains('demo-playing'), true);
+    view.document.querySelector('#install-tab').click();
+    assert.equal(detail.classList.contains('demo-playing'), false);
     assert.equal(environment.pendingTimers, 0);
     assert.equal(view.requests.length, 1);
   } finally { view.close(); }

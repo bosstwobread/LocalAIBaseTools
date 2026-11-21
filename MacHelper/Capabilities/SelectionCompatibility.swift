@@ -30,34 +30,88 @@ struct SelectionCompatibilityProcess: Hashable, Sendable {
     }
 }
 
-struct SelectionCompatibilityActivationPolicy {
-    private var attempted: Set<SelectionCompatibilityProcess> = []
-    private var pendingRefresh: [SelectionCompatibilityProcess: TimeInterval] = [:]
+/// AX may return a fresh wrapper for the same window on each read. Compare
+/// the underlying elements, retaining them so reused addresses cannot alias.
+struct SelectionWindowIdentity: Hashable, @unchecked Sendable {
+    let element: AXUIElement
 
-    mutating func begin(source: SelectionCompatibilityProcess, explicitGesture: Bool, enabled: Bool,
-                        trusted: Bool, currentSource: Bool) -> Bool {
-        guard explicitGesture, enabled, trusted, currentSource, source.processIdentifier > 1,
-              !source.bundleIdentifier.isEmpty, attempted.count < 256, !attempted.contains(source) else { return false }
-        attempted.insert(source)
+    init(_ element: AXUIElement) { self.element = element }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { CFEqual(lhs.element, rhs.element) }
+    func hash(into hasher: inout Hasher) { hasher.combine(CFHash(element)) }
+}
+
+private struct SelectionCompatibilityTarget: Hashable {
+    let source: SelectionCompatibilityProcess
+    let window: SelectionWindowIdentity?
+}
+
+private struct SelectionCompatibilityActivationPolicy {
+    private enum ProbeAttempt { case first, retryAvailable, last }
+    private var attempted: [SelectionCompatibilityTarget: ProbeAttempt] = [:]
+    private var unsupported: Set<SelectionCompatibilityProcess> = []
+    private var pendingRefresh: [SelectionCompatibilityTarget: TimeInterval] = [:]
+
+    mutating func begin(_ target: SelectionCompatibilityTarget) -> Bool {
+        guard target.source.processIdentifier > 1, !target.source.bundleIdentifier.isEmpty,
+              !unsupported.contains(target.source) else { return false }
+        switch attempted[target] {
+        case nil where attempted.count < 256:
+            attempted[target] = .first
+        case .retryAvailable:
+            attempted[target] = .last
+        default:
+            return false
+        }
         return true
     }
 
-    /// A stale context before the write made no request. Allow a later explicit
-    /// gesture to try again; actual attempts and known unsupported cases stay final.
-    mutating func releaseStaleReservation(for source: SelectionCompatibilityProcess) {
-        attempted.remove(source)
+    /// A stale check before a write hasn't used this window's request.
+    mutating func release(_ target: SelectionCompatibilityTarget) {
+        if attempted[target] == .last {
+            attempted[target] = .retryAvailable
+        } else {
+            attempted.removeValue(forKey: target)
+        }
     }
 
-    mutating func awaitRefresh(for source: SelectionCompatibilityProcess, readyAt: TimeInterval) {
-        pendingRefresh[source] = readyAt
+    /// A timeout does not establish lack of support. Allow one more probe on a
+    /// later selection gesture without ever repeating a dispatched write.
+    mutating func inconclusive(_ target: SelectionCompatibilityTarget) {
+        if pendingRefresh[target] != nil {
+            if attempted[target] == .first {
+                attempted[target] = .last
+            } else {
+                finishRefresh(for: target)
+            }
+        } else if attempted[target] == .first {
+            attempted[target] = .retryAvailable
+        }
     }
 
-    func remainingDelay(for source: SelectionCompatibilityProcess, now: TimeInterval) -> TimeInterval? {
-        pendingRefresh[source].map { max(0, $0 - now) }
+    mutating func markUnsupported(_ source: SelectionCompatibilityProcess) {
+        unsupported.insert(source)
+        pendingRefresh = pendingRefresh.filter { $0.key.source != source }
     }
 
-    mutating func finishRefresh(for source: SelectionCompatibilityProcess) {
-        pendingRefresh.removeValue(forKey: source)
+    mutating func awaitRefresh(for target: SelectionCompatibilityTarget, readyAt: TimeInterval) {
+        pendingRefresh[target] = readyAt
+        deferOtherWindows(of: target.source, until: readyAt)
+    }
+
+    /// Electron debounces writes on the process, even for different windows.
+    mutating func deferOtherWindows(of source: SelectionCompatibilityProcess, until readyAt: TimeInterval) {
+        for target in pendingRefresh.keys where target.source == source {
+            pendingRefresh[target] = max(pendingRefresh[target] ?? readyAt, readyAt)
+        }
+    }
+
+    func remainingDelay(for target: SelectionCompatibilityTarget, now: TimeInterval) -> TimeInterval? {
+        pendingRefresh[target].map { max(0, $0 - now) }
+    }
+
+    mutating func finishRefresh(for target: SelectionCompatibilityTarget) {
+        pendingRefresh.removeValue(forKey: target)
     }
 }
 
@@ -84,9 +138,9 @@ struct SelectionCompatibilitySettlement {
 }
 
 protocol SelectionCompatibilityAccessibility {
-    func isAdvertised(source: SelectionCompatibilityProcess) -> Bool
-    func isSettable(source: SelectionCompatibilityProcess) -> Bool
-    func isEnabled(source: SelectionCompatibilityProcess) -> Bool
+    func isAdvertised(source: SelectionCompatibilityProcess) -> Bool?
+    func isSettable(source: SelectionCompatibilityProcess) -> Bool?
+    func isEnabled(source: SelectionCompatibilityProcess) -> Bool?
     func request(source: SelectionCompatibilityProcess) -> Bool
 }
 
@@ -96,18 +150,22 @@ private struct SystemSelectionCompatibilityAccessibility: SelectionCompatibility
         AXUIElementSetMessagingTimeout(application, 0.12)
         return application
     }
-    func isAdvertised(source: SelectionCompatibilityProcess) -> Bool {
+    func isAdvertised(source: SelectionCompatibilityProcess) -> Bool? {
         var names: CFArray?
-        return AXUIElementCopyAttributeNames(application(source), &names) == .success &&
-            (names as? [String])?.contains("AXManualAccessibility") == true
+        guard AXUIElementCopyAttributeNames(application(source), &names) == .success,
+              let attributes = names as? [String] else { return nil }
+        return attributes.contains("AXManualAccessibility")
     }
-    func isSettable(source: SelectionCompatibilityProcess) -> Bool {
+    func isSettable(source: SelectionCompatibilityProcess) -> Bool? {
         var writable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(application(source), "AXManualAccessibility" as CFString, &writable) == .success && writable.boolValue
+        let result = AXUIElementIsAttributeSettable(application(source), "AXManualAccessibility" as CFString, &writable)
+        if result == .attributeUnsupported { return false }
+        return result == .success ? writable.boolValue : nil
     }
-    func isEnabled(source: SelectionCompatibilityProcess) -> Bool {
+    func isEnabled(source: SelectionCompatibilityProcess) -> Bool? {
         var current: CFTypeRef?
-        return AXUIElementCopyAttributeValue(application(source), "AXManualAccessibility" as CFString, &current) == .success && current as? Bool == true
+        guard AXUIElementCopyAttributeValue(application(source), "AXManualAccessibility" as CFString, &current) == .success else { return nil }
+        return current as? Bool
     }
     func request(source: SelectionCompatibilityProcess) -> Bool {
         AXUIElementSetAttributeValue(application(source), "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success
@@ -135,63 +193,78 @@ final class SelectionCompatibilityActivator: @unchecked Sendable {
         self.accessibility = accessibility ?? SystemSelectionCompatibilityAccessibility()
     }
 
-    func prepare(source: SelectionCompatibilityProcess, explicitGesture: Bool,
-                 currentSource: () -> Bool) -> SelectionCompatibilityActivationOutcome {
+    func prepare(source: SelectionCompatibilityProcess, window: SelectionWindowIdentity? = nil,
+                 explicitGesture: Bool, selectionReadFailed: Bool = false, currentSource: () -> Bool) -> SelectionCompatibilityActivationOutcome {
         lock.lock(); defer { lock.unlock() }
-        guard explicitGesture, enabled(), trusted(), currentSource() else { return .notRequested }
+        guard explicitGesture, window == nil || selectionReadFailed, enabled(), trusted(), currentSource() else { return .notRequested }
+        let target = SelectionCompatibilityTarget(source: source, window: window)
         // A later deliberate gesture may resume the one pending refresh. It
         // must not repeat the first request or restart Electron's debounce.
-        if policy.remainingDelay(for: source, now: now()) != nil { return .pendingSettlement }
-        guard policy.begin(source: source, explicitGesture: explicitGesture, enabled: enabled(),
-                           trusted: trusted(), currentSource: currentSource()) else { return .notRequested }
+        if policy.remainingDelay(for: target, now: now()) != nil { return .pendingSettlement }
+        guard policy.begin(target) else { return .notRequested }
         let advertised = accessibility.isAdvertised(source: source)
         guard enabled(), trusted(), currentSource() else {
-            policy.releaseStaleReservation(for: source); return .stale
+            policy.release(target); return .stale
         }
-        guard advertised else { return .unsupported }
+        if let stopped = check(advertised, for: target, unsupported: .unsupported) { return stopped }
         let settable = accessibility.isSettable(source: source)
         guard enabled(), trusted(), currentSource() else {
-            policy.releaseStaleReservation(for: source); return .stale
+            policy.release(target); return .stale
         }
-        guard settable else { return .notSettable }
+        if let stopped = check(settable, for: target, unsupported: .notSettable) { return stopped }
         let alreadyEnabled = accessibility.isEnabled(source: source)
         guard enabled(), trusted(), currentSource() else {
-            policy.releaseStaleReservation(for: source); return .stale
+            policy.release(target); return .stale
         }
-        if alreadyEnabled { return .alreadyEnabled }
+        // A verified editor window can miss the support notification even if
+        // complete mode is already on. A failed read permits one rebroadcast.
+        guard let alreadyEnabled else { policy.inconclusive(target); return .failed }
+        if alreadyEnabled && window == nil { return .alreadyEnabled }
         guard accessibility.request(source: source) else { return .failed }
-        policy.awaitRefresh(for: source, readyAt: now() + 2.2)
+        policy.awaitRefresh(for: target, readyAt: now() + 2.2)
         return .requested
     }
 
-    func delayBeforeRefresh(source: SelectionCompatibilityProcess) -> TimeInterval? {
+    func delayBeforeRefresh(source: SelectionCompatibilityProcess, window: SelectionWindowIdentity? = nil) -> TimeInterval? {
         lock.lock(); defer { lock.unlock() }
-        return policy.remainingDelay(for: source, now: now())
+        return policy.remainingDelay(for: .init(source: source, window: window), now: now())
     }
 
     /// Electron emits its support-change event before its delayed mode update.
     /// One settled second true refreshes that event. Never gate this on the
     /// exact-mode getter, which may remain false when additional flags are set.
-    func refreshAfterSettlement(source: SelectionCompatibilityProcess,
+    func refreshAfterSettlement(source: SelectionCompatibilityProcess, window: SelectionWindowIdentity? = nil,
                                 currentSource: () -> Bool) -> SelectionCompatibilityActivationOutcome {
         lock.lock(); defer { lock.unlock() }
-        guard let delay = policy.remainingDelay(for: source, now: now()) else { return .notRequested }
+        let target = SelectionCompatibilityTarget(source: source, window: window)
+        guard let delay = policy.remainingDelay(for: target, now: now()) else { return .notRequested }
         guard enabled(), trusted(), currentSource() else { return .stale }
         guard delay <= 0 else { return .pendingSettlement }
         let advertised = accessibility.isAdvertised(source: source)
         guard enabled(), trusted(), currentSource() else { return .stale }
-        guard advertised else {
-            policy.finishRefresh(for: source); return .unsupported
-        }
+        if let stopped = check(advertised, for: target, unsupported: .unsupported) { return stopped }
         let settable = accessibility.isSettable(source: source)
         guard enabled(), trusted(), currentSource() else { return .stale }
-        guard settable else {
-            policy.finishRefresh(for: source); return .notSettable
-        }
+        if let stopped = check(settable, for: target, unsupported: .notSettable) { return stopped }
         // Consume before the write, so failure or a subsequent context change
         // cannot cause a third request. Stale pre-write checks leave it pending
         // for a future explicit gesture, never for an ordinary polling timer.
-        policy.finishRefresh(for: source)
-        return accessibility.request(source: source) ? .refreshed : .failed
+        policy.finishRefresh(for: target)
+        guard accessibility.request(source: source) else { return .failed }
+        policy.deferOtherWindows(of: source, until: now() + 2.2)
+        return .refreshed
+    }
+
+    private func check(_ supported: Bool?, for target: SelectionCompatibilityTarget,
+                       unsupported: SelectionCompatibilityActivationOutcome) -> SelectionCompatibilityActivationOutcome? {
+        guard let supported else {
+            policy.inconclusive(target)
+            return .failed
+        }
+        guard supported else {
+            policy.markUnsupported(target.source)
+            return unsupported
+        }
+        return nil
     }
 }

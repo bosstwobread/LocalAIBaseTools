@@ -15,6 +15,32 @@ struct SelectionFocusPath<Element> {
     }
 }
 
+/// A missing focus attribute during a nonactivating panel click is different
+/// from observing an actual foreign, changed, malformed or protected control.
+enum SelectionEditFocusStatus { case current, unavailable, changed }
+
+extension SelectionFocusPath {
+    func editStatus(allowSameEditor: Bool,
+                    resolve: (Bool) -> SelectionFocusResolution<Element>,
+                    sameElement: (Element, Element) -> Bool) -> SelectionEditFocusStatus {
+        func classify(_ resolution: SelectionFocusResolution<Element>) -> SelectionEditFocusStatus {
+            switch resolution {
+            case .unavailable: return .unavailable
+            case .blocked: return .changed
+            case .path(let actual):
+                if matches(actual, sameElement: sameElement) { return .current }
+                // Each freshly resolved intermediate wrapper has already been
+                // checked for protection, cycles and truncation. Only the
+                // identical focused editor can survive a changed wrapper/root.
+                return allowSameEditor && sameElement(leaf, actual.leaf) ? .current : .changed
+            }
+        }
+        let primary = classify(resolve(systemWide))
+        guard primary == .unavailable, allowSameEditor else { return primary }
+        return classify(resolve(!systemWide))
+    }
+}
+
 enum SelectionFocusLink<Element> {
     case leaf, element(Element), invalid
 }

@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import MacHelper
 @testable import MacHelperCapabilities
 
 /// Exercises actual offscreen AppKit controls, without selection reads, AI,
@@ -12,6 +13,22 @@ final class SelectionToolbarTests: XCTestCase {
         }
         return NSApplication.shared.windows.flatMap { window in
             window.contentView.map(visit) ?? []
+        }
+    }
+
+    func testApplyKeepsItsLabelAcrossReplacementMethodsAndOutcomes() throws {
+        _ = NSApplication.shared
+        let panels = FloatingCapabilityPanels(toolTitle: "Polish fixture", systemSymbolName: "pencil")
+        let apply = try XCTUnwrap(buttons().first { $0.target === panels && $0.action == NSSelectorFromString("applyResult") })
+        XCTAssertEqual(apply.title, L("Apply"))
+        for menuPaste in [false, true] {
+            panels.configureReplacement(allowed: true, available: true, usesMenuPaste: menuPaste)
+            for outcome: SelectionReplacementOutcome in [.pasteRequested, .unverified, .changedByEditor, .confirmed] {
+                panels.replacementSucceeded(outcome)
+                XCTAssertEqual(apply.title, L("Apply"))
+                XCTAssertFalse(apply.isEnabled)
+                XCTAssertFalse(apply.accessibilityHelp()?.isEmpty ?? true)
+            }
         }
     }
 

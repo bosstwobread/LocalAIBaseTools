@@ -49,6 +49,41 @@ final class GeometryTests: XCTestCase {
                                                visibleFrames: [first, second]), second)
     }
 
+    func testKeyboardSelectionWithEmptyAXBoundsStaysInTheEditorOnAnotherDisplay() {
+        let primary = CGRect(x: 0, y: 0, width: 1400, height: 900)
+        let secondary = CGRect(x: 1400, y: 350, width: 1200, height: 800)
+        let editor = CGRect(x: 1500, y: 475, width: 800, height: 500)
+        let placement = SelectionToolbarAnchor(screens: [primary, secondary],
+            pointer: CGPoint(x: 200, y: 200), fromPointerGesture: false)
+        let bounds = placement.anchor(range: .zero, editor: editor, window: secondary)
+        XCTAssertEqual(bounds.origin, CGPoint(x: editor.midX, y: editor.midY))
+        XCTAssertEqual(FloatingGeometry.screen(for: bounds, visibleFrames: [primary, secondary]), secondary)
+    }
+
+    func testKeyboardAnchorFallsBackToVisibleWindowWhenEditorIsOffscreen() {
+        let primary = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let upper = CGRect(x: 0, y: 800, width: 900, height: 600)
+        let window = CGRect(x: 200, y: 1250, width: 1400, height: 400)
+        let placement = SelectionToolbarAnchor(screens: [primary, upper], pointer: CGPoint(x: 80, y: 80), fromPointerGesture: false)
+        let bounds = placement.anchor(range: CGRect(x: 30, y: 0, width: 170, height: 20), editor: .infinite, window: window)
+        let visible = window.intersection(upper)
+        XCTAssertEqual(bounds.origin, CGPoint(x: visible.midX, y: visible.midY))
+        let good = CGRect(x: 290, y: 1300, width: 130, height: 18)
+        XCTAssertEqual(placement.anchor(range: good, editor: nil, window: window), good)
+    }
+
+    func testMouseSelectionDiscardsRemoteOrMisplacedBoundsAndUsesGestureDisplay() {
+        let primary = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let secondary = CGRect(x: -900, y: 0, width: 900, height: 700)
+        let pointer = CGPoint(x: -60, y: 130)
+        let placement = SelectionToolbarAnchor(screens: [primary, secondary], pointer: pointer, fromPointerGesture: true)
+        for rect in [CGRect(x: 20, y: 10, width: 60, height: 20), CGRect(x: -300, y: 500, width: 60, height: 20)] {
+            XCTAssertEqual(placement.anchor(range: rect, editor: nil, window: secondary).origin, pointer)
+        }
+        let acrossDisplays = CGRect(x: -75, y: 127, width: 120, height: 18)
+        XCTAssertEqual(placement.anchor(range: acrossDisplays, editor: nil, window: nil), acrossDisplays.intersection(secondary))
+    }
+
     func testNoScreensProducesNoPlacement() {
         XCTAssertNil(FloatingGeometry.screen(for: .zero, visibleFrames: []))
     }

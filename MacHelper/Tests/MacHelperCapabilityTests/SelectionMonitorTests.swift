@@ -76,7 +76,7 @@ final class SelectionMonitorTests: XCTestCase {
     func testSelectAllRecognizedWithEitherReleaseOrder() async throws {
         for (code, flags): (UInt16, NSEvent.ModifierFlags) in [(0, .command), (124, [.command, .shift])] {
           for commandReleasedFirst in [false, true] {
-            let monitor = SelectionMonitor()
+            let monitor = SelectionMonitor(isKeyDown: { $0 == code })
             var gestures: [Bool] = []
             monitor.onSelectionGesture = { gestures.append($0) }
             monitor.handle(try key(.flagsChanged, code: 55, flags: .command), local: false)
@@ -84,9 +84,14 @@ final class SelectionMonitorTests: XCTestCase {
             XCTAssertFalse(monitor.consumeCopyGesture(), "Command still suppresses the toolbar")
             if commandReleasedFirst {
                 monitor.handle(try key(.flagsChanged, code: 55), local: false)
+                XCTAssertTrue(gestures.isEmpty)
+                XCTAssertTrue(monitor.isReadDeferred(at: .greatestFiniteMagnitude), "Polling must wait for the selection key")
+                XCTAssertFalse(monitor.consumeCopyGesture())
                 monitor.handle(try key(.keyUp, code: code), local: false)
             } else {
                 monitor.handle(try key(.keyUp, code: code, flags: flags), local: false)
+                XCTAssertTrue(gestures.isEmpty)
+                XCTAssertFalse(monitor.consumeCopyGesture())
                 monitor.handle(try key(.flagsChanged, code: 55), local: false)
             }
             XCTAssertEqual(gestures, [true])
@@ -126,8 +131,42 @@ final class SelectionMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandReleaseRecoversConsumedSelectionKeyUpOnce() async throws {
+        for receivesLateRelease in [false, true] {
+            let monitor = SelectionMonitor(isKeyDown: { _ in false })
+            var gestures: [Bool] = []
+            monitor.onSelectionGesture = { gestures.append($0) }
+            monitor.handle(try key(.keyDown, code: 0, flags: .command), local: false)
+            monitor.handle(try key(.flagsChanged, code: 55), local: false)
+            if receivesLateRelease { monitor.handle(try key(.keyUp, code: 0), local: false) }
+            XCTAssertEqual(gestures, [true])
+            XCTAssertTrue(monitor.consumeCopyGesture(), "A late selection keyUp must not cancel the gesture")
+            XCTAssertFalse(monitor.consumeCopyGesture())
+            monitor.handle(try key(.keyDown, code: 0), local: false)
+            monitor.handle(try key(.keyUp, code: 0), local: false)
+            XCTAssertEqual(gestures, [true, false], "Typing the same letter later is ordinary input")
+            monitor.stop()
+        }
+    }
+
+    @MainActor
+    func testInterveningTypingAfterCommandReleaseCancelsStillHeldSelectionKey() async throws {
+        let monitor = SelectionMonitor(isKeyDown: { _ in true })
+        var gestures: [Bool] = []
+        monitor.onSelectionGesture = { gestures.append($0) }
+        monitor.handle(try key(.keyDown, code: 0, flags: .command), local: false)
+        monitor.handle(try key(.flagsChanged, code: 55), local: false)
+        monitor.handle(try key(.keyDown, code: 11), local: false)
+        monitor.handle(try key(.keyUp, code: 11), local: false)
+        monitor.handle(try key(.keyUp, code: 0), local: false)
+        XCTAssertFalse(gestures.contains(true))
+        XCTAssertFalse(monitor.consumeCopyGesture())
+        monitor.stop()
+    }
+
+    @MainActor
     func testRepeatingSelectAllDoesNotArmAdditionalCopyAttempts() async throws {
-        let monitor = SelectionMonitor()
+        let monitor = SelectionMonitor(isKeyDown: { _ in true })
         var gestures: [Bool] = []
         monitor.onSelectionGesture = { gestures.append($0) }
         monitor.handle(try key(.flagsChanged, code: 55, flags: .command), local: false)
@@ -136,10 +175,11 @@ final class SelectionMonitorTests: XCTestCase {
             monitor.handle(try key(.keyDown, code: 0, flags: .command, repeated: true), local: false)
         }
         monitor.handle(try key(.flagsChanged, code: 55), local: false)
-        XCTAssertTrue(monitor.consumeCopyGesture())
+        XCTAssertFalse(monitor.consumeCopyGesture())
         monitor.handle(try key(.keyUp, code: 0), local: false)
         XCTAssertEqual(gestures, [true])
-        XCTAssertFalse(monitor.consumeCopyGesture(), "The late key release must not arm a second Copy")
+        XCTAssertTrue(monitor.consumeCopyGesture())
+        XCTAssertFalse(monitor.consumeCopyGesture(), "Repeating a shortcut still allows only one Copy")
         monitor.stop()
     }
 

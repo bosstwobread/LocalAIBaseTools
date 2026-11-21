@@ -53,6 +53,34 @@ final class SelectedMarkerTextReaderTests: XCTestCase {
         XCTAssertNil(reader(string: { _ in "ab\0cd" }).read())
     }
 
+    func testOptionalMarkerTimeoutLeavesToolbarEvidenceUsable() {
+        let span = SelectedTextSpan(text: "draft", range: NSRange(location: 1, length: 5))
+        for timeout in [false, true] {
+            var canRead = true
+            let evidence = SelectionMarkerEvidence<Int>.capture(for: span, canRead: { canRead }, marker: {
+                canRead = !timeout
+                return timeout ? 42 : nil
+            }, selectedSpan: { XCTFail("Unusable markers do not need further reads"); return .empty },
+               sameOrigin: { XCTFail("No origin check needed"); return false })
+            guard case .unavailable = evidence else { return XCTFail("Missing markers cannot invalidate the verified selection") }
+        }
+    }
+
+    func testOptionalMarkersBelongToTheVerifiedSpanAndSource() {
+        let span = SelectedTextSpan(text: "é", range: NSRange(location: 20, length: 1))
+        func capture(_ read: SelectedTextReadResult, origin: Bool = true) -> SelectionMarkerEvidence<Int> {
+            .capture(for: span, canRead: { true }, marker: { 42 }, selectedSpan: { read }, sameOrigin: { origin })
+        }
+        guard case .verified(42) = capture(.selected(span)) else { return XCTFail("Marker proof lost") }
+        guard case .unavailable = capture(.unavailable) else { return XCTFail("Inconclusive marker proof discarded the selection") }
+        for changed in [SelectedTextReadResult.empty,
+                        .selected(.init(text: "é", range: NSRange(location: 30, length: 1))),
+                        .selected(.init(text: "e\u{301}", range: span.range))] {
+            guard case .selectionChanged = capture(changed) else { return XCTFail("Accepted a different selection") }
+        }
+        guard case .selectionChanged = capture(.selected(span), origin: false) else { return XCTFail("Accepted a different source") }
+    }
+
     func testAttributedFallbackIsOnlyForAbsentPlainRepresentation() {
         var calls = 0
         let attributed = { () -> SelectedTextAttributeRead in calls += 1; return .text("draft") }

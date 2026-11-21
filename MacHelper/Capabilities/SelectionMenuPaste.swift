@@ -169,8 +169,8 @@ struct SelectionMenuPasteTransaction {
     }
 }
 
-/// This target is only for a separately labelled explicit Paste into the app's
-/// current editable selection. Strict Apply uses AccessibilitySelectionEditTarget.
+/// Apply uses this target for an explicit menu paste into the original window's
+/// current editable selection when no exact Accessibility range is available.
 final class SelectionMenuPasteTarget: @unchecked Sendable {
     private let source: SelectionCopyTarget
     private let menu: SelectionEditMenu

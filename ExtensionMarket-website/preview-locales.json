@@ -27,8 +27,6 @@
       "demo.select": "Select a word",
       "demo.click": "Click to translate",
       "demo.read": "Meaning in this sentence",
-      "demo.replay": "Replay demo",
-      "demo.stop": "Stop demo",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · shared AI settings",
       "demo.copy": "Copy",
@@ -50,7 +48,10 @@
       "polish.hint": "Apply replaces your selection in supported editors. Copy is also available.",
       "polish.copy": "Copy",
       "polish.apply": "Apply",
-      "polish.instruction": "SELECT. POLISH. REVIEW. APPLY."
+      "polish.instruction": "SELECT. POLISH. REVIEW. APPLY.",
+      "polish.selectStep": "Select a draft",
+      "polish.reviewStep": "Review the edit",
+      "polish.applyStep": "Apply to selection"
     },
     "zh-Hans": {
       "hero.noteTitle": "周五的备忘",
@@ -78,8 +79,6 @@
       "demo.select": "选中单词",
       "demo.click": "点击翻译",
       "demo.read": "读懂此处词义",
-      "demo.replay": "重新播放演示",
-      "demo.stop": "停止演示",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · 共享 AI 设置",
       "demo.copy": "复制",
@@ -101,7 +100,10 @@
       "polish.hint": "支持的编辑框可应用修改；也可复制结果。",
       "polish.copy": "复制",
       "polish.apply": "应用",
-      "polish.instruction": "选择。润色。预览。应用。"
+      "polish.instruction": "选择。润色。预览。应用。",
+      "polish.selectStep": "选中草稿文字",
+      "polish.reviewStep": "查看润色结果",
+      "polish.applyStep": "应用到选区"
     },
     "zh-Hant": {
       "hero.noteTitle": "週五的備忘",
@@ -129,8 +131,6 @@
       "demo.select": "選取單字",
       "demo.click": "點擊翻譯",
       "demo.read": "理解此處詞義",
-      "demo.replay": "重新播放示範",
-      "demo.stop": "停止示範",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · 共用 AI 設定",
       "demo.copy": "複製",
@@ -152,7 +152,10 @@
       "polish.hint": "支援的編輯欄位可套用修改；也可複製結果。",
       "polish.copy": "複製",
       "polish.apply": "套用",
-      "polish.instruction": "選取。潤飾。預覽。套用。"
+      "polish.instruction": "選取。潤飾。預覽。套用。",
+      "polish.selectStep": "選取草稿文字",
+      "polish.reviewStep": "查看潤飾結果",
+      "polish.applyStep": "套用至選取範圍"
     },
     "es": {
       "hero.noteTitle": "Una nota para el viernes",
@@ -180,8 +183,6 @@
       "demo.select": "Selecciona una palabra",
       "demo.click": "Haz clic para traducir",
       "demo.read": "Significado en esta oración",
-      "demo.replay": "Repetir demostración",
-      "demo.stop": "Detener demostración",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · ajustes de IA compartidos",
       "demo.copy": "Copiar",
@@ -203,7 +204,10 @@
       "polish.hint": "Aplica en campos editables compatibles o copia el resultado.",
       "polish.copy": "Copiar",
       "polish.apply": "Aplicar",
-      "polish.instruction": "SELECCIONA. MEJORA. REVISA. APLICA."
+      "polish.instruction": "SELECCIONA. MEJORA. REVISA. APLICA.",
+      "polish.selectStep": "Selecciona el texto",
+      "polish.reviewStep": "Revisa los cambios",
+      "polish.applyStep": "Aplica a la selección"
     },
     "fr": {
       "hero.noteTitle": "Une note pour vendredi",
@@ -231,8 +235,6 @@
       "demo.select": "Sélectionnez un mot",
       "demo.click": "Cliquez pour traduire",
       "demo.read": "Sens dans cette phrase",
-      "demo.replay": "Revoir la démonstration",
-      "demo.stop": "Arrêter la démonstration",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · réglages IA partagés",
       "demo.copy": "Copier",
@@ -254,7 +256,10 @@
       "polish.hint": "Applique dans un champ compatible ou copie le résultat.",
       "polish.copy": "Copier",
       "polish.apply": "Appliquer",
-      "polish.instruction": "SÉLECTIONNER. AMÉLIORER. RELIRE. APPLIQUER."
+      "polish.instruction": "SÉLECTIONNER. AMÉLIORER. RELIRE. APPLIQUER.",
+      "polish.selectStep": "Sélectionnez le texte",
+      "polish.reviewStep": "Relisez la suggestion",
+      "polish.applyStep": "Appliquez à la sélection"
     },
     "de": {
       "hero.noteTitle": "Eine Notiz für Freitag",
@@ -282,8 +287,6 @@
       "demo.select": "Ein Wort auswählen",
       "demo.click": "Zum Übersetzen klicken",
       "demo.read": "Bedeutung in diesem Satz",
-      "demo.replay": "Demo erneut abspielen",
-      "demo.stop": "Demo stoppen",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · gemeinsame KI-Einstellungen",
       "demo.copy": "Kopieren",
@@ -305,7 +308,10 @@
       "polish.hint": "In unterstützten Eingabefeldern übernehmen oder kopieren.",
       "polish.copy": "Kopieren",
       "polish.apply": "Übernehmen",
-      "polish.instruction": "MARKIEREN. VERBESSERN. PRÜFEN. ÜBERNEHMEN."
+      "polish.instruction": "MARKIEREN. VERBESSERN. PRÜFEN. ÜBERNEHMEN.",
+      "polish.selectStep": "Text markieren",
+      "polish.reviewStep": "Änderung prüfen",
+      "polish.applyStep": "Für Auswahl übernehmen"
     },
     "ja": {
       "hero.noteTitle": "金曜日のメモ",
@@ -333,8 +339,6 @@
       "demo.select": "単語を選択",
       "demo.click": "クリックして翻訳",
       "demo.read": "この文での意味を読む",
-      "demo.replay": "デモをもう一度再生",
-      "demo.stop": "デモを停止",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · 共通の AI 設定",
       "demo.copy": "コピー",
@@ -356,7 +360,10 @@
       "polish.hint": "対応する入力欄に適用するか、結果をコピーできます。",
       "polish.copy": "コピー",
       "polish.apply": "適用",
-      "polish.instruction": "選択。推敲。確認。適用。"
+      "polish.instruction": "選択。推敲。確認。適用。",
+      "polish.selectStep": "下書きを選択",
+      "polish.reviewStep": "修正案を確認",
+      "polish.applyStep": "選択範囲に適用"
     },
     "ko": {
       "hero.noteTitle": "금요일 메모",
@@ -384,8 +391,6 @@
       "demo.select": "단어 선택",
       "demo.click": "클릭하여 번역",
       "demo.read": "이 문장에서의 뜻",
-      "demo.replay": "데모 다시 재생",
-      "demo.stop": "데모 중지",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · 공유 AI 설정",
       "demo.copy": "복사",
@@ -407,7 +412,10 @@
       "polish.hint": "지원되는 입력란에 적용하거나 결과를 복사하세요.",
       "polish.copy": "복사",
       "polish.apply": "적용",
-      "polish.instruction": "선택. 다듬기. 검토. 적용."
+      "polish.instruction": "선택. 다듬기. 검토. 적용.",
+      "polish.selectStep": "초안 선택",
+      "polish.reviewStep": "수정안 검토",
+      "polish.applyStep": "선택 영역에 적용"
     },
     "pt": {
       "hero.noteTitle": "Uma nota para sexta-feira",
@@ -435,8 +443,6 @@
       "demo.select": "Selecione uma palavra",
       "demo.click": "Clique para traduzir",
       "demo.read": "Significado nesta frase",
-      "demo.replay": "Repetir demonstração",
-      "demo.stop": "Parar demonstração",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · configurações de IA compartilhadas",
       "demo.copy": "Copiar",
@@ -458,7 +464,10 @@
       "polish.hint": "Aplique em campos editáveis compatíveis ou copie o resultado.",
       "polish.copy": "Copiar",
       "polish.apply": "Aplicar",
-      "polish.instruction": "SELECIONE. MELHORE. REVISE. APLIQUE."
+      "polish.instruction": "SELECIONE. MELHORE. REVISE. APLIQUE.",
+      "polish.selectStep": "Selecione o texto",
+      "polish.reviewStep": "Revise a sugestão",
+      "polish.applyStep": "Aplique à seleção"
     },
     "ar": {
       "hero.noteTitle": "ملاحظة ليوم الجمعة",
@@ -486,8 +495,6 @@
       "demo.select": "حدّد كلمة",
       "demo.click": "انقر للترجمة",
       "demo.read": "المعنى في هذه الجملة",
-      "demo.replay": "إعادة تشغيل العرض",
-      "demo.stop": "إيقاف العرض",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · إعدادات الذكاء الاصطناعي المشتركة",
       "demo.copy": "نسخ",
@@ -509,7 +516,10 @@
       "polish.hint": "طبّق في حقل تحرير مدعوم أو انسخ النتيجة.",
       "polish.copy": "نسخ",
       "polish.apply": "تطبيق",
-      "polish.instruction": "حدّد. حسّن. راجع. طبّق."
+      "polish.instruction": "حدّد. حسّن. راجع. طبّق.",
+      "polish.selectStep": "حدّد نص المسودة",
+      "polish.reviewStep": "راجع التعديل",
+      "polish.applyStep": "طبّق على النص المحدد"
     },
     "hi": {
       "hero.noteTitle": "शुक्रवार के लिए एक नोट",
@@ -537,8 +547,6 @@
       "demo.select": "एक शब्द चुनें",
       "demo.click": "अनुवाद के लिए क्लिक करें",
       "demo.read": "इस वाक्य में अर्थ",
-      "demo.replay": "डेमो फिर से चलाएँ",
-      "demo.stop": "डेमो रोकें",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · साझा AI सेटिंग्स",
       "demo.copy": "कॉपी करें",
@@ -560,7 +568,10 @@
       "polish.hint": "समर्थित संपादन फ़ील्ड में लागू करें या परिणाम कॉपी करें।",
       "polish.copy": "कॉपी",
       "polish.apply": "लागू करें",
-      "polish.instruction": "चुनें। सुधारें। देखें। लागू करें।"
+      "polish.instruction": "चुनें। सुधारें। देखें। लागू करें।",
+      "polish.selectStep": "मसौदे का पाठ चुनें",
+      "polish.reviewStep": "सुझाव देखें",
+      "polish.applyStep": "चुने हुए पाठ पर लागू करें"
     },
     "ru": {
       "hero.noteTitle": "Заметка на пятницу",
@@ -588,8 +599,6 @@
       "demo.select": "Выделите слово",
       "demo.click": "Нажмите для перевода",
       "demo.read": "Значение в этом предложении",
-      "demo.replay": "Повторить демонстрацию",
-      "demo.stop": "Остановить демонстрацию",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · общие настройки ИИ",
       "demo.copy": "Копировать",
@@ -611,7 +620,10 @@
       "polish.hint": "Примените в поддерживаемом поле или скопируйте результат.",
       "polish.copy": "Копировать",
       "polish.apply": "Применить",
-      "polish.instruction": "ВЫДЕЛИТЕ. УЛУЧШИТЕ. ПРОВЕРЬТЕ. ПРИМЕНИТЕ."
+      "polish.instruction": "ВЫДЕЛИТЕ. УЛУЧШИТЕ. ПРОВЕРЬТЕ. ПРИМЕНИТЕ.",
+      "polish.selectStep": "Выделите текст",
+      "polish.reviewStep": "Проверьте правку",
+      "polish.applyStep": "Замените выделенное"
     },
     "it": {
       "hero.noteTitle": "Una nota per venerdì",
@@ -639,8 +651,6 @@
       "demo.select": "Seleziona una parola",
       "demo.click": "Fai clic per tradurre",
       "demo.read": "Significato in questa frase",
-      "demo.replay": "Ripeti la demo",
-      "demo.stop": "Ferma la demo",
       "demo.panelTitle": "Translation",
       "demo.settings": "MacHelper · impostazioni IA condivise",
       "demo.copy": "Copia",
@@ -662,7 +672,10 @@
       "polish.hint": "Applica nei campi modificabili supportati o copia il risultato.",
       "polish.copy": "Copia",
       "polish.apply": "Applica",
-      "polish.instruction": "SELEZIONA. MIGLIORA. RIVEDI. APPLICA."
+      "polish.instruction": "SELEZIONA. MIGLIORA. RIVEDI. APPLICA.",
+      "polish.selectStep": "Seleziona il testo",
+      "polish.reviewStep": "Rileggi la proposta",
+      "polish.applyStep": "Applica alla selezione"
     }
   }
 }

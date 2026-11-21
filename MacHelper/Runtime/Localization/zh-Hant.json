@@ -33,9 +33,8 @@
   "Allow “%@” to paste results?": "允許「%@」貼上結果？",
   "Allow “%@” to replace selected text?": "允許「%@」取代所選文字？",
   "App compatibility": "應用程式相容性",
-  "Applied": "已套用",
   "Apply": "套用",
-  "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "「套用」可將結果貼到已確認的選取範圍。如果無法取得選取位置，「貼上」會使用原視窗目前的選取範圍。這兩種透過剪貼簿貼上的操作都會將結果留在剪貼簿中。",
+  "Apply pastes into the current selection in the original window. The result stays on the clipboard.": "按一下「套用」會將結果貼到原視窗的目前選取範圍。結果會保留在剪貼簿中。",
   "Apply status": "套用狀態",
   "Automatic (service default)": "自動（服務預設值）",
   "Automatic selection fallback": "自動取詞後備",
@@ -175,7 +174,6 @@
   "Paste": "貼上",
   "Paste completed results into the original window": "將完成的結果貼到原視窗",
   "Paste could not be requested. The preview is still available to copy.": "無法要求貼上；仍可複製預覽中的結果。",
-  "Paste into the current selection in the original window. The result stays on the clipboard.": "貼到原視窗目前選取的位置。結果會保留在剪貼簿中。",
   "Paste requested. The result is on the clipboard.": "已要求貼上。結果已放在剪貼板中。",
   "Provider and model are shared across your tools.": "服務提供者和模型由各工具共用。",
   "Quit MacHelper": "結束 MacHelper",
@@ -281,6 +279,7 @@
   "Website connection": "網站連線",
   "Website connection could not start. Quit other copies of MacHelper and try again.": "無法啟動網站連線。請結束其他 MacHelper 執行個體後重試。",
   "Website connection is stopped.": "網站連線已停止。",
+  "When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard.": "按一下「套用」後，MacHelper 可以將結果貼到原視窗的目前選取範圍，即使編輯器無法提供選取位置。貼上後，結果會保留在剪貼簿中。",
   "Working…": "處理中…",
   "Working… · %@": "處理中… · %@"
 }

@@ -37,6 +37,31 @@ struct SelectedMarkerTextReader<MarkerRange> {
     }
 }
 
+/// Optional identity evidence for applying edits from mirrored AX nodes.
+enum SelectionMarkerEvidence<Marker> {
+    case unavailable
+    case selectionChanged
+    case verified(Marker)
+
+    static func capture(for span: SelectedTextSpan, canRead: () -> Bool, marker: () -> Marker?,
+                        selectedSpan: () -> SelectedTextReadResult, sameOrigin: () -> Bool) -> Self {
+        guard canRead(), let marker = marker(), canRead() else { return .unavailable }
+        let selection = selectedSpan()
+        guard canRead() else { return .unavailable }
+        switch selection {
+        case .unavailable: return .unavailable
+        case .empty: return .selectionChanged
+        case .selected(let current):
+            guard current.range == span.range, current.text.utf16.elementsEqual(span.text.utf16) else {
+                return .selectionChanged
+            }
+        }
+        let current = sameOrigin()
+        guard canRead() else { return .unavailable }
+        return current ? .verified(marker) : .selectionChanged
+    }
+}
+
 /// A missing plain range representation permits the attributed representation
 /// of that identical selected range. Malformed or contradictory data does not.
 struct SelectionRangeTextReader {
@@ -61,6 +86,13 @@ struct SelectionRangeTextReader {
 }
 
 extension AccessibilitySelectedText {
+    static func selectedMarkers(in element: AXUIElement) -> AXTextMarkerRange? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXTextMarkerRangeGetTypeID() else { return nil }
+        return (value as! AXTextMarkerRange)
+    }
+
     static func markerText(in element: AXUIElement, expectedText: String? = nil,
                            continuing: () -> Bool) -> String? {
         withoutActuallyEscaping(continuing) { continuing in
@@ -78,10 +110,8 @@ extension AccessibilitySelectedText {
             }
             return SelectedMarkerTextReader<AXTextMarkerRange>(selectedRange: {
                 guard continuing() else { return nil }
-                var value: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &value) == .success,
-                      continuing() else { return nil }
-                return range(value)
+                let markers = selectedMarkers(in: element)
+                return continuing() ? markers : nil
             }, equalsRange: { CFEqual($0, $1) }, orderedRange: { selected in
                 let start = AXTextMarkerRangeCopyStartMarker(selected)
                 let end = AXTextMarkerRangeCopyEndMarker(selected)

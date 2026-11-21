@@ -40,6 +40,24 @@ struct CapabilityOperationGate {
     }
 }
 
+/// A nonactivating panel click can briefly leave the source app without a
+/// focused element. Only the initial, pre-write focus check can request a wait.
+@MainActor
+enum SelectionApplyPreflight {
+    static func perform(isCurrent: () -> Bool,
+                        waitForFocus: () async throws -> Void = { try await Task.sleep(for: .milliseconds(120)) },
+                        replace: () throws -> SelectionReplacementOutcome) async throws -> SelectionReplacementOutcome {
+        guard isCurrent() else { throw CancellationError() }
+        do {
+            return try replace()
+        } catch SelectionReplacementPreflightError.focusUnavailable {
+            try await waitForFocus()
+            guard !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            return try replace()
+        }
+    }
+}
+
 public struct CapabilitySelectionAction {
     public let identifier: String
     /// Opaque owner activation generation. Rebuilding another tool must not
@@ -307,23 +325,29 @@ public final class SelectionActionCapability {
         let operation = operationGate.generation
         editTarget = nil
         completedSelectionGeneration = nil
-        do {
-            let isCurrent = { [weak self] in
-                guard let self else { return false }
-                return self.isRunning && self.operationGate.generation == operation && self.state.acceptsResult(for: generation)
+        operationTask = Task { [weak self] in
+            guard let self else { return }
+            let isCurrent = {
+                !Task.isCancelled && self.isRunning && self.operationGate.generation == operation &&
+                    self.state.acceptsResult(for: generation)
             }
-            let outcome: SelectionReplacementOutcome
-            switch target {
-            case .exact(let exact):
-                outcome = try exact.replace(with: text, validateInvocation: isCurrent)
-            case let .menu(menu, original, context):
-                outcome = try menu.paste(text, originalText: original.text) { [weak self] in
-                    isCurrent() && self?.monitor.isCurrentMenuPasteSelection(original, context: context) == true
+            guard isCurrent() else { return }
+            do {
+                let outcome: SelectionReplacementOutcome
+                switch target {
+                case .exact(let exact):
+                    outcome = try await SelectionApplyPreflight.perform(isCurrent: isCurrent) {
+                        try exact.replace(with: text, validateInvocation: isCurrent)
+                    }
+                case let .menu(menu, original, context):
+                    outcome = try menu.paste(text, originalText: original.text) {
+                        isCurrent() && self.monitor.isCurrentMenuPasteSelection(original, context: context)
+                    }
                 }
+                self.panels.replacementSucceeded(outcome)
+            } catch {
+                if isCurrent() { self.panels.replacementFailed(error.localizedDescription) }
             }
-            panels.replacementSucceeded(outcome)
-        } catch {
-            panels.replacementFailed(error.localizedDescription)
         }
     }
 

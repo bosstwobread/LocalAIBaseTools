@@ -3,7 +3,7 @@
   "runtime": "javascript",
   "identifier": "com.localaibasetools.polish-input",
   "displayName": "Polish-input",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "summary": "Polish selected writing, preview the result, and apply it to a supported editable field.",
   "entryPoint": "main.js",
   "permissions": ["selection.read", "selection.replace", "selection.paste", "ai.transform", "ui.panel"],

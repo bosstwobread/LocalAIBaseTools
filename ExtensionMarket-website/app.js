@@ -225,7 +225,6 @@
       renderDiscovery();
       renderCards();
       updateHelperLinks();
-      $('#spotlight').hidden = !tools.some(tool => tool.slug === 'translation');
       route();
     } catch {
       $('#extension-grid').hidden = true;
@@ -257,8 +256,8 @@
       return (!query || searchable.includes(query)) && (category === 'all' || tool.category === category) && (platform === 'all' || tool.platforms.includes(platform));
     });
     $('#extension-grid').replaceChildren(...filtered.map(tool=>card(tool, discovery.mode === 'description' ? discovery.matches?.find(match=>match.id===tool.id) : null)));
-    translationDemos.prune();
-    translationDemos.refresh();
+    extensionDemos.prune();
+    extensionDemos.refresh();
     $('#catalog-empty').hidden = filtered.length !== 0;
     $('#result-count').textContent = filtered.length === state.tools.length ? t('Extensions: {count}', { count: filtered.length }) : t('Extensions: {count} / {total}', { count: filtered.length, total: state.tools.length });
     $('#clear-filters').hidden = !query && category === 'all' && platform === 'all';
@@ -266,9 +265,11 @@
   function card(tool, match = null) {
     const details = `#extension/${encodeURIComponent(tool.slug)}`;
     const shot = tool.screenshots[0];
-    const visual = tool.id === 'com.localaibasetools.translation'
-      ? h('div', { class: 'card-visual' }, translationDemos.create('card'))
-      : h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) }, image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('span', { class: 'preview-label' }, t("Interface preview")));
+    const visual = h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) },
+      extensionDemos.create(tool.id, 'card') ?? [
+        image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }),
+        h('span', { class: 'preview-label' }, t("Interface preview"))
+      ]);
     const install = h('button', { type: 'button', class: 'card-install', 'aria-label': t('Installation options for {name}', { name: tool.name }) }, tool.kind === 'mac-source' ? t("Add to MacHelper ↗") : t("Get extension ↗"));
     install.addEventListener('click', () => navigate(tool.slug, 'install'));
     return h('article', { class: 'extension-card' }, visual,
@@ -349,7 +350,7 @@
         installTab.tabIndex = isOverview ? -1 : 0;
         overview.hidden = !isOverview;
         installation.hidden = isOverview;
-        translationDemos.refresh();
+        extensionDemos.refresh();
         if (focus) (isOverview ? overviewTab : installTab).focus();
       };
       overviewTab.addEventListener('click', () => selectTab('overview'));
@@ -365,8 +366,8 @@
       selectTab(tab === 'install' ? 'install' : 'overview');
     }
     if (!dialog.open) { dialog.showModal(); document.body.classList.add('modal-open'); }
-    translationDemos.prune();
-    translationDemos.refresh();
+    extensionDemos.prune();
+    extensionDemos.refresh();
     dialog.scrollTop = 0;
     close.focus({ preventScroll: true });
   }
@@ -374,7 +375,8 @@
     const main = h('div', {}, h('p', { class: 'detail-description' }, toolText(tool,tool.description)));
     if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, t("What it does")), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, toolText(tool,feature)))));
     if(tool.limitations.length) main.append(h('h3',{class:'detail-subheading'},t('Limitations')),h('ul',{class:'detail-list'},tool.limitations.map(value=>h('li',{},toolText(tool,value)))));
-    if (tool.id === 'com.localaibasetools.translation') main.append(translationDemos.create('detail'));
+    const demo = extensionDemos.create(tool.id, 'detail');
+    if (demo) main.append(demo);
     else for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, t(shot.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('figcaption', {}, t(shot.caption) || t("Interface preview · Example content"))));
     if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
     const facts = h('dl', {}, h('dt', {}, t("Platforms")), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, t("Package")), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("Editable native Swift source") : t("Editable JavaScript source")) : t("Browser extension ZIP")), h('dt', {}, t("Version")), h('dd', {}, tool.version || '—'));
@@ -394,7 +396,7 @@
     return h('div', { class: 'detail-grid' }, main, side);
   }
   function permissionLabel(value) {
-    return ({ 'selection.read': t("Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe."), 'selection.replace': t("Replace unchanged selected text in a supported editable field only when you click Apply."), 'selection.paste': t("Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
+    return ({ 'selection.read': t("Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe."), 'selection.replace': t("Replace unchanged selected text in a supported editable field only when you click Apply."), 'selection.paste': t("When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
   }
   function installContent(tool) {
     const sourceTool = tool.kind === 'mac-source';
@@ -464,9 +466,12 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { node.hidden = true; }, 3500);
   }
-  function setupTranslationDemos() {
+  function setupExtensionDemos() {
     const original = $('#translation-demo');
-    const template = original.cloneNode(true);
+    const templates = new Map([
+      ['com.localaibasetools.translation', original.cloneNode(true)],
+      ['com.localaibasetools.polish-input', $('#polish-demo-template').content.firstElementChild]
+    ]);
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const demos = new Map();
     let sequence = 0;
@@ -479,13 +484,9 @@
     }
     function update(demo, entry) {
       const insideDialog = demo.closest('dialog');
-      const playing = demo.isConnected && entry.visible && !entry.stopped && !document.hidden && !reducedMotion?.matches
+      const playing = demo.isConnected && entry.visible && !document.hidden && !reducedMotion?.matches
         && !demo.closest('[hidden]') && (!insideDialog || insideDialog.open) && (!dialog.open || insideDialog === dialog);
       demo.classList.toggle('demo-playing', Boolean(playing));
-      const control = demo.querySelector('.demo-control');
-      const key = playing ? 'demo.stop' : 'demo.replay';
-      control.dataset.previewKey = key;
-      control.textContent = i18n?.previewText(key) || (playing ? 'Stop demo' : 'Replay demo');
     }
     const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
       for (const item of entries) {
@@ -497,26 +498,22 @@
     }, { threshold: [0, 0.2] }) : null;
     function refresh() { for (const [demo, entry] of demos) update(demo, entry); }
     function register(demo) {
-      const entry = { visible: !observer, stopped: false };
+      const entry = { visible: !observer };
       demos.set(demo, entry);
       localize(demo);
-      const control = demo.querySelector('.demo-control');
-      control.hidden = false;
-      control.addEventListener('click', () => {
-        entry.stopped = demo.classList.contains('demo-playing');
-        update(demo, entry);
-      });
       observer?.observe(demo);
       update(demo, entry);
       return demo;
     }
-    function create(placement) {
-      const demo = template.cloneNode(true);
-      const id = `translation-demo-${++sequence}`;
+    function create(toolId, placement) {
+      const template = templates.get(toolId);
+      if (!template) return null;
+      const demo = document.importNode(template, true);
+      const id = `extension-demo-${++sequence}`;
       demo.id = id;
       demo.classList.add(`demo-${placement}`);
-      demo.querySelector('#demo-title').id = `${id}-title`;
-      demo.querySelector('#demo-summary').id = `${id}-summary`;
+      demo.querySelector('[data-demo-title]').id = `${id}-title`;
+      demo.querySelector('[data-demo-summary]').id = `${id}-summary`;
       demo.setAttribute('aria-labelledby', `${id}-title`);
       demo.setAttribute('aria-describedby', `${id}-summary`);
       return register(demo);
@@ -529,7 +526,6 @@
       }
     }
     register(original);
-    $('#translation-spotlight').append(create('spotlight'));
     refresh();
     document.addEventListener('visibilitychange', refresh);
     window.addEventListener('market-language-change', () => {
@@ -547,7 +543,7 @@
     });
     return { create, prune, refresh };
   }
-  const translationDemos = setupTranslationDemos();
+  const extensionDemos = setupExtensionDemos();
   $('#keyword-mode').addEventListener('click',()=>chooseSearchMode('keywords'));
   $('#description-mode').addEventListener('click',()=>chooseSearchMode('description'));
   $('#need-query').addEventListener('input',updateNeed);
@@ -568,7 +564,7 @@
   window.addEventListener('hashchange', route);
   dialog.addEventListener('close', () => {
     document.body.classList.remove('modal-open');
-    translationDemos.refresh();
+    extensionDemos.refresh();
     state.activeSlug = null;
     if (location.hash.startsWith('#extension/')) history.replaceState(null, '', '#browse');
     if (state.returnFocus?.isConnected) state.returnFocus.focus({ preventScroll: true });

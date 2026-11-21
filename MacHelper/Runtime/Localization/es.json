@@ -33,9 +33,8 @@
   "Allow “%@” to paste results?": "¿Permitir que «%@» pegue resultados?",
   "Allow “%@” to replace selected text?": "¿Permitir que «%@» reemplace el texto seleccionado?",
   "App compatibility": "Compatibilidad con aplicaciones",
-  "Applied": "Aplicado",
   "Apply": "Aplicar",
-  "Apply can paste into a verified selection. Paste uses the current selection in the original window when its position is unavailable. Both clipboard actions leave the result on the clipboard.": "Aplicar puede pegar en una selección verificada. Si no se puede obtener su posición, Pegar usa la selección actual de la ventana original. Ambas acciones dejan el resultado en el portapapeles.",
+  "Apply pastes into the current selection in the original window. The result stays on the clipboard.": "«Aplicar» pega el resultado en la selección actual de la ventana original. El resultado permanece en el portapapeles.",
   "Apply status": "Estado de Aplicar",
   "Automatic (service default)": "Automático (predeterminado)",
   "Automatic selection fallback": "Captura alternativa automática",
@@ -175,7 +174,6 @@
   "Paste": "Pegar",
   "Paste completed results into the original window": "Pegar los resultados terminados en la ventana original",
   "Paste could not be requested. The preview is still available to copy.": "No se pudo solicitar el pegado. Aún puedes copiar la vista previa.",
-  "Paste into the current selection in the original window. The result stays on the clipboard.": "Pega en la selección actual de la ventana original. El resultado permanece en el portapapeles.",
   "Paste requested. The result is on the clipboard.": "Pegado solicitado. El resultado está en el portapapeles.",
   "Provider and model are shared across your tools.": "El proveedor y el modelo se comparten entre tus herramientas.",
   "Quit MacHelper": "Salir de MacHelper",
@@ -281,6 +279,7 @@
   "Website connection": "Conexión con el sitio web",
   "Website connection could not start. Quit other copies of MacHelper and try again.": "No se pudo iniciar la conexión. Cierra las otras instancias de MacHelper y vuelve a intentarlo.",
   "Website connection is stopped.": "La conexión con el sitio web está detenida.",
+  "When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard.": "Al hacer clic en «Aplicar», MacHelper puede pegar el resultado en la selección actual de la ventana original, aunque el editor no indique su posición. Después de pegar, el resultado permanece en el portapapeles.",
   "Working…": "Procesando…",
   "Working… · %@": "Procesando… · %@"
 }

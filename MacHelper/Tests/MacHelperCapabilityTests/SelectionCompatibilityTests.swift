@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 import XCTest
 @testable import MacHelperCapabilities
@@ -44,6 +45,119 @@ final class SelectionCompatibilityTests: XCTestCase {
             bundleIdentifier: source.bundleIdentifier, launchDate: Date(timeIntervalSince1970: 200))
         XCTAssertEqual(activator.prepare(source: relaunched, explicitGesture: true, currentSource: { true }), .requested)
         XCTAssertEqual(access.calls.count, 11)
+    }
+
+    // Synthetic AX elements give these tests distinct/equivalent CF identities
+    // without inspecting a running app or requiring Accessibility permission.
+    func testNewEditorWindowCanRecoverEvenAfterTheProcessHasEnabledAccessibility() {
+        let firstWindow = SelectionWindowIdentity(AXUIElementCreateApplication(42))
+        let sameWindow = SelectionWindowIdentity(AXUIElementCreateApplication(42))
+        let secondWindow = SelectionWindowIdentity(AXUIElementCreateApplication(43))
+        XCTAssertEqual(Set([firstWindow, sameWindow, secondWindow]).count, 2)
+        let access = MockAccessibility()
+        var now: TimeInterval = 0
+        let activator = SelectionCompatibilityActivator(enabled: { true }, trusted: { true }, now: { now }, accessibility: access)
+        func prepare(_ window: SelectionWindowIdentity, failed: Bool) -> SelectionCompatibilityActivationOutcome {
+            activator.prepare(source: source, window: window, explicitGesture: true,
+                              selectionReadFailed: failed, currentSource: { true })
+        }
+
+        XCTAssertEqual(prepare(firstWindow, failed: true), .requested)
+        now = 3
+        XCTAssertEqual(activator.refreshAfterSettlement(source: source, window: sameWindow, currentSource: { true }), .refreshed)
+        access.enabled = true
+        XCTAssertEqual(prepare(secondWindow, failed: false), .notRequested)
+        XCTAssertEqual(access.calls.filter { $0 == "request" }.count, 2)
+        XCTAssertEqual(prepare(secondWindow, failed: true), .requested)
+        XCTAssertEqual(prepare(secondWindow, failed: true), .pendingSettlement)
+        now = 6
+        XCTAssertEqual(activator.refreshAfterSettlement(source: source, window: secondWindow, currentSource: { true }), .refreshed)
+        XCTAssertEqual(prepare(secondWindow, failed: true), .notRequested)
+        XCTAssertEqual(prepare(sameWindow, failed: true), .notRequested)
+        XCTAssertEqual(access.calls.filter { $0 == "request" }.count, 4)
+    }
+
+    func testWindowSwitchDoesNotRefreshStaleWindowOrRestartTheProcessDebounceTooSoon() {
+        let first = SelectionWindowIdentity(AXUIElementCreateApplication(42))
+        let second = SelectionWindowIdentity(AXUIElementCreateApplication(43))
+        var focused = first
+        let access = MockAccessibility()
+        var now: TimeInterval = 0
+        let activator = SelectionCompatibilityActivator(enabled: { true }, trusted: { true }, now: { now }, accessibility: access)
+        func prepare(_ window: SelectionWindowIdentity) -> SelectionCompatibilityActivationOutcome {
+            activator.prepare(source: source, window: window, explicitGesture: true,
+                              selectionReadFailed: true, currentSource: { focused == window })
+        }
+        func refresh(_ window: SelectionWindowIdentity) -> SelectionCompatibilityActivationOutcome {
+            activator.refreshAfterSettlement(source: source, window: window, currentSource: { focused == window })
+        }
+
+        XCTAssertEqual(prepare(first), .requested)
+        now = 1
+        focused = second
+        XCTAssertEqual(prepare(second), .requested)
+        now = 2.3
+        XCTAssertEqual(refresh(first), .stale)
+        focused = first
+        XCTAssertEqual(prepare(first), .pendingSettlement)
+        XCTAssertEqual(refresh(first), .pendingSettlement)
+        now = 3.3
+        XCTAssertEqual(refresh(first), .refreshed)
+        focused = second
+        XCTAssertEqual(refresh(second), .pendingSettlement)
+        now = 6
+        XCTAssertEqual(refresh(second), .refreshed)
+        XCTAssertEqual(access.calls.filter { $0 == "request" }.count, 4)
+    }
+
+    func testUnsupportedApplicationIsNotReprobedForEveryWindow() {
+        for advertised in [true, false] {
+            let access = MockAccessibility()
+            access.advertised = advertised
+            access.settable = false
+            let activator = SelectionCompatibilityActivator(enabled: { true }, trusted: { true }, accessibility: access)
+            func prepare(_ id: Int32) -> SelectionCompatibilityActivationOutcome {
+                activator.prepare(source: source, window: .init(AXUIElementCreateApplication(id)),
+                                  explicitGesture: true, selectionReadFailed: true, currentSource: { true })
+            }
+            XCTAssertEqual(prepare(42), advertised ? .notSettable : .unsupported)
+            let calls = access.calls
+            XCTAssertEqual(prepare(43), .notRequested)
+            XCTAssertEqual(access.calls, calls)
+        }
+    }
+
+    func testTransientProbeIsBoundedToOneMoreGestureAndNeverDisablesOtherWindows() {
+        let access = MockAccessibility()
+        let first = SelectionWindowIdentity(AXUIElementCreateApplication(42))
+        let second = SelectionWindowIdentity(AXUIElementCreateApplication(43))
+        let activator = SelectionCompatibilityActivator(enabled: { true }, trusted: { true }, accessibility: access)
+        func prepare(_ window: SelectionWindowIdentity, gesture: Bool = true) -> SelectionCompatibilityActivationOutcome {
+            activator.prepare(source: source, window: window, explicitGesture: gesture,
+                              selectionReadFailed: true, currentSource: { true })
+        }
+        access.advertised = nil
+        XCTAssertEqual(prepare(first), .failed)
+        XCTAssertEqual(prepare(first, gesture: false), .notRequested)
+        XCTAssertEqual(prepare(first), .failed)
+        XCTAssertEqual(prepare(first), .notRequested)
+        XCTAssertEqual(access.calls, ["advertised", "advertised"])
+        access.advertised = true
+        XCTAssertEqual(prepare(second), .requested)
+    }
+
+    func testTransientProbeAtSettlementDoesNotRepeatInitialWrite() {
+        let access = MockAccessibility()
+        var now: TimeInterval = 0
+        let activator = SelectionCompatibilityActivator(enabled: { true }, trusted: { true }, now: { now }, accessibility: access)
+        XCTAssertEqual(activator.prepare(source: source, explicitGesture: true, currentSource: { true }), .requested)
+        now = 3
+        access.settable = nil
+        XCTAssertEqual(activator.refreshAfterSettlement(source: source, currentSource: { true }), .failed)
+        access.settable = true
+        XCTAssertEqual(activator.prepare(source: source, explicitGesture: true, currentSource: { true }), .pendingSettlement)
+        XCTAssertEqual(activator.refreshAfterSettlement(source: source, currentSource: { true }), .refreshed)
+        XCTAssertEqual(access.calls.filter { $0 == "request" }.count, 2)
     }
 
     func testUnsupportedNotSettableAlreadyEnabledAndFailureDoNotRetry() {
@@ -213,14 +327,15 @@ final class SelectionCompatibilityTests: XCTestCase {
 
     private final class MockAccessibility: SelectionCompatibilityAccessibility {
         var calls: [String] = []
-        var advertised = true, settable = true, enabled = false, accepted = true
+        var advertised: Bool? = true, settable: Bool? = true, enabled: Bool? = false
+        var accepted = true
         var beforeEnabled: (() -> Void)?
         var beforeAdvertised: (() -> Void)?
         var beforeSettable: (() -> Void)?
         var onRequest: (() -> Void)?
-        func isAdvertised(source: SelectionCompatibilityProcess) -> Bool { calls.append("advertised"); beforeAdvertised?(); return advertised }
-        func isSettable(source: SelectionCompatibilityProcess) -> Bool { calls.append("settable"); beforeSettable?(); return settable }
-        func isEnabled(source: SelectionCompatibilityProcess) -> Bool { calls.append("enabled"); beforeEnabled?(); return enabled }
+        func isAdvertised(source: SelectionCompatibilityProcess) -> Bool? { calls.append("advertised"); beforeAdvertised?(); return advertised }
+        func isSettable(source: SelectionCompatibilityProcess) -> Bool? { calls.append("settable"); beforeSettable?(); return settable }
+        func isEnabled(source: SelectionCompatibilityProcess) -> Bool? { calls.append("enabled"); beforeEnabled?(); return enabled }
         func request(source: SelectionCompatibilityProcess) -> Bool { calls.append("request"); onRequest?(); return accepted }
     }
 }

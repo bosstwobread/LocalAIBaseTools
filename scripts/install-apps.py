@@ -184,7 +184,7 @@ def main():
     if retired:
         print(f"Moved the old standalone Translation app to {retired}; its preferences were preserved.")
     print("Open MacHelper.app. Translation and Polish-input settings are under Extensions; launch at login is under General.")
-    print("MacHelper requires Accessibility approval for selection; editing requires clicking Apply or Paste in a completed preview.")
+    print("MacHelper requires Accessibility approval for selection; editing requires clicking Apply in a completed preview.")
 
 
 if __name__ == "__main__":

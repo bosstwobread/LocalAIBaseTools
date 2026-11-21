@@ -71,6 +71,9 @@ struct AccessibilitySelectionOrigin: @unchecked Sendable, Equatable {
     var windowAnchor: SelectionWindowAnchor? = nil
     var applicationAnchor = false
     var terminalParent: SelectionParent<AXUIElement> = .root
+    /// Some web editors mirror the active range on their layout/accessibility
+    /// nodes. Opaque endpoints can bind that read to the actual focused editor.
+    var selectedMarkers: AXTextMarkerRange? = nil
     var source: AXUIElement { ancestry[sourceIndex] }
 
     func matchesSource(_ candidate: AXUIElement) -> Bool {
