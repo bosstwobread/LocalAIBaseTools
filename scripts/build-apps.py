@@ -113,7 +113,7 @@ def main():
             continue
         manifest = json.loads(manifest_path.read_text())
         shutil.copytree(folder, resources / "SourceSeeds" / (manifest["identifier"] + ".macsource"),
-                        ignore=shutil.ignore_patterns(".*", "__pycache__", "node_modules"))
+                        ignore=shutil.ignore_patterns(".*", "__pycache__", "node_modules", "marketplace"))
     sign(app, identity, "com.localaibasetools.mac-helper")
     print(f"Built {app}")
     print("Source tools install into independent editable working folders when enabled; each worker supports hot reload.")

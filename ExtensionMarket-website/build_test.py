@@ -1,4 +1,5 @@
 """Exercise native source packaging without changing the real website output."""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -57,6 +58,63 @@ class NativeSourcePackagingTests(unittest.TestCase):
     def build(self):
         with patch.object(market, "ROOT", self.root), patch.object(market, "HERE", self.site):
             return market.build(self.site / "dist", self.root / "unused.app", without_app=True)
+
+    def test_standalone_github_extension_is_indexed_without_hosting_its_source(self):
+        commit = "1234567890abcdef1234567890abcdef12345678"
+        source_url = f"https://github.com/independent/example/tree/{commit}"
+        raw_prefix = f"https://raw.githubusercontent.com/independent/example/{commit}/"
+        registry = self.site / "registry.json"
+        registry.write_text(json.dumps({"schemaVersion": 1, "extensions": [source_url]}))
+        files = {path.name: path.read_bytes() for path in self.package.iterdir()}
+        files["marketplace/preview.json"] = json.dumps({
+            "schemaVersion": 1, "layout": "image", "image": "preview.png",
+            "strings": {"en": {"description": "An example preview."}},
+            "releaseZip": "native-example.macsource.zip",
+        }).encode()
+        files["marketplace/preview.png"] = b"an illustrative fixture"
+        self.package.rename(self.root / "standalone-checkout")
+
+        def git_hash(data):
+            return hashlib.sha1(f"blob {len(data)}\0".encode() + data, usedforsecurity=False).hexdigest()
+
+        def pinned_tree(owner, repository, revision, folder):
+            self.assertEqual((owner, repository, revision, folder), ("independent", "example", commit, ""))
+            return b"".join(
+                f"100644 blob {git_hash(raw)}\t{path}\0".encode()
+                for path, raw in files.items()
+            )
+
+        def pinned_file(url, maximum):
+            self.assertTrue(url.startswith(raw_prefix))
+            raw = files[url.removeprefix(raw_prefix)]
+            self.assertLessEqual(len(raw), maximum)
+            return raw
+
+        load_registry = market.read_registry
+        with patch.object(market, "read_registry", side_effect=lambda path, **kwargs:
+                          load_registry(path, fetch=pinned_file, tree_reader=pinned_tree, **kwargs)):
+            tools, _ = self.build()
+            output = self.site / "dist"
+            catalog = json.loads((output / "catalog.json").read_text())
+            discovery = json.loads((output / "discovery-index.json").read_text())
+            tool, = tools
+            entry, = catalog["extensions"]
+            self.assertEqual(tool["sourceUrl"], source_url)
+            self.assertEqual(tool["preview"]["image"], raw_prefix + "marketplace/preview.png")
+            self.assertEqual(tool["packageUrl"], "https://github.com/independent/example/releases/download/v1.0.0/native-example.macsource.zip")
+            self.assertEqual(discovery["extensions"][0]["description"], "A synthetic native tool.")
+            expected = {path: data for path, data in files.items() if not path.startswith("marketplace/")}
+            self.assertEqual({record["path"] for record in entry["files"]}, set(expected))
+            for record in entry["files"]:
+                self.assertEqual(record["url"], raw_prefix + record["path"])
+                self.assertEqual(record["sha256"], hashlib.sha256(expected[record["path"]]).hexdigest())
+            self.assertFalse((output / "packages").exists())
+
+            original = (output / "catalog.json").read_bytes()
+            files["marketplace/preview.json"] = b'{"schemaVersion":1,"layout":"html","html":"<script>invalid</script>"}'
+            with self.assertRaises(ValueError):
+                self.build()
+            self.assertEqual((output / "catalog.json").read_bytes(), original)
 
     def test_native_package_uses_unified_catalog_full_inventory_and_public_sdk(self):
         tools, _ = self.build()

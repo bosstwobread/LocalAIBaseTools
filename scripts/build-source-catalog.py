@@ -31,7 +31,9 @@ def main():
             parser.error('Duplicate source package identifier.')
         identifiers.add(manifest['identifier'])
         base = args.base_url or f'https://raw.githubusercontent.com/bosstwobread/LocalAIBaseTools/{args.ref}/Extensions/{name}/'
-        paths = sorted(path for path in package.rglob('*') if path.is_file() and not any(part.startswith('.') for part in path.relative_to(package).parts))
+        paths = sorted(path for path in package.rglob('*')
+                       if path.is_file() and path.relative_to(package).parts[0] != 'marketplace'
+                       and not any(part.startswith('.') for part in path.relative_to(package).parts))
         files = []
         for path in paths:
             if path.is_symlink():

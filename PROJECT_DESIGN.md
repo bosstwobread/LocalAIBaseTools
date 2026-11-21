@@ -19,7 +19,7 @@ The public marketplace is [local-ai-extension.nelson007.com](https://local-ai-ex
 
 The website and MacHelper expose 13 interface languages: English, both Chinese scripts, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi, Russian, and Italian. The website detects browser preferences and stores explicit choices locally; MacHelper has a separate persistent General preference with a System language option. Arabic uses right-to-left layout. Native catalogs live in `MacHelper/Runtime/Localization`; website catalogs are owned by the website. UI changes require matching catalog keys and format parameters. Extension-specific labels come from an optional manifest-declared localization resource, not host-specific settings code. Changing interface language refreshes presentation without restarting source workers, changing the translation target, or rewriting prompts. Technical guides and diagnostics can retain their original language.
 
-Visible text embedded in artwork is part of localization. Website preview strings live in `ExtensionMarket-website/preview-locales.json`. The build generates escaped SVG variants under `assets/localized/<locale>/` and the `preview-locales.js` data used by HTML demonstrations. Translation and Polish-input have animated examples on their collection cards and in their detail dialogs. The homepage hero also shows Translation explaining a word in context. Polish-input shows the selected draft, the proposed edit, and the explicit Apply action that replaces the selection. Both previews animate when visible and display a completed example for visitors who prefer reduced motion. The preview catalog supplies captions, accessible text, and sample drafts and results. Playback uses these examples without calling AI, contacting MacHelper, or accessing the clipboard. App and extension artwork should use their own text resources or locale-specific assets when they contain interface text.
+Each tool’s optional `marketplace/preview.json` supplies localized labels, accessible text, and sample content for its website preview. The site renders these through shared lookup, revision, and image layouts. Translation demonstrates a word in context on its card, in its detail dialog, and in the homepage hero. Polish-input shows a selected draft, the proposed edit, and the explicit Apply action. Both animations play when visible and display a completed example for visitors who prefer reduced motion. Playback uses authored examples without calling AI, contacting MacHelper, or accessing the clipboard. The separate website artwork catalog supplies localized text for the legacy SVG illustrations.
 
 “Local AI connection” describes where the integration runs. ChatGPT requests still use an online account and remote inference. Ollama and LM Studio can run inference on the user's Mac. The project does not guarantee free or unlimited provider usage.
 
@@ -27,7 +27,8 @@ Visible text embedded in artwork is part of localization. Website preview string
 
 | Location | Installed or running there | Responsibility |
 | --- | --- | --- |
-| Linux server | Nginx marketplace container; Caddy reverse proxy | Serve public pages, catalog metadata, source files, ZIP packages, and the MacHelper download over HTTPS. |
+| Linux server | Nginx marketplace container and Caddy reverse proxy | Serve the marketplace, generated catalog and search metadata, historical packages, and the MacHelper download over HTTPS. |
+| Public GitHub repositories | Each author’s source, listing assets, and optional release ZIP | Supply source files at approved commits and keep published versions reachable. |
 | User's Mac | MacHelper.app with local website service, source workers, on-demand AI host | Manage settings and permissions, serve bounded website search on loopback, read supported selections, display the shared toolbar/panels, validate explicit selected-text replacements, and contact the configured provider. |
 | Browser on that Mac | Official marketplace page and supported editable/read-only content | Connect the marketplace directly to MacHelper’s local search service. Translation and Polish-input operate through macOS Accessibility; no browser extension is required. |
 | Provider environment | Bundled Codex app-server, or Ollama/LM Studio loopback server | Discover available models and perform inference under the user's chosen provider. |
@@ -36,7 +37,8 @@ There is no central AI backend in the marketplace. Selected text, message drafts
 
 ```mermaid
 flowchart TD
-    Market["HTTPS marketplace: pages, public discovery index, complete tool source"]
+    Market["HTTPS marketplace: pages, public discovery index, and install catalog"]
+    GitHub["Public repositories with commit-pinned tool source"]
     LocalService["Inside MacHelper: 127.0.0.1:43827 discovery service"]
     App["MacHelper app: Dock, menu bar, settings, and capabilities"]
     Worker["Translation / Polish-input JavaScript workers"]
@@ -44,7 +46,9 @@ flowchart TD
     Host["On-demand mac-helper-host process"]
     ChatGPT["Installed Codex app-server → online ChatGPT account"]
     Local["Ollama / LM Studio → loopback model server"]
-    Market -->|"Reviewed source installation"| App
+    GitHub -->|"Publishing job reads and validates metadata"| Market
+    Market -->|"Install catalog and native review request"| App
+    GitHub -->|"Verified source downloads after approval"| App
     App <-->|"Framed IPC and capability calls"| Worker
     App <-->|"Framed IPC and capability calls"| Native
     App -->|"Explicit AI action"| Host
@@ -80,7 +84,7 @@ MacHelper is a persistent application with a Dock icon and menu-bar shortcut. Cl
 | `MacHelper/Runtime/Discovery*` | Verified public metadata cache/seed, keyword retrieval, and bounded AI ranking. |
 | `MacHelper/Runtime/MarketplaceLocalService*` | Loopback HTTP parsing/listener, official-origin checks, short-lived sessions, and website search/cancel routing. |
 | `catalog/extensions.json` | Source catalog with complete file inventory, sizes, hashes, and download locations. Regenerate after changing published tool files. |
-| `ExtensionMarket-website/` | Static website, visual metadata, package builder/verifier, Docker configuration, and deployment automation. |
+| `ExtensionMarket-website/` | Static website and shared preview layouts, approved GitHub URL registry, publishing and verification tools, and deployment automation. |
 | `ExtensionMarket-website/historical-packages/` | Immutable files and ZIPs required by previously published source-package URLs. |
 | `docs/` | Detailed extension-development, source-package, and AI protocol contracts. |
 | `scripts/` | Mac build/install tools, catalog generation, and integration checks. |
@@ -217,20 +221,20 @@ The installed app retains Native Messaging support with exact allowed extension 
 
 ## 10. Marketplace and release design
 
-The website is plain HTML/CSS/JavaScript served by Nginx. There is no production Node process, database, AI gateway, or account service. `marketplace.config.json` supplies presentation metadata; manifests supply tool identity/version and source permissions.
+The website is plain HTML/CSS/JavaScript served by Nginx. `registry.json` contains reviewed GitHub links to extension folders at exact commits. A publishing job fetches and validates the relevant source, listing metadata, and optional preview from each pinned folder. `marketplace.config.json` controls site-wide settings, including the MacHelper download and the featured extension. Extension manifests supply identity, version, runtime, and permissions.
 
 `build.py` generates a verified distribution containing:
 
 - `data/extensions.json` for the visual website catalog.
 - `catalog.json` for MacHelper source installation.
 - `discovery-index.json` and `discovery-manifest.json` for independent metadata-only search updates.
-- Complete versioned source files and ZIPs under `packages/`.
+- Retained versioned source files and ZIPs under `packages/` for previously published links.
 - `downloads/MacHelper-macOS-arm64.zip`, built on macOS before server publication.
 - Static pages, artwork, and illustrated previews.
 
 The website’s `machelper://open` link launches/focuses MacHelper without inference. Its separate `machelper://install` link opens the native app for source installation. MacHelper fetches metadata, presents permissions for review, and downloads the complete source only after installation is approved. The browser cannot silently install the app or grant Accessibility permission. Existing tool installations open settings without overwriting local changes or forcing enablement.
 
-Source packages use complete file inventories with sizes and SHA-256 hashes. Downloads stage and validate before atomic activation. These checks establish consistency with the chosen HTTPS catalog; they are not publisher signatures or a guarantee that a tool is safe. Previously published package URLs are immutable and retained for older app catalogs.
+Source inventories contain direct HTTPS URLs to commit-pinned GitHub files, sizes, and SHA-256 hashes. MacHelper stages and validates downloads before atomic activation. The hashes establish that installed files match the selected catalog. Published package URLs under `packages/` remain available for compatible older app catalogs. The website serves a published copy of the listing and discovery data so page visits and search do not depend on per-extension GitHub requests. If GitHub is unavailable, existing local installs and published listings remain usable while new GitHub downloads may fail.
 
 Current production uses a dedicated Docker container behind the existing Caddy proxy. Only the marketplace container is replaced during deployment. A candidate container's full file inventory is checked before publication, Caddy changes are validated and guarded against concurrent edits, and prior release information supports rollback. The legacy `recite.nelson007.com/extension-market` landing address redirects to the new domain; nested legacy package/catalog/download URLs remain directly accessible for older clients that reject redirects.
 
@@ -238,7 +242,7 @@ The app builder regenerates the first-party source catalog before bundling the m
 
 ### Description-based discovery (metadata 6.3; extension-free website service 6.5)
 
-Every newly authored/published tool owns root `discovery.json`; JavaScript, native Swift, and browser packages use the same public descriptor. The website publisher validates schema 1, rejects unknown fields, derives identity/version from the manifest, and combines descriptors into a source-free index. It is required for marketplace publication, while existing installed tools remain runnable without it. Extension-owned translation maps support the same 13 interface languages without moving descriptions into MacHelper source. See [the exact descriptor contract](docs/Source-Extensions.md#public-discovery-metadata-machelper-63).
+Every newly published tool owns a root `discovery.json`. MacHelper JavaScript and native Swift tools use the same public descriptor, also used by historical browser packages. The website publisher validates schema 1, rejects unknown fields, derives identity/version from the manifest, and combines descriptors into a source-free index. It is required for marketplace publication, while existing installed tools remain runnable without it. Extension-owned translation maps support the same 13 interface languages without moving descriptions into MacHelper source. See [the exact descriptor contract](docs/Source-Extensions.md#public-discovery-metadata-machelper-63).
 
 A small revision manifest names a fixed adjacent index and includes its SHA-256, byte size, timestamp, and content revision. MacHelper checks the manifest first, downloads changed index bytes, validates the pair, and stores it privately. The index is limited to 16 MiB and 10,000 entries. A last verified cache or bundled seed remains available with a stale indication after a network failure; invalid downloads never replace it. Public metadata updates do not require app releases or downloading tool source. The website serves its own static description data for keyword search; there is no server AI gateway.
 

@@ -323,23 +323,26 @@ The integration script uses isolated temporary sources/preferences and real work
 
 A separate repository or ZIP may contain the whole package, README, and license. Recipients extract it and use **Install Source…**. A ZIP alone is not a catalog URL. Do not include the installed hidden receipt, preferences, private deployment guide, credentials, runtime state, or `.git`/build directories in a distributable package.
 
-For marketplace publication, provide and validate the root `discovery.json` described above; its contents support both ordinary description search and AI discovery. Rebuild the independent discovery index/manifest whenever public metadata changes. For catalog distribution, serve JSON and immutable versioned source files over HTTPS. The catalog has `schemaVersion: 1` and an `extensions` array. Each entry copies `identifier`, `displayName`, `version`, and `summary` **exactly** from the manifest, and supplies a `files` array with every relative path, HTTPS/relative URL, exact SHA-256, and preferably byte size. Include scripts, prompts, schema, `discovery.json`, README, and license. Calculate hashes from bytes, not normalized text. List every regular source file, not just the entry point.
+For marketplace publication, keep a valid root `discovery.json` beside `extension.json`, `README.md`, and `LICENSE` in a public GitHub repository. Publish a commit containing the complete editable source. Submit a link of the form `https://github.com/OWNER/REPO/tree/FULL_COMMIT` with an optional source subfolder for repositories containing several tools. The marketplace maintainer reviews that link for `ExtensionMarket-website/registry.json`. The builder uses the pinned manifest and discovery data to generate the listing, search index, and installation catalog.
+
+Optionally add `marketplace/preview.json` and its referenced media in the same source folder. Use the shared `lookup`, `revision`, or `image` layout, with localized sample text and an accessible description. `marketplace/` is for the website and is excluded from the downloadable MacHelper source inventory. Preview data belongs to the extension author. The website owns the renderer, so a new tool can use these layouts without website code changes. See the [publisher guide](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/ExtensionMarket-website/README.md#publish-a-tool).
+
+You can also distribute an independent HTTPS catalog with `schemaVersion: 1` and an `extensions` array. Each record copies `identifier`, `displayName`, `version`, and `summary` **exactly** from the manifest. Its `files` array includes every package file relative to the source folder, its absolute HTTPS or catalog-relative URL, its SHA-256, and preferably its size in bytes. Hash the original bytes. Include scripts, prompts, schema, `discovery.json`, README, and license.
 
 Catalog discovery reads metadata; enabling stages/downloads the complete inventory, checks hashes/identity/paths, then installs atomically. Remote redirects, remote-to-local URLs, and HTTPS downgrades are rejected. Local-file and loopback HTTP catalogs are development options. A previously enabled local source copy is preserved rather than silently replaced.
 
-Changing any published file, including README or license, changes its hash. Publish a new version and regenerate its full inventory; retain every previously published version's original bytes and ZIP. The repository’s `scripts/build-source-catalog.py` includes every folder under `Extensions` with an `extension.json` source manifest by default, currently Translation and Polish-input. Repeat `--package NAME` to select a subset. `--base-url` is a single-package source root and requires exactly one selected package, for example `--package Translation --base-url https://example.com/packages/translation/VERSION/`. For a separate publisher, generate a catalog using the same documented JSON contract and immutable URLs. There is no publisher-upload backend or automatic third-party marketplace listing workflow yet.
+When an installable file changes, including README or license, publish a new extension version and regenerate its full inventory. Keep the old commit and any previously published ZIP available. An edit confined to `marketplace/` can keep the extension version when the install inventory’s paths and bytes are unchanged. Submit the updated commit URL for review. When generating a standalone catalog with `scripts/build-source-catalog.py`, use `--ref` to pin the published commit. Repeat `--package NAME` to select first-party packages from this checkout or use `--base-url` to specify the HTTPS source root for a single package.
 
-For an authorized first-party source-tool release in this checkout, update the changed tool’s version, regenerate the catalog using its published commit, then rebuild/verify the website:
+For an authorized first-party source-tool release, publish the source commit and update its URL in `ExtensionMarket-website/registry.json`. Rebuild and verify the website from the repository root:
 
 ```sh
-python3 scripts/build-source-catalog.py --ref PUBLISHED_GIT_COMMIT
-python3 ExtensionMarket-website/discovery.py --output /tmp/my-extension-discovery-check
+python3 scripts/build-apps.py
 python3 ExtensionMarket-website/build.py
 python3 ExtensionMarket-website/verify.py
 node --test ExtensionMarket-website/test.cjs
 ```
 
-Replace `PUBLISHED_GIT_COMMIT` with the immutable commit containing the released source. Website packaging requires the MacHelper application build described in [README](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/README.md). Build/verification is separate from deployment or publishing; do not deploy a website or publish a release unless the user requests it.
+Building the full site requires the MacHelper application build described in the [project README](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/README.md). Use `build.py --without-app` for website-only verification. Publication and deployment are separate from these checks and require the user’s authorization.
 
 ## 8. Report a reviewable result
 

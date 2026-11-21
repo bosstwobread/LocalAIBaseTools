@@ -80,7 +80,7 @@ def json_bytes(value):
 def build_discovery_index(root, config=None, allow_legacy=False):
     root = Path(root)
     config = config if config is not None else json.loads((root / 'ExtensionMarket-website/marketplace.config.json').read_text())
-    entries, identifiers, slugs = [], set(), set()
+    entries = []
     for folder in sorted((root / 'Extensions').iterdir()):
         if folder.is_symlink():
             raise ValueError('Extensions cannot be symbolic links.')
@@ -98,27 +98,41 @@ def build_discovery_index(root, config=None, allow_legacy=False):
         summary = manifest.get('summary') if source.exists() else manifest.get('description')
         descriptor = read_descriptor(folder, {'summary':summary}, allow_legacy)
         identifier = manifest.get('identifier') if source.exists() else descriptor.get('identifier', metadata.get('id', 'com.localaibasetools.' + folder.name.lower()))
-        if not isinstance(identifier, str) or not IDENTIFIER.fullmatch(identifier) or len(identifier.encode('utf-8')) > 128 or (not source.exists() and metadata.get('id', identifier) != identifier):
-            raise ValueError('Invalid or conflicting stable discovery identifier.')
         slug = metadata.get('slug', folder.name.lower())
-        if not isinstance(slug, str) or not re.fullmatch('[a-z0-9][a-z0-9-]{0,99}', slug) or identifier in identifiers or slug in slugs:
-            raise ValueError('Duplicate or invalid discovery ID/slug.')
-        identifiers.add(identifier); slugs.add(slug)
-        runtime = manifest.get('runtime') if source.exists() else 'browser'
-        if runtime not in {'javascript','native','browser'} or (source.exists() and (manifest.get('schemaVersion') != 2 or runtime == 'browser')):
-            raise ValueError('Unsupported discovery runtime.')
-        name = text(manifest.get('displayName') if source.exists() else manifest.get('name'), 'name', 256, 256)
-        # Foundation's source rules reject control/format characters in names.
-        if any(unicodedata.category(char) in {'Cc','Cf'} for char in name):
-            raise ValueError('Invalid discovery name control characters.')
-        version = text(manifest.get('version'), 'version', 80, 80)
-        if not VERSION.fullmatch(version):
-            raise ValueError('Invalid discovery semantic version.')
-        entry = {'id':identifier,'slug':slug,'name':name,'version':version,'summary':text(summary,'summary',2000,2000),'kind':'mac-source' if source.exists() else 'browser','runtime':runtime}
-        entry.update({key:descriptor[key] for key in ['description','capabilities','exampleQueries','keywords','limitations','platforms','translations']})
+        entry = discovery_entry(manifest, descriptor, slug, source.exists(), identifier)
+        if not source.exists() and metadata.get('id', identifier) != identifier:
+            raise ValueError('Invalid or conflicting stable discovery identifier.')
         entries.append(entry)
-        if len(entries) > 10000:
-            raise ValueError('Discovery index exceeds 10,000 entries.')
+    return discovery_documents(entries)
+
+
+def discovery_entry(manifest, descriptor, slug, mac_source=True, identifier=None):
+    identifier = identifier if identifier is not None else manifest.get('identifier')
+    if not isinstance(identifier, str) or not IDENTIFIER.fullmatch(identifier) or len(identifier.encode('utf-8')) > 128:
+        raise ValueError('Invalid stable discovery identifier.')
+    if not isinstance(slug, str) or not re.fullmatch('[a-z0-9][a-z0-9-]{0,99}', slug):
+        raise ValueError('Invalid discovery slug.')
+    runtime = manifest.get('runtime') if mac_source else 'browser'
+    if runtime not in {'javascript','native','browser'} or (mac_source and (manifest.get('schemaVersion') != 2 or runtime == 'browser')):
+        raise ValueError('Unsupported discovery runtime.')
+    name = text(manifest.get('displayName') if mac_source else manifest.get('name'), 'name', 256, 256)
+    if any(unicodedata.category(char) in {'Cc','Cf'} for char in name):
+        raise ValueError('Invalid discovery name control characters.')
+    version = text(manifest.get('version'), 'version', 80, 80)
+    if not VERSION.fullmatch(version):
+        raise ValueError('Invalid discovery semantic version.')
+    summary = manifest.get('summary' if mac_source else 'description')
+    entry = {'id':identifier,'slug':slug,'name':name,'version':version,'summary':text(summary,'summary',2000,2000),
+             'kind':'mac-source' if mac_source else 'browser','runtime':runtime}
+    entry.update({key:descriptor[key] for key in ['description','capabilities','exampleQueries','keywords','limitations','platforms','translations']})
+    return entry
+
+
+def discovery_documents(entries):
+    if len(entries) > 10000:
+        raise ValueError('Discovery index exceeds 10,000 entries.')
+    if any(len({entry[key] for entry in entries}) != len(entries) for key in ('id', 'slug')):
+        raise ValueError('Duplicate discovery ID/slug.')
     revision = hashlib.sha256(json.dumps(entries,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
     updated = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
     index = {'schemaVersion':1,'revision':revision,'updatedAt':updated,'extensions':entries}
@@ -130,7 +144,10 @@ def build_discovery_index(root, config=None, allow_legacy=False):
 
 
 def write_discovery_index(root, output, config=None, allow_legacy=False):
-    index, manifest = build_discovery_index(root, config, allow_legacy)
+    return write_discovery_documents(output, *build_discovery_index(root, config, allow_legacy))
+
+
+def write_discovery_documents(output, index, manifest):
     output = Path(output); output.mkdir(parents=True,exist_ok=True)
     (output / 'discovery-index.json').write_bytes(json_bytes(index))
     (output / 'discovery-manifest.json').write_bytes(json_bytes(manifest))

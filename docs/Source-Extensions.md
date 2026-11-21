@@ -118,7 +118,7 @@ Keys are exact original UI strings from the tool's display name, summary, comman
 
 The optional catalog is at most 64 KiB of UTF-8 JSON, has `schemaVersion: 1`, and allows at most 32 language tables with 256 entries each. Locale keys contain 2–3 letters followed by up to three hyphen-separated 2–8 character alphanumeric subtags. Label keys must be nonempty and at most 2,000 UTF-8 bytes; values must be nonempty and at most 8,000 bytes; neither may contain NUL. The file counts toward the existing 96 KiB runtime text budget. Invalid/missing declared catalogs fail source validation and keep the last working generation. Tools without a catalog remain valid and retain original text. Edits use the normal source watcher/reload flow. Host translations never substitute for tool-owned configuration strings.
 
-The catalog translates host-rendered labels, not pixels inside an image. Authors who supply text-bearing artwork for their own UI or marketplace listing must keep localized text or locale-specific asset variants with that source and select the appropriate variant in the owning UI. Include shipped variants in the complete file inventory; provide matching captions and accessible descriptions. Verify long and right-to-left translations. This does not add image controls to the settings schema or permission to rewrite user content; language switches remain presentation-only and do not call AI.
+The catalog translates host-rendered labels. Keep app artwork localized in the tool’s runtime resources when it contains visible text. Keep website-only preview copy and assets in `marketplace/`; these stay outside the MacHelper install inventory. Provide localized captions and accessible descriptions, and check that long and right-to-left strings fit. Language switches update presentation without changing user content or contacting AI.
 
 ### JavaScript entry point
 
@@ -299,7 +299,7 @@ The source-package tests exercise metadata-only catalog loading, complete materi
 swift test --package-path MacHelper --filter 'SourcePackageTests|SourceWatcherTests'
 ```
 
-The [Extension Market](https://local-ai-extension.nelson007.com/) serves this catalog format and complete source packages. Its [website source](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/ExtensionMarket-website/README.md) includes search, filters, details, and install/download flows.
+The [Extension Market](https://local-ai-extension.nelson007.com/) serves this catalog format. New entries use direct commit-pinned GitHub HTTPS file URLs. The website retains previously published package files and ZIPs for older catalogs. The maintainer publishes new entries by reviewing a GitHub link to the extension folder at an exact commit. See the [publisher guide](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/ExtensionMarket-website/README.md#publish-a-tool).
 
 ## Website install links
 

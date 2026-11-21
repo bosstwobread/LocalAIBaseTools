@@ -11,11 +11,14 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
-from discovery import read_descriptor, write_discovery_index
+from discovery import discovery_documents, read_descriptor, write_discovery_documents, write_discovery_index
+from github_publication import collect_publications
+from github_registry import read_registry
 from preview_assets import build_previews
 
 HERE = Path(__file__).resolve().parent
@@ -118,6 +121,42 @@ def validate_source_files(manifest, files):
                     raise ValueError("The UI translation catalog has invalid labels.")
 
 
+def validate_registered_files(manifest, files):
+    runtime = source_runtime(manifest)
+    validate_source_files(manifest, files)
+    allowed = {"selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel"}
+    if runtime == "native":
+        allowed.add("native.execute")
+    declared = manifest["permissions"]
+    if any(not isinstance(item, str) or item not in allowed for item in declared) or len(set(declared)) != len(declared):
+        raise ValueError("Registered source declares unsupported or duplicate permissions.")
+    permissions = set(declared)
+    if ("selection.replace" in permissions and "selection.read" not in permissions
+            or "selection.paste" in permissions and not {"selection.read", "selection.replace"} <= permissions):
+        raise ValueError("Registered source is missing the selection permissions required for Apply.")
+    schema = manifest.get("settingsSchema")
+    if schema is not None and (not isinstance(schema, str) or schema not in files):
+        raise ValueError("The declared settings schema is missing from registered source.")
+    commands = manifest.get("commands")
+    if not isinstance(commands, list) or not 1 <= len(commands) <= 16:
+        raise ValueError("Registered source requires between 1 and 16 commands.")
+    identifiers = set()
+    for command in commands:
+        if not isinstance(command, dict):
+            raise ValueError("Invalid registered extension command.")
+        identifier, title, trigger = (command.get(key) for key in ("identifier", "title", "trigger"))
+        if (not isinstance(identifier, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,47}", identifier)
+                or identifier in identifiers or not isinstance(title, str) or not title.strip()
+                or len(title.encode("utf-8")) > 160
+                or any(unicodedata.category(char) in {"Cc", "Cf"} for char in title)
+                or trigger not in ("selection", "manual") or (trigger == "selection" and "selection.read" not in permissions)):
+            raise ValueError("Invalid registered extension command.")
+        symbol = command.get("systemSymbolName")
+        if symbol is not None and (not isinstance(symbol, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,99}", symbol)):
+            raise ValueError("Invalid registered extension command icon.")
+        identifiers.add(identifier)
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -168,7 +207,7 @@ def source_files(folder):
     result = {}
     for path in sorted(folder.rglob("*")):
         relative = path.relative_to(folder)
-        if any(part.startswith(".") or part in {"node_modules", "__pycache__"} for part in relative.parts):
+        if relative.parts[0] == "marketplace" or any(part.startswith(".") or part in {"node_modules", "__pycache__"} for part in relative.parts):
             continue
         if path.is_symlink():
             raise ValueError("Source downloads cannot contain symbolic links: " + str(relative))
@@ -202,7 +241,101 @@ def updated_at(folder):
     return datetime.fromtimestamp(max(p.stat().st_mtime for p in folder.rglob("*") if p.is_file()), timezone.utc).date().isoformat()
 
 
-def build(output, app, without_app=False, allow_legacy_discovery=False):
+def build_legacy_catalog(stage, config, allow_legacy_discovery):
+    discovery_index, _ = write_discovery_index(ROOT, stage, config, allow_legacy_discovery)
+    discovery_by_id = {item["id"]: item for item in discovery_index["extensions"]}
+    catalog = {"schemaVersion": 1, "extensions": []}
+    tools = []
+    known = config.get("tools", {})
+    seen_ids = set()
+    seen_slugs = set()
+    for folder in sorted((ROOT / "Extensions").iterdir()):
+        if not folder.is_dir() or folder.name.startswith(".") or folder.name in config.get("retiredTools", []):
+            continue
+        metadata = known.get(folder.name, {})
+        native_manifest = folder / "extension.json"
+        browser_manifest = folder / "manifest.json"
+        if native_manifest.exists():
+            manifest = json.loads(native_manifest.read_text())
+            runtime = source_runtime(manifest)
+            kind = "mac-source"
+            identifier = manifest["identifier"]
+            name = manifest["displayName"]
+            summary = manifest["summary"]
+            permissions = manifest["permissions"]
+            platforms = ["macOS"]
+        elif browser_manifest.exists():
+            manifest = json.loads(browser_manifest.read_text())
+            kind = "browser"
+            runtime = "browser"
+            identifier = metadata.get("id", "com.localaibasetools." + folder.name.lower())
+            name = manifest["name"]
+            summary = manifest["description"]
+            permissions = manifest.get("permissions", [])
+            platforms = ["macOS", "Chrome", "Edge"]
+        else:
+            raise ValueError("An extension directory has no supported manifest: " + folder.name)
+        discovery = read_descriptor(folder, {"summary": summary}, allow_legacy_discovery)
+        if kind == "browser":
+            identifier = discovery.get("identifier", identifier)
+        platforms = discovery["platforms"]
+        version = manifest["version"]
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
+            raise ValueError("The source version must be a safe semantic version: " + folder.name)
+        if not isinstance(identifier, str) or not re.fullmatch(r"[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+", identifier) or len(identifier) > 128:
+            raise ValueError("The source identifier must use reverse-domain notation: " + folder.name)
+        slug = metadata.get("slug", folder.name.lower())
+        if not slug or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in slug):
+            raise ValueError("The extension slug is not URL-safe: " + slug)
+        if identifier in seen_ids or slug in seen_slugs:
+            raise ValueError("Duplicate extension identifier or slug.")
+        seen_ids.add(identifier); seen_slugs.add(slug)
+        files = source_files(folder)
+        if kind == "mac-source":
+            validate_source_files(manifest, files)
+            inventory = []
+            for relative, data in files.items():
+                url = "packages/" + slug + "/" + quote(version, safe="") + "/" + quote(relative, safe="/")
+                destination = stage / "packages" / slug / version / relative
+                write_package(destination, data)
+                inventory.append({"path": relative, "url": url, "sha256": digest(data), "size": len(data)})
+            catalog["extensions"].append({
+                "identifier": identifier, "displayName": name, "version": version,
+                "summary": summary, "files": inventory,
+            })
+            package_name = "packages/" + slug + "-" + version + ".macsource.zip"
+            write_source_zip(stage / package_name, identifier + ".macsource", files)
+        else:
+            package_name = "packages/" + slug + "-" + version + ".zip"
+            complete = dict(files)
+            complete.setdefault("LICENSE", (ROOT / "LICENSE").read_bytes())
+            complete.setdefault("README.md", ("# " + name + "\n\n" + summary + "\n\n" +
+                "\n".join(str(i + 1) + ". " + step for i, step in enumerate(discovery.get("installSteps", []))) +
+                "\n\nComplete source: " + config["sourceUrl"] + "/tree/main/Extensions/" + folder.name + "\n").encode())
+            write_source_zip(stage / package_name, folder.name, complete)
+        item = {
+            "id": identifier, "slug": slug, "name": name, "version": version,
+            "summary": summary, "description": discovery["description"],
+            "category": metadata.get("category", "Productivity"), "platforms": platforms,
+            "kind": kind, "runtime": runtime,
+            "icon": metadata.get("icon", "assets/mac-helper.png"),
+            "screenshots": metadata.get("screenshots", []), "features": discovery["capabilities"],
+            "keywords": discovery["keywords"], "exampleQueries": discovery["exampleQueries"],
+            "limitations": discovery["limitations"], "translations": discovery["translations"],
+            "permissions": permissions, "installSteps": discovery.get("installSteps", []),
+            "sourceUrl": config["sourceUrl"] + "/tree/main/Extensions/" + quote(folder.name),
+            "packageUrl": package_name, "packageSha256": digest((stage / package_name).read_bytes()),
+            "packageSize": (stage / package_name).stat().st_size,
+            "catalogUrl": "catalog.json" if kind == "mac-source" else None,
+            "license": "MIT", "author": "LocalAIBaseTools contributors", "updatedAt": updated_at(folder),
+        }
+        if item["id"] not in discovery_by_id:
+            raise ValueError("Published tool is missing from discovery metadata.")
+        tools.append(item)
+    return tools, catalog
+
+
+def build(output, app, without_app=False, allow_legacy_discovery=False, local_sources=False):
     config = json.loads((HERE / "marketplace.config.json").read_text())
     base = config["baseUrl"]
     parsed = urlsplit(base)
@@ -211,6 +344,7 @@ def build(output, app, without_app=False, allow_legacy_discovery=False):
     output = output.resolve()
     if output == HERE or HERE not in output.parents or output.name != "dist":
         raise ValueError("The build output must be a dist directory inside ExtensionMarket-website.")
+    output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".market-build-", dir=HERE) as temporary:
         stage = Path(temporary) / "site"
         stage.mkdir()
@@ -222,96 +356,13 @@ def build(output, app, without_app=False, allow_legacy_discovery=False):
         build_previews(HERE, stage)
         shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.png", stage / "assets/mac-helper.png")
         copy_public_documents(stage)
-        discovery_index, _ = write_discovery_index(ROOT, stage, config, allow_legacy_discovery)
-        discovery_by_id = {item["id"]: item for item in discovery_index["extensions"]}
-        catalog = {"schemaVersion": 1, "extensions": []}
-        tools = []
-        known = config.get("tools", {})
-        seen_ids = set()
-        seen_slugs = set()
-        for folder in sorted((ROOT / "Extensions").iterdir()):
-            if not folder.is_dir() or folder.name.startswith(".") or folder.name in config.get("retiredTools", []):
-                continue
-            metadata = known.get(folder.name, {})
-            native_manifest = folder / "extension.json"
-            browser_manifest = folder / "manifest.json"
-            if native_manifest.exists():
-                manifest = json.loads(native_manifest.read_text())
-                runtime = source_runtime(manifest)
-                kind = "mac-source"
-                identifier = manifest["identifier"]
-                name = manifest["displayName"]
-                summary = manifest["summary"]
-                permissions = manifest["permissions"]
-                platforms = ["macOS"]
-            elif browser_manifest.exists():
-                manifest = json.loads(browser_manifest.read_text())
-                kind = "browser"
-                runtime = "browser"
-                identifier = metadata.get("id", "com.localaibasetools." + folder.name.lower())
-                name = manifest["name"]
-                summary = manifest["description"]
-                permissions = manifest.get("permissions", [])
-                platforms = ["macOS", "Chrome", "Edge"]
-            else:
-                raise ValueError("An extension directory has no supported manifest: " + folder.name)
-            discovery = read_descriptor(folder, {"summary": summary}, allow_legacy_discovery)
-            if kind == "browser":
-                identifier = discovery.get("identifier", identifier)
-            platforms = discovery["platforms"]
-            version = manifest["version"]
-            if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
-                raise ValueError("The source version must be a safe semantic version: " + folder.name)
-            if not isinstance(identifier, str) or not re.fullmatch(r"[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+", identifier) or len(identifier) > 128:
-                raise ValueError("The source identifier must use reverse-domain notation: " + folder.name)
-            slug = metadata.get("slug", folder.name.lower())
-            if not slug or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in slug):
-                raise ValueError("The extension slug is not URL-safe: " + slug)
-            if identifier in seen_ids or slug in seen_slugs:
-                raise ValueError("Duplicate extension identifier or slug.")
-            seen_ids.add(identifier); seen_slugs.add(slug)
-            files = source_files(folder)
-            if kind == "mac-source":
-                validate_source_files(manifest, files)
-                inventory = []
-                for relative, data in files.items():
-                    url = "packages/" + slug + "/" + quote(version, safe="") + "/" + quote(relative, safe="/")
-                    destination = stage / "packages" / slug / version / relative
-                    write_package(destination, data)
-                    inventory.append({"path": relative, "url": url, "sha256": digest(data), "size": len(data)})
-                catalog["extensions"].append({
-                    "identifier": identifier, "displayName": name, "version": version,
-                    "summary": summary, "files": inventory,
-                })
-                package_name = "packages/" + slug + "-" + version + ".macsource.zip"
-                write_source_zip(stage / package_name, identifier + ".macsource", files)
-            else:
-                package_name = "packages/" + slug + "-" + version + ".zip"
-                complete = dict(files)
-                complete.setdefault("LICENSE", (ROOT / "LICENSE").read_bytes())
-                complete.setdefault("README.md", ("# " + name + "\n\n" + summary + "\n\n" +
-                    "\n".join(str(i + 1) + ". " + step for i, step in enumerate(discovery.get("installSteps", []))) +
-                    "\n\nComplete source: " + config["sourceUrl"] + "/tree/main/Extensions/" + folder.name + "\n").encode())
-                write_source_zip(stage / package_name, folder.name, complete)
-            item = {
-                "id": identifier, "slug": slug, "name": name, "version": version,
-                "summary": summary, "description": discovery["description"],
-                "category": metadata.get("category", "Productivity"), "platforms": platforms,
-                "kind": kind, "runtime": runtime,
-                "icon": metadata.get("icon", "assets/mac-helper.png"),
-                "screenshots": metadata.get("screenshots", []), "features": discovery["capabilities"],
-                "keywords": discovery["keywords"], "exampleQueries": discovery["exampleQueries"],
-                "limitations": discovery["limitations"], "translations": discovery["translations"],
-                "permissions": permissions, "installSteps": discovery.get("installSteps", []),
-                "sourceUrl": config["sourceUrl"] + "/tree/main/Extensions/" + quote(folder.name),
-                "packageUrl": package_name, "packageSha256": digest((stage / package_name).read_bytes()),
-                "packageSize": (stage / package_name).stat().st_size,
-                "catalogUrl": "catalog.json" if kind == "mac-source" else None,
-                "license": "MIT", "author": "LocalAIBaseTools contributors", "updatedAt": updated_at(folder),
-            }
-            if item["id"] not in discovery_by_id:
-                raise ValueError("Published tool is missing from discovery metadata.")
-            tools.append(item)
+        registry = HERE / "registry.json"
+        if registry.is_file():
+            sources = read_registry(registry, local_root=ROOT if local_sources else None)
+            tools, catalog, entries = collect_publications(sources, validate_registered_files)
+            write_discovery_documents(stage, *discovery_documents(entries))
+        else:
+            tools, catalog = build_legacy_catalog(stage, config, allow_legacy_discovery)
         mac = dict(config["macHelper"])
         mac.update({"sourceUrl": config["sourceUrl"], "marketplaceUrl": base,
                     "downloadUrl": "downloads/MacHelper-macOS-arm64.zip", "available": not without_app})
@@ -327,7 +378,12 @@ def build(output, app, without_app=False, allow_legacy_discovery=False):
         else:
             mac["downloadUrl"] = None
         json_file(stage / "catalog.json", catalog)
-        json_file(stage / "data/extensions.json", {"schemaVersion": 1, "name": config["name"], "extensions": tools, "macHelper": mac})
+        data = {"schemaVersion": 1, "name": config["name"], "extensions": tools, "macHelper": mac}
+        if config.get("featuredExtension"):
+            data["featuredExtension"] = config["featuredExtension"]
+        if local_sources:
+            data["developmentSources"] = True
+        json_file(stage / "data/extensions.json", data)
         (stage / "robots.txt").write_text("User-agent: *\nAllow: /\n")
         # A failed build never replaces the last complete website.
         previous = output.with_name(".previous-market-build")
@@ -346,11 +402,12 @@ def main():
     parser.add_argument("--output", type=Path, default=HERE / "dist")
     parser.add_argument("--app", type=Path, default=ROOT / "dist/MacHelper.app")
     parser.add_argument("--without-app", action="store_true", help="Local website development only; omits the app download.")
+    parser.add_argument("--local-sources", action="store_true", help="Preview working-tree first-party files. This output cannot be deployed.")
     args = parser.parse_args()
-    try: tools, mac = build(args.output, args.app, args.without_app)
+    try: tools, mac = build(args.output, args.app, args.without_app, local_sources=args.local_sources)
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, "Marketplace build failed: " + str(error) + "\n")
-    print("Built", args.output, "with", len(tools), "extensions and", len([t for t in tools if t["kind"] == "mac-source"]), "complete MacHelper source packages.")
+    print("Built", args.output, "with", len(tools), "extensions and", len([t for t in tools if t["kind"] == "mac-source"]), "installable MacHelper extensions.")
     print("MacHelper download:", "included" if mac["available"] else "omitted for local development")
 
 

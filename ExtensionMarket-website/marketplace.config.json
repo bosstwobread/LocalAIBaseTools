@@ -17,7 +17,7 @@
         {
           "src": "assets/translation-preview.svg",
           "alt": "Illustrated document with selected Chinese text and a nearby English translation. Example content.",
-          "caption": "Interface preview — selected text, a nearby translation, and streaming output."
+          "caption": "Interface preview \u2014 selected text, a nearby translation, and streaming output."
         }
       ]
     },
@@ -29,12 +29,13 @@
         {
           "src": "assets/polish-input-preview.svg",
           "alt": "Illustrated editor with selected text, a shared Translate and Polish toolbar, and a polished preview with Apply and Copy. Example content.",
-          "caption": "Interface preview — select text, review the polished result, then Apply or Copy."
+          "caption": "Interface preview \u2014 select text, review the polished result, then Apply or Copy."
         }
       ]
     }
   },
   "retiredTools": [
     "MessageHelper-Upwork"
-  ]
+  ],
+  "featuredExtension": "com.localaibasetools.translation"
 }

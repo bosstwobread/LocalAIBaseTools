@@ -393,6 +393,9 @@ def private_settings(path: Path) -> dict[str, str]:
 def source_files(dist: Path) -> list[tuple[Path, str]]:
     if dist.is_symlink() or not dist.is_dir() or not (dist / "index.html").is_file():
         raise ValueError("Build the website first: dist/index.html is missing or the output directory is a symlink.")
+    listing = dist / "data/extensions.json"
+    if listing.is_file() and json.loads(listing.read_text()).get("developmentSources"):
+        raise ValueError("Working-tree source builds are for local testing. Build again with published GitHub revisions.")
     files = [(ROOT / "Dockerfile", "Dockerfile"), (ROOT / "nginx.conf", "nginx.conf")]
     if any(path.is_symlink() or not path.is_file() for path, _ in files):
         raise ValueError("The deployment Dockerfile and nginx configuration must be ordinary files.")

@@ -10,7 +10,7 @@ This follows Serenity's existing SSH → server Docker build → Docker Hub push
 
 ## Prepare and review
 
-Build the website into `ExtensionMarket-website/dist/` first, including the public catalog/source packages and the MacHelper ZIP produced by the project build. The Docker image receives only `Dockerfile`, `nginx.conf`, and `dist/`; private configuration and the rest of the repository are excluded.
+Build the website into `ExtensionMarket-website/dist/` from the pinned public GitHub registry. The build includes the generated catalogs, historical source packages, and the MacHelper ZIP produced by the app build. The Docker image receives `Dockerfile`, `nginx.conf`, and `dist/`. Keep private configuration outside that build context. Use the default GitHub source mode for deployment.
 
 ```sh
 python3 scripts/build-apps.py
@@ -90,9 +90,9 @@ continues to be served in English with its original code and prompts intact.
 ## Discovery metadata and local app connection
 
 Publish `discovery-index.json` and `discovery-manifest.json` from the same
-verified build as `data/extensions.json` and the source ZIPs. These lightweight
-public files contain descriptions only; the manifest SHA-256 and byte size must
-match the exact index bytes. Existing no-cache responses let MacHelper check
+verified build as `data/extensions.json` and `catalog.json`. The discovery
+metadata contains descriptions and related listing data. The discovery
+manifest’s SHA-256 and size must match the exact index bytes. Existing no-cache responses let MacHelper check
 for a new revision without downloading extension source or making an AI call.
 A failed update keeps the last valid app snapshot/cache. Do not hand-edit the
 index, manifest, or generated website data; edit each tool's `discovery.json`
@@ -129,8 +129,10 @@ error, **Open MacHelper** uses `machelper://open` without starting AI, and
 a closed app from a missing installation; do not report the app as uninstalled. MacHelper has no search screen or
 native search-prefill link. Searching never installs or executes matched tools.
 The existing deployment per-file checksum gate covers the public discovery
-files, current source packages, and immutable historical Connector ZIPs as
-ordinary static assets. The former Connector is no longer a current listing.
+files, catalog, and historical packages as ordinary static assets. During the build,
+the registry publisher reads the pinned GitHub files. MacHelper verifies files
+downloaded from those URLs on install. The browser can load published preview
+images from the exact GitHub raw content host.
 
 On a Mac with the installed MacHelper running,
 `python3 scripts/test-marketplace-service.py` checks the HTTP connection and

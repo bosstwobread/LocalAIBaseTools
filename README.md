@@ -23,7 +23,7 @@ LocalAIBaseTools/
 │   └── Polish-input/             Editable cross-app polishing source and prompt
 ├── legacy/MessageHelper-Upwork/  Retired browser package and safe test fixture
 ├── catalog/extensions.json       Source catalog metadata and complete SHA-256 file inventory
-├── ExtensionMarket-website/      Searchable tool marketplace, source packages, Docker deployment
+├── ExtensionMarket-website/      Searchable tool marketplace, GitHub registry, Docker deployment
 ├── examples/NativeGreeting/      Independent native Swift source-worker example
 ├── examples/ExternalGreeting/    Legacy in-process SDK migration fixture
 ├── scripts/                      Build/install and integration checks
@@ -78,7 +78,7 @@ Shared AI preferences are stored in the MacHelper support folder's `settings.jso
 
 The marketplace and MacHelper support English, Simplified Chinese, Traditional Chinese, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi, Russian, and Italian. Choose a language in the website header or **MacHelper → General → Interface language**. The website initially follows browser preferences; MacHelper's **System language** follows macOS. Each remembers its own explicit choice. Arabic uses right-to-left layout. Language changes use bundled translations and make no AI requests.
 
-The collection cards and detail pages show animated examples of Translation and Polish-input. Preview labels, captions, and sample results follow the website language. Translation uses a sample English sentence to illustrate word lookup. Polish-input shows a draft and its revision in the same language. The website owns this artwork copy in `ExtensionMarket-website/preview-locales.json`.
+The collection cards and detail pages show animated examples of Translation and Polish-input. Each tool keeps its labels, captions, and sample text in its own `marketplace/preview.json`. The website renders both with shared layouts and selects the preview language from the visitor’s preference.
 
 MacHelper updates its interface without restarting workers. Finish unsaved prompt/AI settings edits and pending operations before switching. Interface language is separate from Translation's target language, AI provider, and model. Source prompts, user text, model IDs, and code stay unchanged. The technical AI guide and provider/system diagnostics may remain in their original language.
 
@@ -124,7 +124,7 @@ In VS Code, keep the selection in the editor while reviewing the preview. Apply 
 
 Create a source folder containing `extension.json`, its JavaScript or Swift entry, and the editable resources it needs. New tools also provide a root `discovery.json` with a useful description, capabilities, example queries, keywords, limitations, and platforms. Marketplace publication requires that file; older installed tools still run without it. Include it in the complete source inventory. See the [discovery metadata contract](docs/Source-Extensions.md#public-discovery-metadata-machelper-63). Choose **MacHelper → Extensions → Install Source…** to import it, or **Add Catalog…** to list tools from a JSON catalog. Enabling a catalog tool downloads every declared source file with hash/size validation and atomic installation. No additional Mac app is installed.
 
-Browse the [Extension Market](https://local-ai-extension.nelson007.com/) or use **Marketplace…** in MacHelper. The [website project](ExtensionMarket-website/README.md) serves the catalog and complete source packages through a separate Docker container. See [Extension Development](docs/Extension-Development.md) and the detailed [source package/catalog contract](docs/Source-Extensions.md).
+Browse the [Extension Market](https://local-ai-extension.nelson007.com/) or use **Marketplace…** in MacHelper. To list an independent tool, publish it in a public GitHub repository and submit the link to its release commit and source folder for review. The publisher reads the manifests and optional preview, then generates the listing, search index, and installation inventory. MacHelper downloads source files from that GitHub commit after the user approves installation. [Publishing guide](ExtensionMarket-website/README.md#publish-a-tool) · [Source package contract](docs/Source-Extensions.md#download-contract-for-a-marketplace)
 
 Native Swift tools use `runtime: "native"`, a `.swift` entry, and `native.execute` permission. Install Xcode Command Line Tools before enabling or editing native source. MacHelper compiles trusted native code into a separate worker; source changes replace that worker while the app remains open. The same settings schema renders native tool configuration. See [Native source extensions](docs/Native-Extensions.md) for the complete SDK and [Native Greeting](examples/NativeGreeting/README.md) for an independent example.
 

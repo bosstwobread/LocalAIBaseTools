@@ -26,7 +26,24 @@
   }
   const sourceURL = () => url(state.data?.macHelper?.sourceUrl) || 'https://github.com/bosstwobread/LocalAIBaseTools';
   const helperURL = () => url(state.data?.macHelper?.downloadUrl);
-  const image = (src, alt, attrs = {}) => h('img', { src: url(i18n?.previewSource(src) || src) || new URL('assets/mac-helper.png', base).href, alt: i18n?.previewAlt(src, alt) || alt, loading: 'lazy', ...attrs });
+  function artworkURL(value) {
+    const resolved = url(value);
+    if (!resolved) return null;
+    const artwork = new URL(resolved);
+    return !artwork.username && !artwork.password
+      && [base.origin, 'https://raw.githubusercontent.com'].includes(artwork.origin) ? resolved : null;
+  }
+  function image(src, alt, attrs = {}) {
+    const fallback = new URL('assets/mac-helper.png', base).href;
+    const source = artworkURL(i18n?.previewSource(src) || src) || fallback;
+    const node = h('img', { src: source, alt: i18n?.previewAlt(src, alt) || alt, loading: 'lazy', referrerpolicy: 'no-referrer', ...attrs });
+    if (source !== fallback) node.addEventListener('error', () => {
+      node.src = fallback;
+      node.alt = '';
+      node.classList.add('artwork-unavailable');
+    }, { once: true });
+    return node;
+  }
   const textLink = (label, href, extra = {}) => h('a', { class: 'text-link', href, ...extra }, label, h('span', { 'aria-hidden': 'true' }, '↗'));
   function normalize(tool) {
     if (!tool || typeof tool.id !== 'string' || typeof tool.slug !== 'string' || typeof tool.name !== 'string' || !['mac-source', 'browser'].includes(tool.kind)) return null;
@@ -221,6 +238,9 @@
       if (tools.length !== data.extensions.length) throw new Error('Invalid extension metadata');
       state.data = data;
       state.tools = tools;
+      const featured = tools.find(tool => tool.id === data.featuredExtension);
+      const heroDemo = extensionDemos.create(featured, 'hero');
+      $('#hero-preview').replaceChildren(...(heroDemo ? [heroDemo] : []));
       populateFilters();
       renderDiscovery();
       renderCards();
@@ -264,12 +284,12 @@
   }
   function card(tool, match = null) {
     const details = `#extension/${encodeURIComponent(tool.slug)}`;
-    const shot = tool.screenshots[0];
+    const shot = authoredImagePreview(tool) || tool.screenshots[0];
     const visual = h('a', { class: 'card-visual', href: details, 'aria-label': t('Explore {name}', { name: tool.name }) },
-      extensionDemos.create(tool.id, 'card') ?? [
-        image(shot?.src || tool.icon, t(shot?.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }),
+      extensionDemos.create(tool, 'card') ?? (shot ? [
+        previewArtwork(tool, shot),
         h('span', { class: 'preview-label' }, t("Interface preview"))
-      ]);
+      ] : image(tool.icon, '', { class: 'card-visual-icon', width: '1160', height: '720' })));
     const install = h('button', { type: 'button', class: 'card-install', 'aria-label': t('Installation options for {name}', { name: tool.name }) }, tool.kind === 'mac-source' ? t("Add to MacHelper ↗") : t("Get extension ↗"));
     install.addEventListener('click', () => navigate(tool.slug, 'install'));
     return h('article', { class: 'extension-card' }, visual,
@@ -375,9 +395,16 @@
     const main = h('div', {}, h('p', { class: 'detail-description' }, toolText(tool,tool.description)));
     if (tool.features.length) main.append(h('h3', { class: 'detail-subheading' }, t("What it does")), h('ul', { class: 'detail-list' }, tool.features.map(feature => h('li', {}, toolText(tool,feature)))));
     if(tool.limitations.length) main.append(h('h3',{class:'detail-subheading'},t('Limitations')),h('ul',{class:'detail-list'},tool.limitations.map(value=>h('li',{},toolText(tool,value)))));
-    const demo = extensionDemos.create(tool.id, 'detail');
+    const demo = extensionDemos.create(tool, 'detail');
     if (demo) main.append(demo);
-    else for (const shot of tool.screenshots) main.append(h('figure', { class: 'detail-preview' }, image(shot.src, t(shot.alt) || t('{name} interface preview', { name: tool.name }), { width: '1160', height: '720' }), h('figcaption', {}, t(shot.caption) || t("Interface preview · Example content"))));
+    else {
+      const preview = authoredImagePreview(tool);
+      for (const shot of preview ? [preview] : tool.screenshots) {
+        main.append(h('figure', { class: 'detail-preview' },
+          previewArtwork(tool, shot),
+          h('figcaption', { lang: shot.captionLang }, (shot.captionLang ? shot.caption : t(shot.caption)) || t("Interface preview · Example content"))));
+      }
+    }
     if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
     const facts = h('dl', {}, h('dt', {}, t("Platforms")), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, t("Package")), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("Editable native Swift source") : t("Editable JavaScript source")) : t("Browser extension ZIP")), h('dt', {}, t("Version")), h('dd', {}, tool.version || '—'));
     if (tool.updatedAt) {
@@ -414,7 +441,8 @@
       callout.append(h('h3', {}, t('Add {name} to MacHelper', { name: tool.name })), h('p', {}, t("Open the MacHelper app to install the complete editable tool package and review its requested access.")), open, h('p', { class: 'install-help' }, t("This website cannot check whether MacHelper is installed on your Mac.")), installStatus);
       const fallbacks = h('div', { class: 'install-fallbacks' });
       fallbacks.append(textLink(helperURL() ? t("Download MacHelper first") : t("Build MacHelper from source"), helperURL() || sourceURL(), helperURL() ? { download: '' } : external));
-      if (packageURL) fallbacks.append(textLink(t("Download complete tool source"), packageURL, { download: '' }));
+      if (packageURL) fallbacks.append(textLink(t("Download complete tool source"), packageURL, new URL(packageURL).origin === base.origin ? { download: '' } : external));
+      else if (url(tool.sourceUrl)) fallbacks.append(textLink(t("View complete source"), url(tool.sourceUrl), external));
       const catalogCopy = h('button', { type: 'button', class: 'link-button' }, t("Copy catalog URL"));
       catalogCopy.addEventListener('click', () => copy(catalog, catalogCopy));
       fallbacks.append(catalogCopy);
@@ -466,20 +494,86 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { node.hidden = true; }, 3500);
   }
+  function previewCopy(preview, field) {
+    const locale = i18n?.locale || 'en';
+    const localized = preview.strings?.[locale]?.[field];
+    if (typeof localized === 'string') return { text: localized, lang: locale };
+    const english = preview.strings?.en?.[field];
+    return { text: typeof english === 'string' ? english : '', lang: 'en' };
+  }
+  function authoredImagePreview(tool) {
+    const preview = tool.preview;
+    if (preview?.schemaVersion !== 1 || preview.layout !== 'image' || !artworkURL(preview.image)) return null;
+    const description = previewCopy(preview, 'description');
+    const caption = previewCopy(preview, 'caption');
+    return { src: preview.image, alt: description.text, altLang: description.lang, caption: caption.text, captionLang: caption.text ? caption.lang : null };
+  }
+  function previewArtwork(tool, shot) {
+    const alt = (shot.altLang ? shot.alt : t(shot.alt)) || t('{name} interface preview', { name: tool.name });
+    return image(shot.src, alt, { lang: shot.altLang, width: '1160', height: '720' });
+  }
+  const fieldNode = (tag, field, attrs = {}) => h(tag, { ...attrs, 'data-preview-field': field });
+  const paperRule = (short = false) => h('div', { class: short ? 'paper-rule short' : 'paper-rule' });
+  function picturePath(attrs, pathAttrs) {
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const icon = document.createElementNS(svgNamespace, 'svg');
+    const path = document.createElementNS(svgNamespace, 'path');
+    for (const [key, value] of Object.entries(attrs)) icon.setAttribute(key, value);
+    for (const [key, value] of Object.entries(pathAttrs)) path.setAttribute(key, value);
+    icon.append(path);
+    return icon;
+  }
+  function editorWindow(...content) {
+    return h('div', { class: 'paper-window' },
+      h('div', { class: 'window-chrome' }, h('i'), h('i'), h('i'), fieldNode('span', 'editorTitle', { dir: 'auto' })),
+      ...content);
+  }
+  function resultPanel(name, symbol, content, footerAction, streaming = false) {
+    return h('div', { class: 'preview-popover' },
+      h('div', { class: 'popover-header' }, symbol, h('strong', { dir: 'auto' }, name),
+        streaming ? h('span', { class: 'demo-streaming-indicator' }) : null,
+        h('span', { class: 'popover-close' }, '×')),
+      h('div', { class: 'demo-output' }, content),
+      h('div', { class: 'popover-footer' }, fieldNode('span', 'settings'), footerAction));
+  }
+  function lookupIllustration(name) {
+    const source = h('p', { class: 'demo-source', dir: 'auto' },
+      fieldNode('span', 'sentenceBefore'), fieldNode('mark', 'word'), fieldNode('span', 'sentenceAfter'));
+    const editor = editorWindow(
+      h('div', { class: 'paper-content' }, fieldNode('div', 'documentHeading', { class: 'paper-label', dir: 'auto' }), source, paperRule(), paperRule(true)),
+      h('div', { class: 'floating-tool' }, h('span', {}, 'A'), h('span', {}, '文'), h('span', { class: 'demo-click-ring' })));
+    const lookupResult = [
+      h('div', { class: 'demo-meaning' }, fieldNode('strong', 'meaningLabel', { dir: 'auto' }), fieldNode('p', 'meaning', { dir: 'auto' })),
+      h('div', { class: 'demo-sentence' }, fieldNode('strong', 'sentenceLabel', { dir: 'auto' }), fieldNode('p', 'sentenceTranslation', { dir: 'auto' }))
+    ];
+    const panel = resultPanel(name, h('span', { class: 'lookup-symbol' }, '文'), lookupResult, fieldNode('span', 'copy', { class: 'copy-illustration' }), true);
+    const pointer = picturePath({ class: 'demo-pointer', viewBox: '0 0 24 30', width: '24', height: '30' },
+      { d: 'M3 2 21 17 13 18 9 26Z', fill: '#263329', stroke: '#fff', 'stroke-width': '2', 'stroke-linejoin': 'round' });
+    return [editor, panel, pointer];
+  }
+  function revisionIllustration(name) {
+    const pen = picturePath({ width: '18', height: '18', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, { d: 'm4 16-1 5 5-1L20 8l-4-4L4 16Zm9-9 4 4M3 23h17' });
+    const toolbar = h('div', { class: 'revision-toolbar' }, h('span', { class: 'revision-pen' }, pen), h('span', { class: 'revision-translate' }, 'A文'));
+    const passage = h('div', { class: 'revision-passage' },
+      h('div', { class: 'revision-original', dir: 'auto' }, fieldNode('mark', 'draft')),
+      fieldNode('div', 'result', { class: 'revision-applied', dir: 'auto' }));
+    const editor = editorWindow(h('div', { class: 'paper-content' }, paperRule(true), passage, paperRule(), toolbar));
+    const revisionResult = [fieldNode('strong', 'resultLabel', { dir: 'auto' }), fieldNode('p', 'result', { dir: 'auto' })];
+    const actions = h('div', { class: 'revision-actions' },
+      fieldNode('span', 'copy', { class: 'copy-illustration' }), fieldNode('span', 'apply', { class: 'revision-apply' }));
+    return [editor, resultPanel(name, h('span', { class: 'revision-ink' }, '✎'), revisionResult, actions)];
+  }
   function setupExtensionDemos() {
-    const original = $('#translation-demo');
-    const templates = new Map([
-      ['com.localaibasetools.translation', original.cloneNode(true)],
-      ['com.localaibasetools.polish-input', $('#polish-demo-template').content.firstElementChild]
-    ]);
+    const layouts = new Map([['lookup', lookupIllustration], ['revision', revisionIllustration]]);
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const demos = new Map();
     let sequence = 0;
-    function localize(demo) {
-      demo.querySelectorAll('[data-preview-key]').forEach(node => {
-        const text = i18n?.previewText(node.dataset.previewKey);
-        if (text) node.textContent = text;
-        node.lang = i18n?.locale || 'en';
+    function localize(demo, entry) {
+      demo.querySelectorAll('[data-preview-field]').forEach(node => {
+        const { text, lang } = previewCopy(entry.preview, node.dataset.previewField);
+        node.textContent = text;
+        node.lang = lang;
       });
     }
     function update(demo, entry) {
@@ -497,26 +591,25 @@
       }
     }, { threshold: [0, 0.2] }) : null;
     function refresh() { for (const [demo, entry] of demos) update(demo, entry); }
-    function register(demo) {
-      const entry = { visible: !observer };
-      demos.set(demo, entry);
-      localize(demo);
-      observer?.observe(demo);
-      update(demo, entry);
-      return demo;
-    }
-    function create(toolId, placement) {
-      const template = templates.get(toolId);
-      if (!template) return null;
-      const demo = document.importNode(template, true);
+    function create(tool, placement) {
+      const preview = tool?.preview;
+      const render = layouts.get(preview?.layout);
+      if (!render || preview.schemaVersion !== 1 || !preview.strings?.en) return null;
       const id = `extension-demo-${++sequence}`;
-      demo.id = id;
-      demo.classList.add(`demo-${placement}`);
-      demo.querySelector('[data-demo-title]').id = `${id}-title`;
-      demo.querySelector('[data-demo-summary]').id = `${id}-summary`;
-      demo.setAttribute('aria-labelledby', `${id}-title`);
-      demo.setAttribute('aria-describedby', `${id}-summary`);
-      return register(demo);
+      const steps = ['selectStep', 'reviewStep', 'resultStep'].map((field, index) =>
+        h('li', {}, h('span', { 'aria-hidden': 'true' }, `0${index + 1}`), fieldNode('span', field)));
+      const demo = h('figure', {
+        class: `hero-stage ${preview.layout}-demo demo-${placement}`, id,
+        'aria-labelledby': `${id}-title`, 'aria-describedby': `${id}-summary`
+      }, h('strong', { class: 'stage-topline', id: `${id}-title`, dir: 'auto' }, tool.name),
+      fieldNode('p', 'description', { class: 'sr-only', id: `${id}-summary` }),
+      h('div', { class: 'demo-canvas', 'aria-hidden': 'true' }, render(tool.name)),
+      h('ol', { class: 'demo-steps' }, steps));
+      const entry = { visible: !observer, preview };
+      demos.set(demo, entry);
+      localize(demo, entry);
+      observer?.observe(demo);
+      return demo;
     }
     function prune() {
       for (const [demo] of demos) if (!demo.isConnected) {
@@ -525,11 +618,9 @@
         demos.delete(demo);
       }
     }
-    register(original);
-    refresh();
     document.addEventListener('visibilitychange', refresh);
     window.addEventListener('market-language-change', () => {
-      for (const [demo] of demos) localize(demo);
+      for (const [demo, entry] of demos) localize(demo, entry);
       refresh();
     });
     reducedMotion?.addEventListener('change', refresh);
