@@ -226,5 +226,20 @@
   },
   "slug": "translation",
   "category": "Translation",
-  "icon": "translation-icon.svg"
+  "icon": "translation-icon.svg",
+  "fallbackImage": {
+    "en": "translation-preview.svg",
+    "zh-Hans": "localized/zh-Hans/translation-preview.svg",
+    "zh-Hant": "localized/zh-Hant/translation-preview.svg",
+    "es": "localized/es/translation-preview.svg",
+    "fr": "localized/fr/translation-preview.svg",
+    "de": "localized/de/translation-preview.svg",
+    "ja": "localized/ja/translation-preview.svg",
+    "ko": "localized/ko/translation-preview.svg",
+    "pt": "localized/pt/translation-preview.svg",
+    "ar": "localized/ar/translation-preview.svg",
+    "hi": "localized/hi/translation-preview.svg",
+    "ru": "localized/ru/translation-preview.svg",
+    "it": "localized/it/translation-preview.svg"
+  }
 }

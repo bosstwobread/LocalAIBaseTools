@@ -174,5 +174,20 @@
   },
   "slug": "polish-input",
   "category": "Writing",
-  "icon": "polish-input-icon.svg"
+  "icon": "polish-input-icon.svg",
+  "fallbackImage": {
+    "en": "polish-input-preview.svg",
+    "zh-Hans": "localized/zh-Hans/polish-input-preview.svg",
+    "zh-Hant": "localized/zh-Hant/polish-input-preview.svg",
+    "es": "localized/es/polish-input-preview.svg",
+    "fr": "localized/fr/polish-input-preview.svg",
+    "de": "localized/de/polish-input-preview.svg",
+    "ja": "localized/ja/polish-input-preview.svg",
+    "ko": "localized/ko/polish-input-preview.svg",
+    "pt": "localized/pt/polish-input-preview.svg",
+    "ar": "localized/ar/polish-input-preview.svg",
+    "hi": "localized/hi/polish-input-preview.svg",
+    "ru": "localized/ru/polish-input-preview.svg",
+    "it": "localized/it/polish-input-preview.svg"
+  }
 }
