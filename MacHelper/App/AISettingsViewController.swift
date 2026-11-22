@@ -57,7 +57,8 @@ final class AISettingsViewController: NSViewController {
         container.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(container)
         let preferredWidth = container.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -56)
-        preferredWidth.priority = .defaultHigh
+        // Keep the 720-point form cap from resizing the settings window.
+        preferredWidth.priority = .dragThatCannotResizeWindow
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),

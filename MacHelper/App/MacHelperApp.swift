@@ -214,7 +214,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         currentController?.removeFromParent()
         currentController = nil
         navigationButtons.removeAll()
-        if firstWindow { window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760),
+        if firstWindow { window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false) }
         window.title = "MacHelper"
         window.contentMinSize = NSSize(width: 940, height: 650)

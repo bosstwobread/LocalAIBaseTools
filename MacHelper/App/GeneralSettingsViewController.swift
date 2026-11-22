@@ -103,7 +103,8 @@ final class GeneralSettingsViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
         let preferredWidth = stack.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -56)
-        preferredWidth.priority = .defaultHigh
+        // Keep the 720-point form cap from resizing the settings window.
+        preferredWidth.priority = .dragThatCannotResizeWindow
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
