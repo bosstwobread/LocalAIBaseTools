@@ -1252,6 +1252,15 @@ private final class SourceSettingsDocumentView: NSView {
 }
 
 @MainActor
+private enum SourceToolSurface {
+    static func background(emphasized: Bool = false) -> NSColor {
+        let base = NSColor.controlBackgroundColor
+        let fill = emphasized ? base.blended(withFraction: 0.14, of: .controlAccentColor) ?? base : base
+        return fill.withAlphaComponent(0.84)
+    }
+}
+
+@MainActor
 private final class SourceToolIconView: NSView {
     private let artworkView = NSImageView()
     private var artworkSize: [NSLayoutConstraint] = []
@@ -1348,7 +1357,7 @@ private final class SourceToolCard: NSButton {
         let metadata = NSTextField(labelWithString: (tool.version.isEmpty ? "" : L("Version %@", tool.version))
             + (tool.isLocallyModified ? "  ·  " + L("Edited locally") : ""))
         metadata.font = .systemFont(ofSize: 11)
-        metadata.textColor = .tertiaryLabelColor
+        metadata.textColor = .secondaryLabelColor
         metadata.lineBreakMode = .byTruncatingTail
         let meta = NSStackView(views: [badge, metadata])
         meta.spacing = 10
@@ -1385,8 +1394,14 @@ private final class SourceToolCard: NSButton {
     override var acceptsFirstResponder: Bool { true }
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() {
-        layer?.backgroundColor = (isHighlighted || batchSelected ? NSColor.controlAccentColor.withAlphaComponent(0.08) : NSColor.controlBackgroundColor).cgColor
-        layer?.borderColor = (batchSelected ? NSColor.controlAccentColor : NSColor.separatorColor).withAlphaComponent(0.55).cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = SourceToolSurface.background(emphasized: isHighlighted || batchSelected).cgColor
+            layer?.borderColor = (batchSelected ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
+        }
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
     override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
 }
@@ -1397,7 +1412,6 @@ private final class SourceToolEmptyView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 12
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         let heading = NSTextField(labelWithString: title)
         heading.font = .systemFont(ofSize: 14, weight: .medium)
         let note = NSTextField(wrappingLabelWithString: L(message))
@@ -1419,4 +1433,14 @@ private final class SourceToolEmptyView: NSView {
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = SourceToolSurface.background().cgColor
+        }
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
 }

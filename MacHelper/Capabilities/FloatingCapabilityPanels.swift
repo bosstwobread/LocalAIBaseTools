@@ -145,6 +145,25 @@ enum CapabilityDragPointer {
     }
 }
 
+private final class CapabilityResultScrollView: NSScrollView {
+    override func tile() {
+        super.tile()
+        guard let textView = documentView as? NSTextView else { return }
+
+        // Overlay scrollers can cover either edge of the text view.
+        // Legacy scrollers already have their own space beside the clip view.
+        let overlayWidth = verticalScroller.flatMap { scroller in
+            scrollerStyle == .overlay
+                ? NSScroller.scrollerWidth(for: scroller.controlSize, scrollerStyle: .overlay)
+                : nil
+        } ?? 0
+        var inset = textView.textContainerInset
+        guard inset.width != overlayWidth else { return }
+        inset.width = overlayWidth
+        textView.textContainerInset = inset
+    }
+}
+
 @MainActor
 final class FloatingCapabilityPanels {
     var onPerform: (() -> Void)?
@@ -156,7 +175,7 @@ final class FloatingCapabilityPanels {
     private let resultPanel: NSPanel
     private let title = NSTextField(labelWithString: "")
     private let output = NSTextView()
-    private let scroll = NSScrollView()
+    private let scroll = CapabilityResultScrollView()
     private let footer = NSTextField(labelWithString: "")
     private let actionStatus = NSTextField(wrappingLabelWithString: "")
     private var actionStatusHeight: NSLayoutConstraint?
@@ -361,7 +380,7 @@ final class FloatingCapabilityPanels {
 
     func setActions(_ actions: [(identifier: String, title: String, systemSymbolName: String)]) {
         guard !actions.isEmpty else { return }
-        let background = Self.background()
+        let background = Self.toolbarBackground()
         let stack = NSStackView()
         stack.orientation = .horizontal
         stack.spacing = 4
@@ -446,7 +465,7 @@ final class FloatingCapabilityPanels {
     }
 
     private func buildIcon() {
-        let background = Self.background()
+        let background = Self.toolbarBackground()
         iconPanel.contentView = background
         let button = NSButton(image: NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: toolTitle) ?? NSImage(systemSymbolName: "sparkles", accessibilityDescription: toolTitle)!,
                               target: self, action: #selector(perform))
@@ -466,7 +485,7 @@ final class FloatingCapabilityPanels {
     }
 
     private func buildResult() {
-        let background = Self.background()
+        let background = MacHelperFrostedSurface(cornerRadius: 10)
         resultPanel.contentView = background
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.lineBreakMode = .byTruncatingTail
@@ -590,14 +609,21 @@ final class FloatingCapabilityPanels {
         actionStatusHeight = statusHeight
     }
 
-    private static func background() -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .popover
-        view.blendingMode = .behindWindow
-        view.state = .active
-        view.wantsLayer = true
-        view.layer?.cornerRadius = 10
-        view.layer?.masksToBounds = true
+    private static func toolbarBackground() -> NSVisualEffectView {
+        let view = MacHelperFrostedSurface(cornerRadius: 10)
+        let inset: CGFloat = 4
+        let radius: CGFloat = 10
+        let cap = inset + radius
+        let size = NSSize(width: 2 * cap + 1, height: 2 * cap + 1)
+        let mask = NSImage(size: size, flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: inset, dy: inset), xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        mask.capInsets = NSEdgeInsets(top: cap, left: cap, bottom: cap, right: cap)
+        mask.resizingMode = .stretch
+        // Mask the glass independently of the buttons' hit areas.
+        view.maskImage = mask
         return view
     }
 
@@ -615,7 +641,6 @@ final class FloatingCapabilityPanels {
 
     private func setResultFrame(_ frame: CGRect) {
         if resultPanel.frame != frame { resultPanel.setFrame(frame, display: true) }
-        output.frame.size.width = max(1, frame.width - 26)
     }
 
     /// Append growing text without rebuilding the view or resetting a reader's
@@ -649,7 +674,6 @@ final class FloatingCapabilityPanels {
         let frames = NSScreen.screens.map(\.visibleFrame)
         guard let screen = FloatingGeometry.screen(for: anchor, visibleFrames: frames) else { return }
         panel.setFrame(FloatingGeometry.frame(size: size, near: anchor, in: screen), display: true)
-        output.frame.size.width = max(1, panel.frame.width - 26)
     }
 
     @objc private func perform() { onPerform?() }

@@ -228,28 +228,38 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func createWindow() {
-        let firstWindow = window == nil
+        let previousFrame = window?.frame
+        let firstWindow = previousFrame == nil
         currentController?.view.removeFromSuperview()
         currentController?.removeFromParent()
         currentController = nil
         navigationButtons.removeAll()
-        if firstWindow { window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false) }
-        window.title = "MacHelper"
-        window.contentMinSize = NSSize(width: 940, height: 650)
-        if firstWindow, let visible = NSScreen.main?.visibleFrame {
-            window.setContentSize(NSSize(width: min(1060, max(940, visible.width - 64)),
-                                         height: min(760, max(650, visible.height - 64))))
+        let minimumSize = NSSize(width: 940, height: 650)
+        if firstWindow {
+            var initialSize = NSSize(width: 1060, height: 760)
+            if let visible = NSScreen.main?.visibleFrame {
+                initialSize.width = min(initialSize.width, max(minimumSize.width, visible.width - 64))
+                initialSize.height = min(initialSize.height, max(minimumSize.height, visible.height - 64))
+            }
+            window = SettingsWindow(contentRect: NSRect(origin: .zero, size: initialSize),
+                                    styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                                    backing: .buffered, defer: false)
+            window.title = "MacHelper"
+            window.titlebarAppearsTransparent = true
+            window.titlebarSeparatorStyle = .none
+            window.backgroundColor = .clear
+            window.isOpaque = false
+            window.isReleasedWhenClosed = false
         }
-        window.isReleasedWhenClosed = false
+        let settingsFrame = previousFrame ?? window.frame
+        let root = Self.settingsSurface(material: .popover, darkTintOpacity: 0.55)
+        // AppKit sizes the window from the incoming content view controller.
+        root.frame = NSRect(origin: .zero, size: settingsFrame.size)
         rootController = NSViewController()
-        rootController.view = NSView()
+        rootController.view = root
         window.contentViewController = rootController
 
-        let sidebar = NSVisualEffectView()
-        sidebar.material = .sidebar
-        sidebar.blendingMode = .behindWindow
-        sidebar.state = .followsWindowActiveState
+        let sidebar = Self.settingsSurface(material: .sidebar, darkTintOpacity: 0.47)
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         sidebar.setAccessibilityLabel(L("Settings navigation"))
         let title = NSTextField(labelWithString: L("MacHelper"))
@@ -290,18 +300,21 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         divider.translatesAutoresizingMaskIntoConstraints = false
         container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        let root = window.contentView!
+        // The glass spans the title bar, while controls start below it.
+        let contentTop = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? root.topAnchor
         for view in [sidebar, divider, container!] {
             root.addSubview(view)
         }
         NSLayoutConstraint.activate([
+            // Full-size content participates in layout before the window is shown.
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumSize.height),
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             sidebar.widthAnchor.constraint(equalToConstant: 240),
             header.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 22),
             header.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -16),
-            header.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 24),
+            header.topAnchor.constraint(equalTo: contentTop, constant: 24),
             navigation.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 12),
             navigation.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -12),
             navigation.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 28),
@@ -314,12 +327,31 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             divider.widthAnchor.constraint(equalToConstant: 1),
             container.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             container.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            container.topAnchor.constraint(equalTo: root.topAnchor),
+            container.topAnchor.constraint(equalTo: contentTop),
             container.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
         applyAppLanguageDirection(to: rootController.view)
         showTab(selectedSection)
+        window.contentMinSize = minimumSize
+        if window.frame != settingsFrame { window.setFrame(settingsFrame, display: false) }
         if firstWindow { window.center() }
+    }
+
+    private static func settingsSurface(material: NSVisualEffectView.Material, darkTintOpacity: CGFloat) -> NSView {
+        let glass = MacHelperFrostedSurface(material: material)
+        let tint = NSBox(frame: glass.bounds)
+        tint.boxType = .custom
+        tint.borderType = .noBorder
+        tint.titlePosition = .noTitle
+        tint.fillColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.black.withAlphaComponent(darkTintOpacity)
+                : .clear
+        }
+        tint.autoresizingMask = [.width, .height]
+        tint.setAccessibilityElement(false)
+        glass.addSubview(tint)
+        return glass
     }
 
     private func showSettings(tab: Int) {

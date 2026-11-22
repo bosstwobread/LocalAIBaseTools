@@ -181,7 +181,7 @@ final class SelectionMenuPasteTarget: @unchecked Sendable {
     }
 
     static func capture(from source: SelectionCopyTarget, continuing: () -> Bool) -> SelectionMenuPasteTarget? {
-        guard continuing(), let title = source.windowTitle,
+        guard !source.requiresReadOnlyMenu, continuing(), let title = source.windowTitle,
               source.isCurrent(continuing: continuing), title == SelectionMenuWindowTitle.read(source.window),
               let menu = SelectionEditMenu.read(from: source, continuing: continuing),
               menu.available(afterStagingText: false), continuing() else { return nil }

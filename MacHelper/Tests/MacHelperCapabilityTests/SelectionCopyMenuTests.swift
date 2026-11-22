@@ -62,4 +62,17 @@ final class SelectionCopyMenuTests: XCTestCase {
             XCTAssertFalse(SelectionCopyMenuIdentity.exactTitle(title), title)
         }
     }
+
+    func testReadOnlyFallbackRequiresStandardCopyTitleAndCompatibleShortcut() {
+        func matches(_ title: String, _ status: AXError, _ character: String?, _ modifiers: Int?) -> Bool {
+            SelectionCopyMenuIdentity.matchesDirectCopy(title: title, shortcutStatus: status,
+                                                        character: character, modifiers: modifiers)
+        }
+        XCTAssertTrue(matches("Copy", .success, "c", 0))
+        XCTAssertTrue(matches("复制", .attributeUnsupported, nil, nil))
+        XCTAssertFalse(matches("Copy Link", .success, "c", 0))
+        XCTAssertFalse(matches("Copy", .success, "c", 2))
+        XCTAssertFalse(matches("Copy", .cannotComplete, nil, nil))
+        XCTAssertFalse(matches("Copy", .success, "v", 0))
+    }
 }

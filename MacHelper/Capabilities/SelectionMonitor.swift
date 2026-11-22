@@ -377,7 +377,7 @@ final class SelectionMonitor {
                 let current = { token.isValid && cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) }
                 var candidate: TextSelection?
                 let initialTargetCurrent = cached.target.isCurrent(continuing: current, allowNewlyExposedAnchors: true)
-                if initialTargetCurrent,
+                if initialTargetCurrent, !cached.target.requiresReadOnlyMenu,
                    case .selection(let fresh) = AccessibilitySelectionReader().read(sourcePID: original.sourcePID,
                     mainScreenTop: mainTop, visibleFrames: visibleFrames, fallbackPoint: point, hitPoint: hitPoint, continuing: current),
                    fresh.accessibilityOrigin?.isCurrent(continuing: current) == true {
@@ -413,6 +413,7 @@ final class SelectionMonitor {
     func isCurrentMenuPasteSelection(_ selection: TextSelection, context expected: UInt64) -> Bool {
         guard selection.isClipboardOnly, context == expected,
               let cached = copiedSelection, cached.context == expected, cached.selection == selection,
+              !cached.target.requiresReadOnlyMenu,
               copyRevalidation.consecutiveTimeouts == 0, trusted, !dragging, !commandHeld,
               cached.target.process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication)
         else { return false }
@@ -809,7 +810,8 @@ final class SelectionMonitor {
                         if sameWindow, let currentWindow, let target = SelectionCopyTarget.capture(process: source,
                             hitPoint: hitPoint.map { CGPoint(x: $0.x, y: mainTop - $0.y) }, continuing: current),
                            CFEqual(target.window, currentWindow),
-                           let copyAction = SelectionCopyAction.resolve(application: target.application, pid: pid, continuing: current) {
+                           let copyAction = SelectionCopyAction.resolve(application: target.application, pid: pid,
+                               directEditCopyOnly: target.requiresReadOnlyMenu, continuing: current) {
                             let transaction = SelectionClipboardTransaction(pasteboard: SystemSelectionClipboard())
                             if let text = transaction.capture(prepareCopy: {
                                 target.isCurrent(continuing: current) && copyAction.isAvailable()

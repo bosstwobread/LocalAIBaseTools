@@ -1,5 +1,6 @@
 import AppKit
 import MacHelper
+import MacHelperCapabilities
 
 @MainActor
 final class MacHelperStateTip {
@@ -22,13 +23,7 @@ final class MacHelperStateTip {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
 
-        let background = NSVisualEffectView()
-        background.material = .popover
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 12
-        background.layer?.masksToBounds = true
+        let background = MacHelperFrostedSurface(cornerRadius: 12)
 
         label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.lineBreakMode = .byTruncatingTail

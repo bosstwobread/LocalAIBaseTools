@@ -62,6 +62,11 @@ enum SelectionCopyMenuIdentity {
         default: return false
         }
     }
+    static func matchesDirectCopy(title: String?, shortcutStatus: AXError, character: String?, modifiers: Int?) -> Bool {
+        guard let title, exactTitle(title) else { return false }
+        return standardShortcut(character: character, modifiers: modifiers) ||
+            reportsNoShortcut(status: shortcutStatus, character: character)
+    }
     static func exactTitle(_ title: String) -> Bool {
         let titles: Set<String> = ["copy", "复制", "拷贝", "複製", "拷貝", "copiar", "copier", "kopieren",
             "コピー", "복사", "نسخ", "कॉपी", "копировать", "copia"]
@@ -76,7 +81,8 @@ enum SelectionCopyAction {
     case menu(AXUIElement, pid_t)
     case shortcut(pid_t)
 
-    static func resolve(application: AXUIElement, pid: pid_t, continuing: () -> Bool) -> Self? {
+    static func resolve(application: AXUIElement, pid: pid_t, directEditCopyOnly: Bool = false,
+                        continuing: () -> Bool) -> Self? {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.8
         func allowed() -> Bool { continuing() && ProcessInfo.processInfo.systemUptime < deadline }
         func attribute(_ name: String, _ element: AXUIElement) -> (AXError, CFTypeRef?) {
@@ -91,7 +97,7 @@ enum SelectionCopyAction {
         }
         guard allowed() else { return nil }
         guard let bar = value(kAXMenuBarAttribute, application), CFGetTypeID(bar) == AXUIElementGetTypeID() else {
-            return allowed() ? .shortcut(pid) : nil
+            return !directEditCopyOnly && allowed() ? .shortcut(pid) : nil
         }
         var menuPID: pid_t = 0
         guard AXUIElementGetPid(bar as! AXUIElement, &menuPID) == .success, menuPID == pid else { return nil }
@@ -107,6 +113,13 @@ enum SelectionCopyAction {
                 let (shortcutStatus, shortcutValue) = attribute(kAXMenuItemCmdCharAttribute, element)
                 let character = (shortcutValue as? String)?.lowercased()
                 let modifiers = character == "c" ? value(kAXMenuItemCmdModifiersAttribute, element) as? Int : nil
+                if directEditCopyOnly {
+                    guard inEdit, depth == 3, SelectionCopyMenuIdentity.matchesDirectCopy(
+                        title: value(kAXTitleAttribute, element) as? String, shortcutStatus: shortcutStatus,
+                        character: character, modifiers: modifiers) else { continue }
+                    guard (value(kAXEnabledAttribute, element) as? Bool) == true, allowed() else { return nil }
+                    return .menu(element, pid)
+                }
                 if SelectionCopyMenuIdentity.standardShortcut(character: character, modifiers: modifiers) {
                     guard (value(kAXEnabledAttribute, element) as? Bool) == true, allowed() else { return nil }
                     return .menu(element, pid)
@@ -134,12 +147,17 @@ enum SelectionCopyAction {
             let editIndex = depth == 0 && role == kAXMenuBarRole ? SelectionCopyMenuIdentity.editMenuIndex(in: elements) {
                 value(kAXTitleAttribute, $0) as? String
             } : nil
+            if directEditCopyOnly, depth == 0 {
+                guard let editIndex else { return nil }
+                pending.append((elements[editIndex], depth + 1, true))
+                continue
+            }
             for index in elements.indices.reversed() where index != editIndex {
                 pending.append((elements[index], depth + 1, inEdit))
             }
             if let editIndex { pending.append((elements[editIndex], depth + 1, true)) }
         }
-        guard allowed() else { return nil }
+        guard !directEditCopyOnly, allowed() else { return nil }
         if let titleMatch {
             guard (value(kAXEnabledAttribute, titleMatch) as? Bool) == true, allowed() else { return nil }
             return .menu(titleMatch, pid)
@@ -190,6 +208,34 @@ struct SelectionCopyRevalidation {
     }
 }
 
+enum SelectionReadOnlyCopy {
+    /// A fixed pointer hit must reach the already verified window. A missing
+    /// parent, a different window, and a truncated/cyclic path all fail closed.
+    static func reachesWindow<Element>(from hit: Element, to window: Element,
+                                       sameElement: (Element, Element) -> Bool,
+                                       inspect: (Element, Bool) -> (parent: SelectionParent<Element>, placeholder: Bool)?) -> Bool {
+        var current = hit
+        var seen: [Element] = []
+        var hasPlaceholder = false
+        for index in 0..<16 {
+            if index > 0, sameElement(current, window) { return hasPlaceholder }
+            guard !seen.contains(where: { sameElement($0, current) }),
+                  let node = inspect(current, index == 0),
+                  case .element(let parent) = node.parent else { return false }
+            seen.append(current)
+            hasPlaceholder = hasPlaceholder || node.placeholder
+            current = parent
+        }
+        return false
+    }
+
+    static func isPlaceholder(role: String?, isHit: Bool, selectedText: String?, valueIsReadOnly: Bool,
+                              selectedTextIsReadOnly: Bool) -> Bool {
+        (role == kAXStaticTextRole || (!isHit && role == kAXGroupRole)) &&
+            selectedText == "" && valueIsReadOnly && selectedTextIsReadOnly
+    }
+}
+
 /// Read-only provenance for an explicit gesture when AX cannot supply its text.
 /// This is deliberately not an AccessibilitySelectionOrigin or an edit proof.
 struct SelectionCopyTarget: @unchecked Sendable {
@@ -200,6 +246,7 @@ struct SelectionCopyTarget: @unchecked Sendable {
     let focus: [SelectionFocusPath<AXUIElement>?]
     let hit: AXUIElement?
     let hitPoint: CGPoint?
+    let requiresReadOnlyMenu: Bool
 
     static func capture(process: SelectionCompatibilityProcess, hitPoint: CGPoint?,
                         continuing: () -> Bool) -> Self? {
@@ -229,13 +276,18 @@ struct SelectionCopyTarget: @unchecked Sendable {
             }
         }
         let hit = hitPoint.flatMap { AccessibilitySelectionOrigin.hit(in: app, at: $0) }
-        if let hit, !validChain(hit, application: app, continuing: allowed) { return nil }
+        var requiresReadOnlyMenu = false
+        if let hit, !validChain(hit, application: app, continuing: allowed) {
+            guard validReadOnlyHit(hit, window: window, application: app, pid: process.processIdentifier,
+                                   continuing: allowed) else { return nil }
+            requiresReadOnlyMenu = true
+        }
         guard allowed() else { return nil }
         // Some editors reuse one window for several document tabs. A title read
         // failure affects only the later explicit Paste action, never capture.
         let windowTitle = SelectionMenuWindowTitle.read(window)
         return .init(process: process, application: app, window: window, windowTitle: windowTitle,
-                     focus: focus, hit: hit, hitPoint: hitPoint)
+                     focus: focus, hit: hit, hitPoint: hitPoint, requiresReadOnlyMenu: requiresReadOnlyMenu)
     }
 
     func isCurrent(continuing: () -> Bool, allowNewlyExposedAnchors: Bool = false) -> Bool {
@@ -289,12 +341,59 @@ struct SelectionCopyTarget: @unchecked Sendable {
                 guard Self.validChain(current, application: application, continuing: allowed, onTimeout: onTimeout) else { return unavailable() }
             case (.some(let previous), .some(let current)):
                 guard CFEqual(previous, current) else { return .invalid }
-                guard Self.validChain(current, application: application, continuing: allowed, onTimeout: onTimeout) else { return unavailable() }
+                let valid = requiresReadOnlyMenu
+                    ? Self.validReadOnlyHit(current, window: window, application: application,
+                                            pid: process.processIdentifier, continuing: allowed, onTimeout: onTimeout)
+                    : Self.validChain(current, application: application, continuing: allowed, onTimeout: onTimeout)
+                guard valid else { return unavailable() }
             default: return .invalid
             }
         }
         guard allowed(), process == SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication) else { return unavailable() }
         return .current
+    }
+
+    private static func validReadOnlyHit(_ hit: AXUIElement, window: AXUIElement, application: AXUIElement,
+                                         pid: pid_t, continuing: () -> Bool, onTimeout: () -> Void = {}) -> Bool {
+        func read(_ name: String, of element: AXUIElement) -> CFTypeRef? {
+            guard continuing() else { return nil }
+            AXUIElementSetMessagingTimeout(element, 0.08)
+            var value: CFTypeRef?
+            let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+            if status == .cannotComplete { onTimeout() }
+            return status == .success ? value : nil
+        }
+        func readOnly(_ name: String, of element: AXUIElement) -> Bool {
+            guard continuing() else { return false }
+            var settable = DarwinBoolean(false)
+            let status = AXUIElementIsAttributeSettable(element, name as CFString, &settable)
+            if status == .cannotComplete { onTimeout() }
+            return status == .success && !settable.boolValue
+        }
+        return SelectionReadOnlyCopy.reachesWindow(from: hit, to: window, sameElement: { CFEqual($0, $1) }) { node, isHit in
+            var owner: pid_t = 0
+            guard continuing(), !CFEqual(node, application),
+                  AXUIElementGetPid(node, &owner) == .success, owner == pid,
+                  !AccessibilitySelectedText.isProtected(node, onTimeout: onTimeout),
+                  let role = read(kAXRoleAttribute, of: node) as? String, role != kAXWindowRole,
+                  !isHit || role == kAXStaticTextRole, continuing() else { return nil }
+            let range = AccessibilitySelectedText.rangeEvidence(of: node, continuing: continuing, onTimeout: onTimeout)
+            var placeholder = false
+            switch range {
+            case .invalid: return nil
+            case .missing: if isHit { return nil }
+            case .value(let value):
+                if value.length == 0 {
+                    guard SelectionReadOnlyCopy.isPlaceholder(role: role, isHit: isHit,
+                        selectedText: read(kAXSelectedTextAttribute, of: node) as? String,
+                        valueIsReadOnly: readOnly(kAXValueAttribute, of: node),
+                        selectedTextIsReadOnly: readOnly(kAXSelectedTextAttribute, of: node)) else { return nil }
+                    placeholder = true
+                } else if isHit { return nil }
+            }
+            guard continuing() else { return nil }
+            return (AccessibilitySelectionOrigin.parent(of: node, application: application), placeholder)
+        }
     }
 
     private static func validChain(_ anchor: AXUIElement, application: AXUIElement,
