@@ -7,6 +7,68 @@ final class PanelDragTests: XCTestCase {
     private let screen = CGRect(x: 0, y: 24, width: 1200, height: 760)
     private let size = CGSize(width: 380, height: 268)
 
+    func testResultSharesToolbarEdgeOnEitherSide() throws {
+        let anchor = CGRect(x: 100, y: 380, width: 40, height: 20)
+        for above in [true, false] {
+            var placement = CapabilityPanelPlacement()
+            let toolbar = CGRect(x: 104, y: above ? 411 : 331, width: 76, height: 38)
+            placement.alignWithToolbar(toolbar, occupiedY: anchor.minY...anchor.maxY, size: size,
+                                       near: anchor, visibleFrames: [screen])
+            let result = try XCTUnwrap(placement.frame(size: size, near: anchor, visibleFrames: [screen]))
+            XCTAssertEqual(result.minX, anchor.minX)
+            if above { XCTAssertEqual(result.minY, toolbar.minY) }
+            else { XCTAssertEqual(result.maxY, toolbar.maxY) }
+            XCTAssertFalse(result.intersects(anchor))
+        }
+    }
+
+    func testResultStaysOnSameSideWhenItCanFitCloserToSelection() throws {
+        let anchor = CGRect(x: 100, y: 470, width: 40, height: 30)
+        let toolbar = CGRect(x: 104, y: 520, width: 76, height: 38)
+        var placement = CapabilityPanelPlacement()
+        placement.alignWithToolbar(toolbar, occupiedY: 470...500, size: size, near: anchor, visibleFrames: [screen])
+        let result = try XCTUnwrap(placement.frame(size: size, near: anchor, visibleFrames: [screen]))
+        XCTAssertEqual(result.minY, 507)
+        XCTAssertTrue(screen.insetBy(dx: 6, dy: 6).contains(result))
+    }
+
+    func testResultChangesSidesWhenItCannotFitOnToolbarSide() throws {
+        for above in [true, false] {
+            let anchor = CGRect(x: 100, y: above ? 650 : 90, width: 40, height: 20)
+            let toolbar = CGRect(x: 104, y: above ? 681 : 41, width: 76, height: 38)
+            var placement = CapabilityPanelPlacement()
+            placement.alignWithToolbar(toolbar, occupiedY: anchor.minY...anchor.maxY, size: size,
+                                       near: anchor, visibleFrames: [screen])
+            let result = try XCTUnwrap(placement.frame(size: size, near: anchor, visibleFrames: [screen]))
+            if above { XCTAssertEqual(result.maxY, anchor.minY - 7) }
+            else { XCTAssertEqual(result.minY, anchor.maxY + 7) }
+            XCTAssertTrue(screen.insetBy(dx: 6, dy: 6).contains(result))
+        }
+    }
+
+    func testToolbarAlignmentSurvivesAnchorChangesUntilManualDragOrDismissal() throws {
+        let left = CGRect(x: -1000, y: -100, width: 1000, height: 900)
+        let screens = [left, screen]
+        let anchor = CGRect(x: -85, y: 365, width: 12, height: 20)
+        let toolbar = CGRect(x: -82, y: 395, width: 76, height: 38)
+        let changedAnchor = CGRect(x: 180, y: 140, width: 60, height: 35)
+        var placement = CapabilityPanelPlacement()
+        placement.alignWithToolbar(toolbar, occupiedY: 350...385, size: size, near: anchor, visibleFrames: screens)
+        let first = try XCTUnwrap(placement.frame(size: size, near: anchor, visibleFrames: screens))
+        XCTAssertEqual(first.minY, toolbar.minY)
+        XCTAssertEqual(first.maxX, left.maxX - 6)
+        XCTAssertEqual(placement.frame(size: size, near: changedAnchor, visibleFrames: screens), first)
+
+        let pointer = CGPoint(x: first.midX, y: first.maxY - 10)
+        XCTAssertTrue(placement.beginDrag(frame: first, pointer: pointer))
+        let moved = try XCTUnwrap(placement.drag(to: CGPoint(x: pointer.x - 80, y: pointer.y - 40), visibleFrames: screens))
+        placement.endDrag()
+        XCTAssertEqual(placement.frame(size: size, near: changedAnchor, visibleFrames: screens), moved)
+        placement.reset()
+        XCTAssertEqual(placement.frame(size: size, near: changedAnchor, visibleFrames: screens),
+                       FloatingGeometry.frame(size: size, near: changedAnchor, in: screen))
+    }
+
     func testUserPositionSurvivesProgressCompletionRetryAndChangedAnchor() throws {
         var placement = CapabilityPanelPlacement()
         let anchor = CGRect(x: 100, y: 350, width: 40, height: 20)

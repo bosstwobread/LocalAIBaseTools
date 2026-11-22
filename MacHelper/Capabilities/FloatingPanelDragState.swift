@@ -1,9 +1,10 @@
 import Foundation
 
-/// One result's manual placement survives streaming, completion, errors and a
-/// retry. A new selection or dismissal resets both placement and mouse capture.
+/// One result's placement survives streaming, completion, errors and a retry.
+/// A new selection or dismissal resets placement and mouse capture.
 struct CapabilityPanelPlacement {
     private(set) var userFrame: CGRect?
+    private var toolbarAlignedFrame: CGRect?
     private var startFrame: CGRect?
     private var startPoint: CGPoint?
     var isDragging: Bool { startFrame != nil && startPoint != nil }
@@ -26,12 +27,21 @@ struct CapabilityPanelPlacement {
     mutating func endDrag() { startFrame = nil; startPoint = nil }
     mutating func reset() { self = Self() }
 
+    mutating func alignWithToolbar(_ toolbar: CGRect, occupiedY: ClosedRange<CGFloat>, size: CGSize,
+                                   near anchor: CGRect, visibleFrames: [CGRect]) {
+        guard Self.valid(toolbar), let screen = FloatingGeometry.screen(for: toolbar, visibleFrames: visibleFrames)
+        else { return }
+        toolbarAlignedFrame = FloatingGeometry.resultFrame(size: size, near: anchor, replacing: toolbar,
+                                                            occupiedY: occupiedY, in: screen)
+    }
+
     mutating func frame(size: CGSize, near anchor: CGRect, visibleFrames: [CGRect]) -> CGRect? {
         if let userFrame {
             let frame = Self.clamped(userFrame, visibleFrames: visibleFrames)
             self.userFrame = frame
             return frame
         }
+        if let toolbarAlignedFrame { return Self.clamped(toolbarAlignedFrame, visibleFrames: visibleFrames) }
         guard let screen = FloatingGeometry.screen(for: anchor, visibleFrames: visibleFrames) else { return nil }
         return FloatingGeometry.frame(size: size, near: anchor, in: screen)
     }

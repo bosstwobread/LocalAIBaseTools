@@ -166,6 +166,9 @@ private final class CapabilityResultScrollView: NSScrollView {
 
 @MainActor
 final class FloatingCapabilityPanels {
+    private static let resultSize = CGSize(width: 380, height: 268)
+    private static let toolbarGlassInset: CGFloat = 4
+
     var onPerform: (() -> Void)?
     var onPerformAction: ((String) -> Void)?
     var onApply: ((String) -> Void)?
@@ -184,6 +187,7 @@ final class FloatingCapabilityPanels {
     private let applyButton = NSButton(title: L("Apply"), target: nil, action: nil)
     private var actionButtons: [ObjectIdentifier: String] = [:]
     private var toolbarSize = CGSize(width: 34, height: 34)
+    private var toolbarSelectionY: ClosedRange<CGFloat>?
     private var replacementAllowed = false
     private var replacementAvailable = false
     private var usesMenuPaste = false
@@ -202,7 +206,7 @@ final class FloatingCapabilityPanels {
         self.toolTitle = toolTitle
         self.systemSymbolName = systemSymbolName
         iconPanel = Self.panel(title: toolTitle, size: NSSize(width: 34, height: 34))
-        resultPanel = Self.panel(title: toolTitle, size: NSSize(width: 380, height: 268))
+        resultPanel = Self.panel(title: toolTitle, size: Self.resultSize)
         buildIcon()
         buildResult()
         refreshLanguage()
@@ -257,17 +261,17 @@ final class FloatingCapabilityPanels {
         (resultPanel.isVisible && resultPanel.frame.contains(point))
     }
 
-    func showIcon(near anchor: CGRect) {
+    func showIcon(near anchor: CGRect, adjustment: SelectionToolbarAdjustment?) {
         dragHandle.cancelDrag()
         placement.reset()
         resultPanel.orderOut(nil)
-        place(iconPanel, size: toolbarSize, near: anchor)
+        placeToolbar(near: anchor, adjustment: adjustment)
         iconPanel.orderFrontRegardless()
     }
 
-    func refreshToolbar(near anchor: CGRect) {
+    func refreshToolbar(near anchor: CGRect, adjustment: SelectionToolbarAdjustment?) {
         guard iconPanel.isVisible else { return }
-        place(iconPanel, size: toolbarSize, near: anchor)
+        placeToolbar(near: anchor, adjustment: adjustment)
     }
 
     func showLoading(near anchor: CGRect) {
@@ -335,6 +339,7 @@ final class FloatingCapabilityPanels {
     func hide() {
         dragHandle.cancelDrag()
         placement.reset()
+        toolbarSelectionY = nil
         iconPanel.orderOut(nil)
         resultPanel.orderOut(nil)
         presentation.reset()
@@ -611,7 +616,7 @@ final class FloatingCapabilityPanels {
 
     private static func toolbarBackground() -> NSVisualEffectView {
         let view = MacHelperFrostedSurface(cornerRadius: 10)
-        let inset: CGFloat = 4
+        let inset = toolbarGlassInset
         let radius: CGFloat = 10
         let cap = inset + radius
         let size = NSSize(width: 2 * cap + 1, height: 2 * cap + 1)
@@ -628,9 +633,16 @@ final class FloatingCapabilityPanels {
     }
 
     private func presentResult(near anchor: CGRect, resetScroll: Bool = false) {
+        let size = Self.resultSize
+        let screens = NSScreen.screens.map(\.visibleFrame)
+        if iconPanel.isVisible, let occupiedY = toolbarSelectionY {
+            let inset = Self.toolbarGlassInset
+            let glass = iconPanel.frame.insetBy(dx: inset, dy: inset)
+            placement.alignWithToolbar(glass, occupiedY: occupiedY, size: size,
+                                       near: anchor, visibleFrames: screens)
+        }
         iconPanel.orderOut(nil)
-        if let frame = placement.frame(size: CGSize(width: 380, height: 268), near: anchor,
-                                       visibleFrames: NSScreen.screens.map(\.visibleFrame)) {
+        if let frame = placement.frame(size: size, near: anchor, visibleFrames: screens) {
             setResultFrame(frame)
         }
         if !resultPanel.isVisible {
@@ -670,10 +682,15 @@ final class FloatingCapabilityPanels {
         }
     }
 
-    private func place(_ panel: NSPanel, size: CGSize, near anchor: CGRect) {
+    private func placeToolbar(near anchor: CGRect, adjustment: SelectionToolbarAdjustment?) {
         let frames = NSScreen.screens.map(\.visibleFrame)
-        guard let screen = FloatingGeometry.screen(for: anchor, visibleFrames: frames) else { return }
-        panel.setFrame(FloatingGeometry.frame(size: size, near: anchor, in: screen), display: true)
+        guard let screen = FloatingGeometry.screen(for: anchor, visibleFrames: frames) else {
+            toolbarSelectionY = nil
+            return
+        }
+        toolbarSelectionY = adjustment?.occupiedY ?? anchor.minY...anchor.maxY
+        iconPanel.setFrame(FloatingGeometry.toolbarFrame(size: toolbarSize, near: anchor, in: screen,
+                                                       adjustment: adjustment), display: true)
     }
 
     @objc private func perform() { onPerform?() }

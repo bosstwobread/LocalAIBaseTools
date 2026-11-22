@@ -1,6 +1,11 @@
 import AppKit
 import ApplicationServices
 
+struct SelectionToolbarAdjustment: Sendable {
+    let pointerY: CGFloat
+    let occupiedY: ClosedRange<CGFloat>
+}
+
 /// Placement evidence is independent of the proof used to read or edit text.
 /// All rectangles passed to anchor() use AppKit global screen coordinates.
 struct SelectionToolbarAnchor {
@@ -8,7 +13,8 @@ struct SelectionToolbarAnchor {
     let pointer: CGPoint
     let fromPointerGesture: Bool
 
-    func anchor(range: CGRect?, editor: CGRect?, window: CGRect?) -> CGRect {
+    func anchor(range: CGRect?, editor: CGRect?, window: CGRect?, dragStart: CGPoint? = nil)
+        -> (bounds: CGRect, adjustment: SelectionToolbarAdjustment?) {
         let window = window.flatMap { Self.usable($0) ? $0 : nil }
         let pointerAnchor = Self.point(at: pointer)
         if fromPointerGesture {
@@ -18,18 +24,27 @@ struct SelectionToolbarAnchor {
                let screen = screens.first(where: { $0.contains(pointer) }) {
                 let clipped = range.intersection(window ?? range).intersection(screen)
                 if Self.usable(clipped), clipped.insetBy(dx: -20, dy: -20).contains(pointer) {
-                    return clipped
+                    return (clipped, .init(pointerY: pointer.y, occupiedY: clipped.minY...clipped.maxY))
                 }
             }
-            return pointerAnchor
+            // When the provider has no usable range rectangle, the two
+            // endpoints approximate the lines covered by a local vertical drag.
+            if let dragStart, let window, abs(pointer.y - dragStart.y) >= 12,
+               window.contains(dragStart), window.contains(pointer),
+               let screen = screens.first(where: { $0.contains(pointer) && $0.contains(dragStart) }) {
+                let bottom = max(screen.minY, min(dragStart.y, pointer.y) - 9)
+                let top = min(screen.maxY, max(dragStart.y, pointer.y) + 9)
+                return (pointerAnchor, .init(pointerY: pointer.y, occupiedY: bottom...top))
+            }
+            return (pointerAnchor, nil)
         }
         // A keyboard selection has no pointer endpoint. Keep the toolbar in
         // the visible part of the focused editor/window even if the mouse was
         // last used on another display.
-        if let range, let visible = visiblePart(of: range, inside: window) { return visible }
-        if let editor, let visible = visiblePart(of: editor, inside: window) { return point(in: visible) }
-        if let window, let visible = visiblePart(of: window, inside: nil) { return point(in: visible) }
-        return pointerAnchor
+        if let range, let visible = visiblePart(of: range, inside: window) { return (visible, nil) }
+        if let editor, let visible = visiblePart(of: editor, inside: window) { return (point(in: visible), nil) }
+        if let window, let visible = visiblePart(of: window, inside: nil) { return (point(in: visible), nil) }
+        return (pointerAnchor, nil)
     }
 
     private func visiblePart(of rect: CGRect, inside window: CGRect?) -> CGRect? {

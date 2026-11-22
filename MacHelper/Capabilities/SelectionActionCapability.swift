@@ -198,7 +198,9 @@ public final class SelectionActionCapability {
         panels.setActions(actions.map { (identifier: $0.identifier, title: $0.title, systemSymbolName: $0.systemSymbolName) })
         // If only the toolbar is visible, refresh its size/placement for added
         // or removed actions. A streamed/completed result keeps its placement.
-        if let selection = state.selection, state.canTranslate { panels.refreshToolbar(near: selection.bounds) }
+        if let selection = state.selection, state.canTranslate {
+            panels.refreshToolbar(near: selection.bounds, adjustment: selection.toolbarAdjustment)
+        }
     }
 
     public func dismiss() {
@@ -228,7 +230,7 @@ public final class SelectionActionCapability {
         if state.retainsAppliedPreview { return }
         routing.clearSelection()
         if let selection, state.canTranslate {
-            panels.showIcon(near: selection.bounds)
+            panels.showIcon(near: selection.bounds, adjustment: selection.toolbarAdjustment)
         }
         else { panels.hide() }
     }

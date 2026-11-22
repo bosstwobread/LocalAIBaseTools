@@ -101,7 +101,8 @@ struct AccessibilitySelectionReader {
     }
 
     func read(sourcePID: Int32, mainScreenTop: CGFloat, visibleFrames: [CGRect], fallbackPoint: CGPoint,
-              hitPoint: CGPoint? = nil, continuing: @escaping () -> Bool = { true }) -> SelectionReadResult {
+              hitPoint: CGPoint? = nil, dragStart: CGPoint? = nil,
+              continuing: @escaping () -> Bool = { true }) -> SelectionReadResult {
         let deadline = ProcessInfo.processInfo.systemUptime + 2.4
         var routeDeadline = deadline
         guard let process = SelectionCompatibilityProcess(NSWorkspace.shared.frontmostApplication),
@@ -163,7 +164,7 @@ struct AccessibilitySelectionReader {
             }
             var windowFrame: CGRect?
             var editorFrame: CGRect?
-            if hitPoint == nil || rangeFrame != nil {
+            if hitPoint == nil || rangeFrame != nil || dragStart != nil {
                 let sourceWindow = window?.element ?? AccessibilitySelectionOrigin.window(in: app, attribute: .focused)
                     ?? AccessibilitySelectionOrigin.window(in: app, attribute: .main)
                 windowFrame = SelectionToolbarAnchor.appKitFrame(of: sourceWindow, mainScreenTop: mainScreenTop)
@@ -171,9 +172,10 @@ struct AccessibilitySelectionReader {
                     editorFrame = SelectionToolbarAnchor.appKitFrame(of: focus?.leaf ?? origin.source, mainScreenTop: mainScreenTop)
                 }
             }
-            let bounds = placement.anchor(range: rangeFrame, editor: editorFrame, window: windowFrame)
+            let anchor = placement.anchor(range: rangeFrame, editor: editorFrame, window: windowFrame, dragStart: dragStart)
             return TextSelection(text: current.text, sourcePID: sourcePID, rangeLocation: current.range?.location ?? -1,
-                rangeLength: current.range?.length ?? current.text.utf16.count, bounds: bounds, accessibilityOrigin: origin)
+                rangeLength: current.range?.length ?? current.text.utf16.count, bounds: anchor.bounds,
+                accessibilityOrigin: origin, toolbarAdjustment: anchor.adjustment)
         }
 
         // A mouse selection can belong to a nonfocused text node. Keep the
@@ -340,6 +342,7 @@ final class SelectionMonitor {
     private var reading = false
     private var dragging = false
     private var selectionMouseDown: (clickCount: Int, time: TimeInterval)?
+    private var mouseDownPoint: CGPoint?
     private var commandHeld = false
     private var commandSelectionPending = false
     private var keyboardSelectionKey: UInt16?
@@ -349,6 +352,7 @@ final class SelectionMonitor {
     private var context: UInt64 = 0
     private var selectionPoint = NSEvent.mouseLocation
     private var selectionHitPoint: CGPoint?
+    private var selectionDragStart: CGPoint?
     private let ownPID = ProcessInfo.processInfo.processIdentifier
 
     init(isKeyDown: @escaping (UInt16) -> Bool = { CGEventSource.keyState(.combinedSessionState, key: $0) }) {
@@ -544,6 +548,7 @@ final class SelectionMonitor {
             invalidateReadContext()
             dragging = false
             if !local { updateCommandState(event.modifierFlags.contains(.command)) }
+            if !local, event.type == .leftMouseDown { mouseDownPoint = point }
             if event.type == .leftMouseDown && (event.clickCount >= 2 || event.modifierFlags.contains(.shift)) {
                 selectionMouseDown = (event.clickCount, event.timestamp)
             }
@@ -552,10 +557,12 @@ final class SelectionMonitor {
             if !local { dragging = true; debounce?.cancel() }
         case .leftMouseUp, .rightMouseUp:
             let selectedByDragging = dragging
+            let dragStart = selectedByDragging ? mouseDownPoint : nil
             let mouseDown = selectionMouseDown
             let clickCount = max(mouseDown?.clickCount ?? 0, event.clickCount)
             let clickSelection = mouseDown != nil || clickCount >= 2 || event.modifierFlags.contains(.shift)
             selectionMouseDown = nil
+            mouseDownPoint = nil
             dragging = false
             if local { return }
             // A flagsChanged notification can be missed when switching apps.
@@ -566,6 +573,7 @@ final class SelectionMonitor {
             let selecting = event.type == .leftMouseUp &&
                 (selectedByDragging || clickSelection)
             selectionHitPoint = selecting ? selectionPoint : nil
+            selectionDragStart = selecting ? dragStart : nil
             // Keep AX responsive. On editors that require Copy, let the
             // complete click sequence and other selection tools settle first.
             let earliestCopy = clickSelection ? SelectionCapturePreparation.clickCopyDeadline(clickCount: clickCount,
@@ -704,6 +712,7 @@ final class SelectionMonitor {
         context &+= 1
         readNotBefore = 0
         selectionMouseDown = nil
+        mouseDownPoint = nil
         actionProofToken?.invalidate(); actionProofToken = nil
         copyPreparation = nil
         copyPreparationWindow = nil
@@ -715,7 +724,10 @@ final class SelectionMonitor {
         if preserveCopiedSelection, let cached = copiedSelection {
             copiedSelection = (context, cached.selection, cached.target)
         } else { copiedSelection = nil; copyRevalidation = SelectionCopyRevalidation() }
-        if !preserveHitPoint { selectionHitPoint = nil }
+        if !preserveHitPoint {
+            selectionHitPoint = nil
+            selectionDragStart = nil
+        }
         commandSelectionPending = false
         compatibilityGestureContext = nil
         compatibilityWaitingContext = nil
@@ -763,6 +775,7 @@ final class SelectionMonitor {
         compatibilityToken = token
         let point = selectionPoint
         let hitPoint = selectionHitPoint
+        let dragStart = selectionDragStart
         let screens = NSScreen.screens
         let mainTop = screens.first?.frame.maxY ?? 0
         let visibleFrames = screens.map(\.visibleFrame)
@@ -781,7 +794,8 @@ final class SelectionMonitor {
             var result = SelectionReadResult.unavailable
             if cachedCopy == nil {
                 result = AccessibilitySelectionReader().read(sourcePID: pid, mainScreenTop: mainTop,
-                    visibleFrames: visibleFrames, fallbackPoint: point, hitPoint: hitPoint, continuing: current)
+                    visibleFrames: visibleFrames, fallbackPoint: point, hitPoint: hitPoint, dragStart: dragStart,
+                    continuing: current)
             }
             let hasAXSelection: Bool
             if case .selection = result { hasAXSelection = true } else { hasAXSelection = false }
@@ -821,12 +835,14 @@ final class SelectionMonitor {
                                 if validity != .invalid {
                                     let placement = SelectionToolbarAnchor(screens: visibleFrames, pointer: point, fromPointerGesture: hitPoint != nil)
                                     let editor = hitPoint == nil ? target.focus.compactMap { $0?.leaf }.first : nil
-                                    let bounds = placement.anchor(range: nil,
+                                    let window = hitPoint == nil || dragStart != nil ? target.window : nil
+                                    let anchor = placement.anchor(range: nil,
                                         editor: SelectionToolbarAnchor.appKitFrame(of: editor, mainScreenTop: mainTop),
-                                        window: SelectionToolbarAnchor.appKitFrame(of: hitPoint == nil ? target.window : nil, mainScreenTop: mainTop))
-                                    var selection = TextSelection(text: text, sourcePID: pid, rangeLocation: -1,
-                                        rangeLength: text.utf16.count, bounds: bounds)
-                                    selection.isClipboardOnly = true
+                                        window: SelectionToolbarAnchor.appKitFrame(of: window, mainScreenTop: mainTop),
+                                        dragStart: dragStart)
+                                    let selection = TextSelection(text: text, sourcePID: pid, rangeLocation: -1,
+                                        rangeLength: text.utf16.count, bounds: anchor.bounds, isClipboardOnly: true,
+                                        toolbarAdjustment: anchor.adjustment)
                                     capturedCopy = (selection, target)
                                     cachedValidity = validity
                                     result = validity == .current ? .selection(selection) : .empty

@@ -128,6 +128,8 @@ struct TextSelection: Equatable, Sendable {
     var accessibilityOrigin: AccessibilitySelectionOrigin? = nil
     /// Copy fallback proves readable content, never an editable numeric span.
     var isClipboardOnly = false
+    /// Idle toolbar geometry is separate from the selection and result anchor.
+    var toolbarAdjustment: SelectionToolbarAdjustment? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.sourcePID == rhs.sourcePID && lhs.rangeLocation == rhs.rangeLocation && lhs.rangeLength == rhs.rangeLength &&
@@ -199,6 +201,8 @@ struct SelectionState {
 }
 
 enum FloatingGeometry {
+    private static let screenPadding: CGFloat = 6
+
     /// AX uses a top-left origin on the main screen; AppKit uses bottom-left.
     /// Other displays may have negative x/y, so never use the union's height.
     static func appKitRect(fromAccessibility rect: CGRect, mainScreenTop: CGFloat) -> CGRect {
@@ -214,7 +218,7 @@ enum FloatingGeometry {
     }
 
     static func frame(size: CGSize, near anchor: CGRect, in visibleFrame: CGRect, gap: CGFloat = 7) -> CGRect {
-        let inset = visibleFrame.insetBy(dx: 6, dy: 6)
+        let inset = visibleFrame.insetBy(dx: screenPadding, dy: screenPadding)
         let width = min(size.width, max(1, inset.width))
         let height = min(size.height, max(1, inset.height))
         let above = anchor.maxY + gap
@@ -227,6 +231,52 @@ enum FloatingGeometry {
             y: clamp(preferredY, lower: inset.minY, upper: inset.maxY - height),
             width: width, height: height
         )
+    }
+
+    static func toolbarFrame(size: CGSize, near anchor: CGRect, in screen: CGRect,
+                             adjustment: SelectionToolbarAdjustment?, gap: CGFloat = 7) -> CGRect {
+        let baseline = frame(size: size, near: anchor, in: screen, gap: gap)
+        guard let adjustment else { return baseline }
+        let pointer = adjustment.pointerY
+        let band = adjustment.occupiedY
+        let distanceLimit: CGFloat = 32
+        let screenArea = screen.insetBy(dx: screenPadding, dy: screenPadding)
+        let lower = max(screenArea.minY, pointer - distanceLimit - baseline.height)
+        let upper = min(screenArea.maxY - baseline.height, pointer + distanceLimit)
+        guard lower <= upper else { return baseline }
+
+        func score(_ y: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
+            let top = y + baseline.height
+            let overlap = max(0, min(top, band.upperBound + gap) - max(y, band.lowerBound - gap))
+            let distance = max(y - pointer, pointer - top, 0)
+            return (overlap, distance, abs(y - baseline.minY))
+        }
+        if (lower...upper).contains(baseline.minY), score(baseline.minY).0 == 0 { return baseline }
+        let pointerAnchor = CGRect(x: baseline.minX, y: pointer, width: 1, height: 1)
+        let nearPointerY = frame(size: baseline.size, near: pointerAnchor, in: screen, gap: gap).minY
+        // If there is no clear side nearby, prefer the least overlap while
+        // staying within reach of the pointer.
+        let positions = [band.upperBound + gap, band.lowerBound - gap - baseline.height, nearPointerY]
+            .map { clamp($0, lower: lower, upper: upper) }
+        let y = positions.min { score($0) < score($1) } ?? baseline.minY
+        return baseline.offsetBy(dx: 0, dy: y - baseline.minY)
+    }
+
+    static func resultFrame(size: CGSize, near anchor: CGRect, replacing toolbar: CGRect,
+                            occupiedY: ClosedRange<CGFloat>, in screen: CGRect, gap: CGFloat = 7) -> CGRect {
+        let selection = CGRect(x: anchor.minX, y: occupiedY.lowerBound, width: anchor.width,
+                               height: occupiedY.upperBound - occupiedY.lowerBound)
+        var result = frame(size: size, near: selection, in: screen, gap: gap)
+        let above = toolbar.midY >= selection.midY
+        let alignedY = above ? toolbar.minY : toolbar.maxY - result.height
+        let aboveY = selection.maxY + gap
+        let belowY = selection.minY - gap - result.height
+        let screenArea = screen.insetBy(dx: screenPadding, dy: screenPadding)
+        let positions = above ? [alignedY, aboveY, belowY] : [alignedY, belowY, aboveY]
+        if let y = positions.first(where: { $0 >= screenArea.minY && $0 + result.height <= screenArea.maxY }) {
+            result.origin.y = y
+        }
+        return result
     }
 
     private static func intersectionArea(_ a: CGRect, _ b: CGRect) -> CGFloat {

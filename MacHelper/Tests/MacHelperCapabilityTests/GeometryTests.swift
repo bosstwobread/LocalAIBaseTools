@@ -55,7 +55,7 @@ final class GeometryTests: XCTestCase {
         let editor = CGRect(x: 1500, y: 475, width: 800, height: 500)
         let placement = SelectionToolbarAnchor(screens: [primary, secondary],
             pointer: CGPoint(x: 200, y: 200), fromPointerGesture: false)
-        let bounds = placement.anchor(range: .zero, editor: editor, window: secondary)
+        let bounds = placement.anchor(range: .zero, editor: editor, window: secondary).bounds
         XCTAssertEqual(bounds.origin, CGPoint(x: editor.midX, y: editor.midY))
         XCTAssertEqual(FloatingGeometry.screen(for: bounds, visibleFrames: [primary, secondary]), secondary)
     }
@@ -65,11 +65,11 @@ final class GeometryTests: XCTestCase {
         let upper = CGRect(x: 0, y: 800, width: 900, height: 600)
         let window = CGRect(x: 200, y: 1250, width: 1400, height: 400)
         let placement = SelectionToolbarAnchor(screens: [primary, upper], pointer: CGPoint(x: 80, y: 80), fromPointerGesture: false)
-        let bounds = placement.anchor(range: CGRect(x: 30, y: 0, width: 170, height: 20), editor: .infinite, window: window)
+        let bounds = placement.anchor(range: CGRect(x: 30, y: 0, width: 170, height: 20), editor: .infinite, window: window).bounds
         let visible = window.intersection(upper)
         XCTAssertEqual(bounds.origin, CGPoint(x: visible.midX, y: visible.midY))
         let good = CGRect(x: 290, y: 1300, width: 130, height: 18)
-        XCTAssertEqual(placement.anchor(range: good, editor: nil, window: window), good)
+        XCTAssertEqual(placement.anchor(range: good, editor: nil, window: window).bounds, good)
     }
 
     func testMouseSelectionDiscardsRemoteOrMisplacedBoundsAndUsesGestureDisplay() {
@@ -78,10 +78,91 @@ final class GeometryTests: XCTestCase {
         let pointer = CGPoint(x: -60, y: 130)
         let placement = SelectionToolbarAnchor(screens: [primary, secondary], pointer: pointer, fromPointerGesture: true)
         for rect in [CGRect(x: 20, y: 10, width: 60, height: 20), CGRect(x: -300, y: 500, width: 60, height: 20)] {
-            XCTAssertEqual(placement.anchor(range: rect, editor: nil, window: secondary).origin, pointer)
+            XCTAssertEqual(placement.anchor(range: rect, editor: nil, window: secondary).bounds.origin, pointer)
         }
         let acrossDisplays = CGRect(x: -75, y: 127, width: 120, height: 18)
-        XCTAssertEqual(placement.anchor(range: acrossDisplays, editor: nil, window: nil), acrossDisplays.intersection(secondary))
+        XCTAssertEqual(placement.anchor(range: acrossDisplays, editor: nil, window: nil).bounds, acrossDisplays.intersection(secondary))
+    }
+
+    func testMouseToolbarClearsEstimatedRowsInEitherDragDirection() {
+        let screen = CGRect(x: -800, y: 0, width: 800, height: 600)
+        let size = CGSize(width: 84, height: 46)
+        let high = CGPoint(x: -180, y: 320)
+        let low = CGPoint(x: -40, y: 296)
+        for (start, end) in [(high, low), (low, high)] {
+            let placement = SelectionToolbarAnchor(screens: [screen], pointer: end, fromPointerGesture: true)
+            let anchor = placement.anchor(range: nil, editor: nil, window: screen, dragStart: start)
+            let baseline = FloatingGeometry.frame(size: size, near: anchor.bounds, in: screen)
+            let toolbar = FloatingGeometry.toolbarFrame(size: size, near: anchor.bounds, in: screen,
+                                                        adjustment: anchor.adjustment)
+            XCTAssertEqual(toolbar.minX, baseline.minX)
+            XCTAssertEqual(toolbar.size, baseline.size)
+            if end == low { XCTAssertEqual(toolbar.maxY, 280) }
+            else { XCTAssertEqual(toolbar.minY, 336) }
+        }
+    }
+
+    func testMouseToolbarUsesNearbySideOfReportedTallSelection() {
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let range = CGRect(x: 90, y: 200, width: 500, height: 360)
+        let placement = SelectionToolbarAnchor(screens: [screen], pointer: CGPoint(x: 350, y: 205), fromPointerGesture: true)
+        let anchor = placement.anchor(range: range, editor: nil, window: screen)
+        XCTAssertEqual(anchor.bounds, range)
+        let toolbar = FloatingGeometry.toolbarFrame(size: CGSize(width: 84, height: 46), near: range,
+                                                    in: screen, adjustment: anchor.adjustment)
+        XCTAssertEqual(toolbar.minX, range.minX)
+        XCTAssertEqual(toolbar.maxY, range.minY - 7)
+        XCTAssertFalse(toolbar.intersects(range))
+    }
+
+    func testMouseToolbarFindsClearSideAtTopAndBottomOfScreen() throws {
+        let screen = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let size = CGSize(width: 84, height: 46)
+        for (start, end) in [(562.0, 580.0), (40.0, 20.0)] {
+            let placement = SelectionToolbarAnchor(screens: [screen], pointer: CGPoint(x: 420, y: end), fromPointerGesture: true)
+            let anchor = placement.anchor(range: nil, editor: nil, window: screen, dragStart: CGPoint(x: 190, y: start))
+            let adjustment = try XCTUnwrap(anchor.adjustment)
+            let toolbar = FloatingGeometry.toolbarFrame(size: size, near: anchor.bounds, in: screen,
+                                                        adjustment: adjustment)
+            XCTAssertEqual(toolbar.minX, 420)
+            XCTAssertTrue(screen.insetBy(dx: 6, dy: 6).contains(toolbar))
+            if start < end {
+                XCTAssertLessThanOrEqual(toolbar.maxY, adjustment.occupiedY.lowerBound)
+                XCTAssertLessThanOrEqual(end - toolbar.maxY, 32)
+            } else {
+                XCTAssertGreaterThanOrEqual(toolbar.minY, adjustment.occupiedY.upperBound)
+                XCTAssertLessThanOrEqual(toolbar.minY - end, 32)
+            }
+        }
+    }
+
+    func testMouseToolbarUsesLeastOverlapWhenClearPlacementWouldBeTooFar() {
+        let screen = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let size = CGSize(width: 84, height: 46)
+        let range = CGRect(x: 90, y: 200, width: 500, height: 300)
+        let placement = SelectionToolbarAnchor(screens: [screen], pointer: CGPoint(x: 140, y: 240), fromPointerGesture: true)
+        let anchor = placement.anchor(range: range, editor: nil, window: screen)
+        let toolbar = FloatingGeometry.toolbarFrame(size: size, near: range, in: screen, adjustment: anchor.adjustment)
+        XCTAssertEqual(toolbar.minX, range.minX)
+        XCTAssertEqual(toolbar.maxY, 208)
+        XCTAssertEqual(toolbar.intersection(range).height, 8)
+    }
+
+    func testToolbarKeepsExistingPositionWithoutCredibleGeometry() {
+        let screen = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let window = CGRect(x: 100, y: 100, width: 620, height: 400)
+        let mouse = SelectionToolbarAnchor(screens: [screen], pointer: CGPoint(x: 300, y: 200), fromPointerGesture: true)
+        XCTAssertNil(mouse.anchor(range: nil, editor: nil, window: window, dragStart: CGPoint(x: 200, y: 205)).adjustment)
+        XCTAssertNil(mouse.anchor(range: nil, editor: nil, window: window, dragStart: CGPoint(x: 200, y: 510)).adjustment)
+        XCTAssertNil(mouse.anchor(range: nil, editor: nil, window: nil, dragStart: CGPoint(x: 200, y: 230)).adjustment)
+
+        let singleLine = CGRect(x: 270, y: 192, width: 60, height: 18)
+        let anchor = mouse.anchor(range: singleLine, editor: nil, window: window)
+        let size = CGSize(width: 84, height: 46)
+        XCTAssertEqual(FloatingGeometry.toolbarFrame(size: size, near: anchor.bounds, in: screen, adjustment: anchor.adjustment),
+                       FloatingGeometry.frame(size: size, near: anchor.bounds, in: screen))
+        let keyboard = SelectionToolbarAnchor(screens: [screen], pointer: mouse.pointer, fromPointerGesture: false)
+        XCTAssertNil(keyboard.anchor(range: singleLine, editor: nil, window: window, dragStart: CGPoint(x: 200, y: 230)).adjustment)
     }
 
     func testNoScreensProducesNoPlacement() {
