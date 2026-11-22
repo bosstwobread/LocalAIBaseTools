@@ -64,7 +64,7 @@ The build prefers an available Developer ID Application or Apple Development sig
 
 Settings uses a left sidebar for **General**, **AI Connection**, and **Extensions**, with the selected section on the right. Tool search lives on the website. **Extensions** opens the installed-tools list first. Choose a tool to open its detail page, or return to the list to choose another. Catalog tools that have not been installed appear separately.
 
-Double-click the MacHelper title bar to fill the available space on the current display. Switching between settings pages keeps the window size.
+Double-click the MacHelper title bar to maximize the window on the current display. Double-click again to restore its previous size and position. Switching between settings pages keeps the window size.
 
 In the **Installed** list, check individual tools or use **Select All**, then choose **Reload**, **Edit Source**, **Enable**, or **Disable**. Reload applies only to selected enabled tools; disabled tools stay disabled. Edit Source opens every selected source folder in VS Code, or Finder when VS Code is unavailable. Enable/Disable skip tools already in the requested state. Checked tools stay selected across refreshes and detail-page navigation. A failed action or cancelled native approval does not stop the remaining tools; the list reports the result and marks errors on the affected tool.
 

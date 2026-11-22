@@ -4,14 +4,17 @@ import AppKit
 final class SettingsWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
         guard event.type == .leftMouseDown, event.clickCount == 2,
-              !styleMask.contains(.fullScreen), let visibleFrame = screen?.visibleFrame,
+              !styleMask.contains(.fullScreen),
               isTitleBarBackground(at: event.locationInWindow) else {
             super.sendEvent(event)
             return
         }
-        if frame != visibleFrame {
-            setFrame(visibleFrame, display: true, animate: true)
-        }
+        zoom(nil)
+    }
+
+    // AppKit asks the window for its zoomed frame and remembers the previous frame.
+    @objc func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame: NSRect) -> NSRect {
+        window.screen?.visibleFrame ?? defaultFrame
     }
 
     private func isTitleBarBackground(at point: NSPoint) -> Bool {
