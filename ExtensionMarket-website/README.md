@@ -26,8 +26,10 @@ The **Open MacHelper** links for Translation and Polish-input use `machelper://i
 native installation review. MacHelper checks the catalog and manifest before
 showing permissions, then downloads the complete hash-verified source after
 approval. Existing local edits, settings, and enabled/disabled choices survive
-repeat install clicks. Both current tools run through MacHelper without a
-browser extension. MacHelper 6.6 adds a shared Translate/Polish selection toolbar;
+repeat install clicks. Users can install a newer catalog version through
+**Update…** in MacHelper after reviewing the release. Both current tools run
+through MacHelper without a browser extension. MacHelper 6.6 adds a shared
+Translate/Polish selection toolbar;
 6.6.1 presents separate icons with nonoverlapping click areas, localized tooltips,
 and an ellipsis menu when more than five actions are enabled.
 MacHelper also hides the waiting toolbar while Command is held; releasing
@@ -82,14 +84,12 @@ Polishing preserves the input language by default. Prompt editing and hot reload
 remain part of the independent extension source. MessageHelper-Upwork is retired
 from current listings; its published ZIPs remain immutable historical downloads.
 
-MacHelper’s **General → Improve compatibility with Electron apps** setting is off
-by default. With it enabled, an unreadable selection can prompt MacHelper to
-request full Accessibility from the supporting editor. In a newly opened VS Code
-window, wait a few seconds and select the text again if the toolbar has yet to
-appear. VS Code may enter Screen Reader Optimized mode, affecting folding and
-the minimap. MacHelper leaves your VS Code settings files, VoiceOver and macOS
-permissions alone. Turning the option off stops future requests. An affected
-app may need restarting. Apply still requires a verified edit target.
+MacHelper honors Electron compatibility preferences saved in earlier versions.
+With a saved opt-in, an unreadable selection can prompt MacHelper to request
+full Accessibility from the supporting editor. If the toolbar misses the first
+gesture in a new VS Code window, wait a few seconds and select the text again.
+VS Code may enter Screen Reader Optimized mode, affecting folding and the
+minimap. Apply still requires a verified edit target.
 
 ## Files
 
@@ -207,6 +207,8 @@ Add `--local-sources` to test unpublished changes to first-party extension
 folders, and pass the same flag to `verify.py`. This mode is for browsing and
 previewing unpublished files. Use the default pinned GitHub sources when
 testing installation against the reviewed release or preparing a deployment.
+When both bundled tools come from the same published commit, pass that revision
+to `scripts/build-apps.py --source-ref` to pin the app’s bundled catalog as well.
 Serve `dist/` locally to test both the domain root and a mounted path prefix.
 
 ## Deploy
@@ -246,7 +248,9 @@ served from `/data/extensions.json` and changes only after a successful rollout.
    Existing local copies keep their edits and preferences.
 
 For a tool update, submit the new commit URL. Increment the manifest version
-when installable files change. Update an illustrated preview independently
+when installable files change so MacHelper can identify it as a newer release.
+The MacHelper **Update…** action verifies the published source inventory and
+keeps a backup of the previous source. Update an illustrated preview independently
 when the source inventory has the same paths and bytes. Keep earlier source
 revisions and release assets available. To retire a listing, remove its
 registry entry. The marketplace keeps already published `/packages/` links
@@ -283,6 +287,8 @@ identifier with dots replaced by hyphens. For a separate manual ZIP download,
 set `releaseZip` to the exact `.macsource.zip` asset name under the GitHub
 release tag `v<VERSION>`. The author publishes and retains that ZIP. MacHelper
 installation continues to use the verified source-file inventory.
+
+A listing can use the static PNG declared by `extension.json` when `marketplace/preview.json` omits its icon. The publisher includes the PNG in the verified source inventory and uses its pinned GitHub URL.
 
 For example, place `preview.png` beside the following `preview.json`:
 
@@ -350,7 +356,7 @@ and relevant public metadata to their configured provider. It uses no marketplac
 AI account, API key, or hosted AI service. Provider availability and limits apply.
 
 MacHelper automatically starts a discovery-only HTTP service at
-`http://127.0.0.1:43827` when its app starts. Enter a need and choose **Find with
+`http://127.0.0.1:43827` while the app is running and enabled. Enter a need and choose **Find with
 AI**. That one click validates input, checks/creates the local connection when
 necessary, and searches using MacHelper’s saved AI settings. Blank, oversized,
 or otherwise invalid needs make no local request. Chrome/Edge may ask for
@@ -358,7 +364,7 @@ permission to access the local/loopback connection during the first valid
 search. The status/session handshake itself does not run inference.
 
 There is no separate Connect/Reconnect control. A new page, expired/evicted
-session, app restart, or **AI Connection → Restart Connection** is handled by
+session, app restart, pause and resume, or **AI Connection → Restart Connection** is handled by
 the next valid **Find with AI** action. If a search receives HTTP 401 before
 inference, it performs one new handshake and retries that search once. A second
 401, provider failure, busy response, network timeout, or other AI error ends
@@ -374,8 +380,9 @@ not browser local storage or URLs. See the
 
 After a local connection error, **Open MacHelper** uses `machelper://open` to
 launch/focus the app without AI, and **Get MacHelper** offers the download. The
-website cannot distinguish an app that is closed from one that is missing by
-that error, and must not claim the app is uninstalled. Denied local access needs
+website shows the same connection error if MacHelper is closed, missing, or
+paused. Resume a paused app in **General → Enable MacHelper**, then choose
+**Find with AI** again. Denied local access needs
 approval in browser site settings. Resolve the issue and choose **Find with AI**
 again. Keyword filtering always remains available.
 

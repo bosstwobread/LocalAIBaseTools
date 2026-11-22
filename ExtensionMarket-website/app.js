@@ -64,7 +64,7 @@
     incompatible: 'Update MacHelper to version 6.5 or later, then try Find with AI again.',
     unauthorized: 'Could not renew the MacHelper connection. Try Find with AI again.',
     timeout: 'Connection timed out. Check that MacHelper is running, then try Find with AI again.'
-  })[code] || 'Install or open MacHelper, then try Find with AI again.';
+  })[code] || 'Open or install MacHelper. If it’s paused, enable it in General. Then try Find with AI again.';
   function localError(code, status) { const error = new Error(code); error.code = code; error.status = status; return error; }
   function requireCurrent(pending) {
     if (discovery.running !== pending || pending.controller.signal.aborted) throw localError('cancelled');
@@ -478,7 +478,6 @@
     if (tool.installSteps.length) container.append(h('h3', { class: 'detail-subheading' }, t("Installation, step by step")), h('ol', { class: 'install-steps' }, tool.installSteps.map(step => h('li', {}, toolText(tool,step)))));
     const preview = /preview/i.test(state.data?.macHelper?.releaseChannel || t("Developer preview"));
     container.append(h('p', { class: 'install-footnote' }, t('MacHelper supports {architecture}, {minimumOS}. Unzip the app, move it to Applications, and open it.', { architecture: state.data?.macHelper?.architecture || 'Apple Silicon', minimumOS: state.data?.macHelper?.minimumOS || 'macOS 14+' }) + ' ' + (preview ? t('This developer preview is not notarized; macOS may require you to review it in Privacy & Security.') + ' ' : '') + t('Prefer to build it yourself? The full source is available below.')),
-      h('p', { class: 'install-footnote' }, t('Optional, off by default: MacHelper → General → Improve compatibility with Electron apps requests full Accessibility in supporting apps. It may change VS Code folding/minimap behavior. Reselect text after enabling.')),
       h('p', { class: 'install-footnote' }, t("If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe.")),
       h('p', { class: 'install-footnote' }, t("Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI.")),
       textLink(t("Review the project source"), sourceURL(), external));

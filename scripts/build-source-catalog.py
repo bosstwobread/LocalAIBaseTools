@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ref', default='main')
+    parser.add_argument('--output', type=Path, default=ROOT / 'catalog/extensions.json',
+                        help='Write the generated inventory to this path.')
     parser.add_argument('--package', action='append', default=[], help='Source folder name under Extensions; repeat to select packages. Defaults to all source packages.')
     parser.add_argument('--base-url', help='Alternative URL root for one selected package; use with exactly one --package.')
     args = parser.parse_args()
@@ -45,8 +47,8 @@ def main():
         entry = {key: manifest[key] for key in ['identifier', 'displayName', 'version', 'summary']}
         entry['files'] = files
         entries.append(entry)
-    target = ROOT / 'catalog/extensions.json'
-    target.parent.mkdir(exist_ok=True)
+    target = args.output
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps({'schemaVersion': 1, 'extensions': entries}, indent=2, ensure_ascii=False) + '\n')
     print(f'Built {target} ({len(entries)} source packages)')
 

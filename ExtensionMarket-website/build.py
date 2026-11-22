@@ -9,6 +9,7 @@ import plistlib
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import tempfile
 import unicodedata
@@ -73,6 +74,27 @@ def source_runtime(manifest):
 
 
 def validate_source_files(manifest, files):
+    icon = manifest.get("icon")
+    if icon is not None:
+        if (not isinstance(icon, str) or not icon.endswith(".png") or len(icon.encode("utf-8")) > 512
+                or len(icon.split("/")) > 12
+                or not all(re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_. -]{0,119}", part) for part in icon.split("/"))):
+            raise ValueError("The extension icon must use a safe relative PNG resource path.")
+        art = files.get(icon, b"")
+        if (not 33 <= len(art) <= 128 * 1024
+                or not art.startswith(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+                or not all(1 <= dimension <= 512 for dimension in struct.unpack_from(">II", art, 16))):
+            raise ValueError("The extension icon must be a PNG of up to 512 pixels per side and 128 KiB.")
+        offset = 8
+        while offset + 12 <= len(art):
+            size, kind = struct.unpack_from(">I4s", art, offset)
+            offset += size + 12
+            if kind == b"acTL":
+                raise ValueError("The extension icon must be a static PNG.")
+            if kind == b"IEND" and size == 0 and offset == len(art):
+                break
+        else:
+            raise ValueError("The extension icon has incomplete PNG data.")
     entry = manifest["entryPoint"]
     if entry not in files:
         raise ValueError("The source package entry point is missing.")
@@ -83,8 +105,9 @@ def validate_source_files(manifest, files):
             swift_files = sorted(path for path in files if Path(path).suffix.lower() == ".swift")
             if swift_files != [entry]:
                 raise ValueError("Native source packages require exactly one Swift entry; the SDK is supplied by MacHelper.")
-            for data in files.values():
-                data.decode("utf-8")
+            for name, data in files.items():
+                if name != icon:
+                    data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ValueError("Native source packages and source entry points require UTF-8 text, not prebuilt binaries.") from error
 

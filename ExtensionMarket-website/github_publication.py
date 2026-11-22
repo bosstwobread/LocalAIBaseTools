@@ -109,8 +109,9 @@ def collect_publications(sources, validate_files):
             "summary": entry["summary"], "files": inventory,
         })
         tool = {key: value for key, value in entry.items() if key != "capabilities"}
+        app_icon = source.raw_url(manifest["icon"]) if manifest.get("icon") else "assets/mac-helper.png"
         tool.update({
-            "category": listing.get("category", "Productivity"), "icon": listing.get("icon", "assets/mac-helper.png"),
+            "category": listing.get("category", "Productivity"), "icon": listing.get("icon", app_icon),
             "screenshots": [], "features": entry["capabilities"], "permissions": manifest["permissions"],
             "installSteps": descriptor.get("installSteps", []), "sourceUrl": source.url, "catalogUrl": "catalog.json",
         })

@@ -1,4 +1,5 @@
 """Exercise native source packaging without changing the real website output."""
+import base64
 import hashlib
 import importlib.util
 import json
@@ -154,6 +155,23 @@ class NativeSourcePackagingTests(unittest.TestCase):
             self.assertEqual(set(archive.namelist()), {"com.example.native-tool.macsource/" + path for path in expected})
         self.assertEqual((output / "NativeExtensionSDK/MacHelperNativeSDK.swift").read_text(), "// public synthetic SDK fixture\n")
         self.assertFalse(any(path.name == "AI_DEPLOYMENT.md" for path in output.rglob("*")))
+
+    def test_native_package_can_include_a_declared_static_png_icon(self):
+        self.manifest["icon"] = "assets/icon.png"
+        self.write_manifest()
+        resource = self.package / self.manifest["icon"]
+        resource.parent.mkdir()
+        pixel = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF8sAAAAASUVORK5CYII="
+        )
+        resource.write_bytes(pixel)
+        tools, _ = self.build()
+        with zipfile.ZipFile(self.site / "dist" / tools[0]["packageUrl"]) as archive:
+            self.assertEqual(archive.read("com.example.native-tool.macsource/assets/icon.png"), pixel)
+
+        resource.write_bytes(b"Unrecognized binary")
+        with self.assertRaisesRegex(ValueError, "icon must be a PNG"):
+            self.build()
 
     def test_native_helper_sources_and_binary_resources_are_rejected(self):
         for relative, data in [("Extra.SWIFT", b"// unexpected helper"), ("worker", b"\xff\xfe\xfa\xce")]:

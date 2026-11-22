@@ -621,8 +621,8 @@ test('missing service shows accurate install-or-open help only after an explicit
     assert.equal(view.localRequests.length,0);
     find(view,'A & B? 翻译');await finished(view);
     assert.equal(help.hidden,false);
-    assert.match(view.document.querySelector('#discovery-status').textContent,/Install or open MacHelper/);
-    assert.equal(view.document.body.textContent.match(/Install or open MacHelper, then try Find with AI again\./g)?.length,1,'Recovery text should appear only once.');
+    assert.match(view.document.querySelector('#discovery-status').textContent,/Open or install MacHelper.*enable it in General/);
+    assert.equal(view.document.body.textContent.match(/Open or install MacHelper\./g)?.length,1,'Recovery text should appear only once.');
     assert.equal(view.window.location.hash,'');assert.equal(view.localRequests.length,1);
     find(view,'A & B? 翻译');await finished(view);
     assert.equal(view.localRequests.length,2,'A second explicit click retries connection without a separate control.');
@@ -762,7 +762,7 @@ test('malformed handshakes never start inference and offer retry without a Conne
     const view=await page({service:call=>call.path==='/v1/status'?{ok:true,version:'6.5.0',protocolVersion:1}:reply});
     try{
       view.document.querySelector('#description-mode').click();find(view);await finished(view);
-      assert.match(view.document.querySelector('#discovery-status').textContent,/Install or open/);
+      assert.match(view.document.querySelector('#discovery-status').textContent,/Open or install/);
       assert.equal(view.document.querySelector('#local-connection-help').hidden,false);
       assert.equal(view.localRequests.some(call=>call.path==='/v1/search'),false);
     }finally{view.close();}
@@ -777,7 +777,7 @@ test('malformed handshakes never start inference and offer retry without a Conne
 
 test('minimal search and conditional recovery messages follow every interface language',async()=>{
   const messages=[
-    'Install or open MacHelper, then try Find with AI again.',
+    'Open or install MacHelper. If it’s paused, enable it in General. Then try Find with AI again.',
     'Allow local or loopback network access for this website in your browser’s site settings, then try Find with AI again.',
     'Update MacHelper to version 6.5 or later, then try Find with AI again.',
     'Connection timed out. Check that MacHelper is running, then try Find with AI again.',

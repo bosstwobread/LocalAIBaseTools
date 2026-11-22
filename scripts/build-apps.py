@@ -42,6 +42,7 @@ def build(package):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--signing-identity", help="Signing identity; otherwise prefer an existing Apple identity, falling back to ad hoc.")
+    parser.add_argument("--source-ref", default="main", help="Git ref for bundled source catalog download URLs.")
     config_path = ROOT / "ExtensionMarket-website/marketplace.config.json"
     default_marketplace = json.loads(config_path.read_text())["baseUrl"] if config_path.exists() else "https://local-ai-extension.nelson007.com/"
     parser.add_argument("--marketplace-url", default=default_marketplace, help="Public HTTPS URL opened by MacHelper's Marketplace entry.")
@@ -50,15 +51,15 @@ def main():
     if market_url.scheme != "https" or not market_url.hostname or market_url.username or market_url.password or market_url.query or market_url.fragment:
         parser.error("The marketplace URL must be a public HTTPS website URL without credentials, query, or fragment.")
     subprocess.run([sys.executable, str(ROOT / "scripts/build-app-icon.py")], check=True)
-    subprocess.run([sys.executable, str(ROOT / "scripts/build-source-catalog.py")], check=True)
-    identity = signing_identity(args.signing_identity)
-    discovery_stage = ROOT / "dist"
-    subprocess.run([sys.executable, str(ROOT / "ExtensionMarket-website/discovery.py"), "--output", str(discovery_stage)], check=True)
-    shutil.copytree(ROOT / "MacHelper/Runtime/DiscoveryPrompts", discovery_stage / "DiscoveryPrompts", dirs_exist_ok=True)
-    (discovery_stage / "discovery-config.json").write_text(json.dumps({"schemaVersion": 1, "websiteURL": args.marketplace_url}) + "\n")
-    helper_bin = build(ROOT / "MacHelper")
     dist = ROOT / "dist"
-    dist.mkdir(exist_ok=True)
+    bundled_catalog = dist / "source-catalog.json"
+    subprocess.run([sys.executable, str(ROOT / "scripts/build-source-catalog.py"),
+                    "--ref", args.source_ref, "--output", str(bundled_catalog)], check=True)
+    identity = signing_identity(args.signing_identity)
+    subprocess.run([sys.executable, str(ROOT / "ExtensionMarket-website/discovery.py"), "--output", str(dist)], check=True)
+    shutil.copytree(ROOT / "MacHelper/Runtime/DiscoveryPrompts", dist / "DiscoveryPrompts", dirs_exist_ok=True)
+    (dist / "discovery-config.json").write_text(json.dumps({"schemaVersion": 1, "websiteURL": args.marketplace_url}) + "\n")
+    helper_bin = build(ROOT / "MacHelper")
     legacy_artifact = dist / "Translation.app"
     if legacy_artifact.exists():
         shutil.rmtree(legacy_artifact)
@@ -76,7 +77,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "6.7.5", "CFBundleVersion": "675", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.7.6", "CFBundleVersion": "676", "CFBundleIconFile": "AppIcon",
         "CFBundleDevelopmentRegion": "en",
         "CFBundleLocalizations": sorted(path.stem for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")),
         "MacHelperMarketplaceURL": args.marketplace_url,
@@ -106,7 +107,7 @@ def main():
     (resources / "NativeExtensionSDK").mkdir()
     shutil.copy2(ROOT / "MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift", resources / "NativeExtensionSDK/MacHelperNativeSDK.swift")
     shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.icns", resources / "AppIcon.icns")
-    shutil.copy2(ROOT / "catalog/extensions.json", resources / "SourceCatalog/extensions.json")
+    shutil.copy2(bundled_catalog, resources / "SourceCatalog/extensions.json")
     for folder in sorted((ROOT / "Extensions").iterdir()):
         manifest_path = folder / "extension.json"
         if not folder.is_dir() or folder.is_symlink() or not manifest_path.is_file():
