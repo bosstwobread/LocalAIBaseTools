@@ -95,32 +95,16 @@ public struct MarketplaceInstallPreview: Sendable {
 public enum MarketplaceReviewLoader {
     public static func load(_ request: MarketplaceInstallRequest, session: URLSession = .shared) async throws -> MarketplaceInstallPreview {
         let catalog = try await SourceCatalogLoader.load(from: request.catalogURL, session: session)
-        guard let entry = catalog.extensions.first(where: { $0.identifier == request.extensionID }),
-              let manifestFile = entry.files.first(where: { $0.path == "extension.json" }) else {
+        guard let entry = catalog.extensions.first(where: { $0.identifier == request.extensionID }) else {
             throw MarketplaceError.invalidLink("The requested tool is not listed in this catalog.")
         }
-        var manifestURL: URL?
         for file in entry.files {
             guard let url = URL(string: file.url, relativeTo: request.catalogURL)?.absoluteURL else {
                 throw MarketplaceError.invalidLink("The catalog contains an invalid source URL.")
             }
             try MarketplaceURLRules.validate(url, allowLocalDevelopment: request.allowsLocalDevelopment)
-            if file.path == "extension.json" { manifestURL = url }
         }
-        guard let manifestURL else { throw MarketplaceError.invalidLink("The tool manifest is missing from this catalog.") }
-        let data = try await SourceDownloadTransport(session: session).read(manifestURL, maximumBytes: 64 * 1024)
-        guard SourcePackageRules.digest(data) == manifestFile.sha256.lowercased(),
-              manifestFile.size.map({ $0 == data.count }) ?? true else {
-            throw MarketplaceError.invalidLink("The tool manifest failed its SHA-256/size check. No tool was installed.")
-        }
-        let manifest = try JSONDecoder().decode(SourceExtensionManifest.self, from: data)
-        try manifest.validate()
-        let paths = Set(entry.files.map(\.path))
-        guard manifest.identifier == entry.identifier, manifest.version == entry.version,
-              manifest.displayName == entry.displayName, manifest.summary == entry.summary,
-              paths.contains(manifest.entryPoint), manifest.settingsSchema.map(paths.contains) ?? true else {
-            throw MarketplaceError.invalidLink("The tool manifest does not match the catalog or its complete source inventory.")
-        }
+        let manifest = try await SourceCatalogLoader.loadManifest(for: entry, relativeTo: request.catalogURL, session: session)
         return MarketplaceInstallPreview(request: request, entry: entry, manifest: manifest)
     }
 }

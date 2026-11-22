@@ -1,12 +1,24 @@
 import AppKit
+import Carbon
 import MacHelper
-import MacHelperCapabilities
 
 @MainActor
 final class GeneralSettingsViewController: NSViewController {
     private let login: LoginItemManager
+    private let enabledToggle = NSButton(checkboxWithTitle: L("Enable MacHelper"), target: nil, action: nil)
+    private let shortcutStatus = NSTextField(wrappingLabelWithString: "")
+    private let changeShortcutButton = NSButton(title: L("Change Shortcut…"), target: nil, action: nil)
+    private let resetShortcutButton = NSButton(title: L("Use Default"), target: nil, action: nil)
+    private var shortcutHint = ""
+    private var shortcutMonitor: Any?
+    private var pendingShortcut: (keyCode: UInt16, shortcut: GlobalShortcut)?
+    var onBeginShortcutRecording: (() -> Void)?
+    var onFinishShortcutRecording: ((GlobalShortcut?) -> Bool)?
+    var onResetShortcut: (() -> Bool)?
+    var onMacHelperEnabledChange: ((Bool) -> Void)? {
+        didSet { enabledToggle.isEnabled = onMacHelperEnabledChange != nil }
+    }
     private let toggle = NSButton(checkboxWithTitle: L("Launch MacHelper at login"), target: nil, action: nil)
-    private let compatibilityToggle = NSButton(checkboxWithTitle: L("Improve compatibility with Electron apps"), target: nil, action: nil)
     private let languagePicker = NSPopUpButton()
     var onLanguageChange: ((String) -> Bool)?
     private let status = NSTextField(wrappingLabelWithString: "")
@@ -14,6 +26,10 @@ final class GeneralSettingsViewController: NSViewController {
 
     init(login: LoginItemManager) { self.login = login; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit {
+        if let shortcutMonitor { NSEvent.removeMonitor(shortcutMonitor) }
+    }
 
     override func loadView() {
         view = NSView()
@@ -36,18 +52,38 @@ final class GeneralSettingsViewController: NSViewController {
         toggle.target = self
         toggle.action = #selector(changeLogin)
         status.font = .systemFont(ofSize: 12)
-        let note = NSTextField(wrappingLabelWithString: L("MacHelper keeps running when you close this window. Click its Dock icon to reopen Settings, or use the menu bar. Your enabled extensions start with it."))
-        note.textColor = .secondaryLabelColor
         let button = NSButton(title: L("Open Login Items…"), target: self, action: #selector(openLoginItems))
-        note.font = .systemFont(ofSize: 12)
         let header = NSStackView(views: [title, subtitle])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
-        let startup = NSStackView(views: [section, toggle, status, button, note])
+        let startup = NSStackView(views: [section, toggle, status, button])
         startup.orientation = .vertical
         startup.alignment = .leading
         startup.spacing = 14
+        let shortcutTitle = NSTextField(labelWithString: L("Global keyboard shortcut"))
+        shortcutTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        enabledToggle.target = self
+        enabledToggle.action = #selector(changeMacHelperEnabled)
+        enabledToggle.identifier = NSUserInterfaceItemIdentifier("machelper-enabled")
+        enabledToggle.isEnabled = onMacHelperEnabledChange != nil
+        shortcutStatus.font = .systemFont(ofSize: 12)
+        shortcutStatus.textColor = .secondaryLabelColor
+        changeShortcutButton.target = self
+        changeShortcutButton.action = #selector(changeShortcut)
+        changeShortcutButton.identifier = NSUserInterfaceItemIdentifier("change-global-shortcut")
+        changeShortcutButton.isEnabled = onBeginShortcutRecording != nil && onFinishShortcutRecording != nil
+        resetShortcutButton.target = self
+        resetShortcutButton.action = #selector(resetShortcut)
+        resetShortcutButton.identifier = NSUserInterfaceItemIdentifier("reset-global-shortcut")
+        resetShortcutButton.isEnabled = onResetShortcut != nil
+        let shortcutControls = NSStackView(views: [changeShortcutButton, resetShortcutButton])
+        shortcutControls.alignment = .centerY
+        shortcutControls.spacing = 8
+        let shortcut = NSStackView(views: [shortcutTitle, enabledToggle, shortcutStatus, shortcutControls])
+        shortcut.orientation = .vertical
+        shortcut.alignment = .leading
+        shortcut.spacing = 10
         let languageTitle = NSTextField(labelWithString: L("Interface language"))
         languageTitle.font = .systemFont(ofSize: 13, weight: .semibold)
         languagePicker.addItem(withTitle: L("System language"))
@@ -57,46 +93,11 @@ final class GeneralSettingsViewController: NSViewController {
         languagePicker.action = #selector(changeLanguage)
         languagePicker.identifier = NSUserInterfaceItemIdentifier("interface-language")
         languagePicker.setAccessibilityLabel(L("Interface language"))
-        let languageNote = NSTextField(wrappingLabelWithString: L("Choose the language used in MacHelper."))
-        languageNote.font = .systemFont(ofSize: 12)
-        languageNote.textColor = .secondaryLabelColor
-        let language = NSStackView(views: [languageTitle, languagePicker, languageNote])
+        let language = NSStackView(views: [languageTitle, languagePicker])
         language.orientation = .vertical
         language.alignment = .leading
         language.spacing = 10
-        let compatibilityTitle = NSTextField(labelWithString: L("App compatibility"))
-        compatibilityTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        compatibilityToggle.state = SelectionCompatibilityPreferences.isEnabled ? .on : .off
-        compatibilityToggle.target = self
-        compatibilityToggle.action = #selector(changeCompatibility)
-        compatibilityToggle.identifier = NSUserInterfaceItemIdentifier("electron-compatibility")
-        compatibilityToggle.cell?.wraps = true
-        compatibilityToggle.cell?.lineBreakMode = .byWordWrapping
-        compatibilityToggle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let compatibilityNote = NSTextField(wrappingLabelWithString: L("Off by default. After you select text, MacHelper can ask supporting apps to expose full Accessibility information. Select the text again after changing this option."))
-        let compatibilityEffects = NSTextField(wrappingLabelWithString: L("Some apps may change behavior. VS Code may enable Screen Reader Optimized mode, affecting features such as folding and the minimap."))
-        let compatibilityReset = NSTextField(wrappingLabelWithString: L("Turning this off stops new requests. Apps already enabled may need to restart to revert. This does not turn on VoiceOver or change macOS permissions."))
-        for label in [compatibilityNote, compatibilityEffects, compatibilityReset] {
-            label.font = .systemFont(ofSize: 12)
-            label.textColor = .secondaryLabelColor
-        }
-        let compatibility = NSStackView(views: [compatibilityTitle, compatibilityToggle, compatibilityNote, compatibilityEffects, compatibilityReset])
-        compatibility.orientation = .vertical
-        compatibility.alignment = .leading
-        compatibility.spacing = 10
-        let fallbackTitle = NSTextField(labelWithString: L("Automatic selection fallback"))
-        fallbackTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        let fallbackNote = NSTextField(wrappingLabelWithString: L("If Accessibility cannot read a selection, MacHelper temporarily copies it and restores the clipboard when safe."))
-        let fallbackPrivacy = NSTextField(wrappingLabelWithString: L("Clipboard snapshots stay in memory for the capture attempt. They are never saved to files, logged, or sent to AI."))
-        for label in [fallbackNote, fallbackPrivacy] {
-            label.font = .systemFont(ofSize: 12)
-            label.textColor = .secondaryLabelColor
-        }
-        let fallback = NSStackView(views: [fallbackTitle, fallbackNote, fallbackPrivacy])
-        fallback.orientation = .vertical
-        fallback.alignment = .leading
-        fallback.spacing = 10
-        let stack = NSStackView(views: [header, language, startup, compatibility, fallback])
+        let stack = NSStackView(views: [header, language, startup, shortcut])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 28
@@ -120,27 +121,107 @@ final class GeneralSettingsViewController: NSViewController {
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 28),
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -28),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            shortcut.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            shortcutStatus.widthAnchor.constraint(equalTo: stack.widthAnchor),
             startup.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            compatibility.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            compatibilityToggle.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor),
-            compatibilityNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            compatibilityEffects.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            compatibilityReset.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            fallback.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            fallbackNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            fallbackPrivacy.widthAnchor.constraint(equalTo: stack.widthAnchor),
             subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            status.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            note.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            status.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+    }
+
+    func updateMacHelperState(isEnabled: Bool, shortcut: String, shortcutAvailable: Bool) {
+        enabledToggle.state = isEnabled ? .on : .off
+        let displayedShortcut = AppLocalization.shared.isRightToLeft ? "\u{2066}\(shortcut)\u{2069}" : shortcut
+        shortcutHint = shortcutAvailable
+            ? L("Press %@ in any app to pause or resume MacHelper.", displayedShortcut)
+            : L("The global shortcut %@ is unavailable. You can still pause or resume MacHelper here.", displayedShortcut)
+        if shortcutMonitor == nil { shortcutStatus.stringValue = shortcutHint }
+    }
+
+    func cancelShortcutRecording() {
+        finishShortcutRecording(nil)
+    }
+
+    @objc private func changeShortcut() {
+        if shortcutMonitor != nil {
+            cancelShortcutRecording()
+            return
+        }
+        guard let window = view.window, let begin = onBeginShortcutRecording, onFinishShortcutRecording != nil else { return }
+        shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .leftMouseDown, .rightMouseDown]) { [weak self, weak window] event in
+            guard let self, let window, window.isKeyWindow, event.window == nil || event.window === window else { return event }
+            return self.handleShortcutRecordingEvent(event)
+        }
+        guard shortcutMonitor != nil else {
+            showUnavailableShortcut()
+            return
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutRecordingWindowResigned(_:)),
+            name: NSWindow.didResignKeyNotification, object: window)
+        begin()
+        changeShortcutButton.title = L("Cancel Recording")
+        resetShortcutButton.isEnabled = false
+        shortcutStatus.stringValue = L("Press a key with at least two modifiers. Press Escape to cancel.")
+    }
+
+    private func handleShortcutRecordingEvent(_ event: NSEvent) -> NSEvent? {
+        switch event.type {
+        case .leftMouseDown, .rightMouseDown:
+            let point = changeShortcutButton.convert(event.locationInWindow, from: nil)
+            if !changeShortcutButton.bounds.contains(point) { cancelShortcutRecording() }
+            return event
+        case .keyDown:
+            if event.keyCode == kVK_Escape {
+                cancelShortcutRecording()
+            } else if !event.isARepeat, pendingShortcut == nil {
+                if let shortcut = GlobalShortcut(event: event) {
+                    pendingShortcut = (event.keyCode, shortcut)
+                } else {
+                    shortcutStatus.stringValue = L("Use at least two modifiers and a supported key.")
+                }
+            }
+        case .keyUp:
+            if let pendingShortcut, event.keyCode == pendingShortcut.keyCode {
+                // Register after the recording keystroke is released, so it cannot also toggle MacHelper.
+                finishShortcutRecording(pendingShortcut.shortcut)
+            }
+        default: return event
+        }
+        return nil
+    }
+
+    private func finishShortcutRecording(_ shortcut: GlobalShortcut?) {
+        guard let shortcutMonitor else { return }
+        NSEvent.removeMonitor(shortcutMonitor)
+        self.shortcutMonitor = nil
+        pendingShortcut = nil
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        changeShortcutButton.title = L("Change Shortcut…")
+        resetShortcutButton.isEnabled = onResetShortcut != nil
+        shortcutStatus.stringValue = shortcutHint
+        let accepted = onFinishShortcutRecording?(shortcut) == true
+        if shortcut != nil, !accepted { showUnavailableShortcut() }
+    }
+
+    @objc private func shortcutRecordingWindowResigned(_ notification: Notification) {
+        cancelShortcutRecording()
+    }
+
+    @objc private func resetShortcut() {
+        if onResetShortcut?() != true { showUnavailableShortcut() }
+    }
+
+    private func showUnavailableShortcut() {
+        shortcutStatus.stringValue = L("That shortcut is unavailable. Choose another combination.") + "\n" + shortcutHint
     }
 
     func refreshStatus() {
         loadViewIfNeeded()
         if login.isEnabled || login.requiresApproval { registrationError = nil }
         toggle.state = login.isEnabled || login.requiresApproval ? .on : .off
-        compatibilityToggle.state = SelectionCompatibilityPreferences.isEnabled ? .on : .off
-        status.stringValue = registrationError.map { L("Startup error: %@", L($0)) } ?? L(login.statusMessage)
+        let message = registrationError.map { L("Startup error: %@", L($0)) } ?? login.statusMessage
+        status.stringValue = message ?? ""
+        status.isHidden = message == nil
         status.textColor = registrationError == nil ? .secondaryLabelColor : .systemRed
     }
 
@@ -155,15 +236,16 @@ final class GeneralSettingsViewController: NSViewController {
         if onLanguageChange?(code) != true { languagePicker.selectItem(at: languageIndex) }
     }
 
+    @objc private func changeMacHelperEnabled() {
+        onMacHelperEnabledChange?(enabledToggle.state == .on)
+    }
+
     @objc private func changeLogin() {
         do {
             if toggle.state == .on { try login.register() } else { try login.unregister() }
             registrationError = nil
         } catch { registrationError = error.localizedDescription }
         refreshStatus()
-    }
-    @objc private func changeCompatibility() {
-        SelectionCompatibilityPreferences.isEnabled = compatibilityToggle.state == .on
     }
     @objc private func openLoginItems() { login.openLoginSettings() }
 }

@@ -716,6 +716,46 @@ enum SourceExtensionVerification {
                       "A failed reviewed source download installed partial code or silently substituted the bundled seed.")
             note("a reviewed download hash failure installs nothing and never substitutes the bundled offline seed")
             await brokenMarket.stopAll()
+
+            let limitedState = workspace.appendingPathComponent("limited-catalog-state", isDirectory: true)
+            try FileManager.default.createDirectory(at: limitedState, withIntermediateDirectories: true)
+            let emptyCatalog = try JSONEncoder().encode(SourceCatalog(extensions: []))
+            let registeredCatalogs = try (0..<31).map { index in
+                let url = limitedState.appendingPathComponent("catalog-\(index).json")
+                try emptyCatalog.write(to: url)
+                return url
+            }
+            let preferencesURL = limitedState.appendingPathComponent("source-extensions.json")
+            let initialPreferences: [String: Any] = ["schemaVersion": 1, "enabled": [:], "permissions": [:],
+                                                     "catalogs": registeredCatalogs.map(\.absoluteString)]
+            try JSONSerialization.data(withJSONObject: initialPreferences).write(to: preferencesURL)
+            let limited = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                bundledCatalogURL: catalogURL, stateDirectory: limitedState,
+                sourceDirectory: workspace.appendingPathComponent("limited-catalog-source"), headless: true)
+            managers.append(limited)
+            await limited.start()
+
+            let heldCatalog = catalogURL.deletingLastPathComponent().appendingPathComponent("held-catalog.json")
+            let pendingCatalog = Task { try await limited.addCatalog(from: heldCatalog) }
+            defer { pendingCatalog.cancel() }
+            let deadline = Date().addingTimeInterval(8)
+            while !(try await requests(requestLogURL).contains("/held-catalog.json")) {
+                try check(Date() < deadline, "The pending catalog did not reach its download.")
+                try await Task.sleep(nanoseconds: 30_000_000)
+            }
+            var rejectedOverCapacity = false
+            do { _ = try await limited.installReviewedMarketplaceTool(preview) }
+            catch MarketplaceError.invalidLink(_) { rejectedOverCapacity = true }
+            let releaseURL = catalogURL.deletingLastPathComponent().appendingPathComponent("__release-catalog")
+            _ = try await URLSession.shared.data(from: releaseURL)
+            try await pendingCatalog.value
+            try await limited.addCatalog(from: registeredCatalogs[0])
+            let preferences = try JSONSerialization.jsonObject(with: Data(contentsOf: preferencesURL)) as? [String: Any]
+            try check(rejectedOverCapacity && limited.sourceURL(for: id) == nil &&
+                      preferences?["catalogs"] as? [String] == registeredCatalogs.map(\.absoluteString) + [heldCatalog.absoluteString],
+                      "Concurrent catalog acquisition exceeded capacity or changed an existing registration.")
+            note("a pending catalog reserves the final slot before a competing installation and registered URLs can still reload")
+            await limited.stopAll()
             report["sourceDownloadCount"] = try await requests(requestLogURL).filter { $0.hasPrefix("/Translation/") }.count
 
             if args.contains("--live") {

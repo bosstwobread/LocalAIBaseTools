@@ -1,5 +1,7 @@
 import CryptoKit
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 public enum SourcePackageError: LocalizedError, Equatable {
     case invalid(String)
@@ -42,16 +44,18 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let commands: [SourceExtensionCommand]
     public let settingsSchema: String?
     public let localizations: String?
+    public let icon: String?
 
     public init(schemaVersion: Int = 2, runtime: String = "javascript", identifier: String,
                 displayName: String, version: String, summary: String, entryPoint: String = "main.js",
                 permissions: [String], commands: [SourceExtensionCommand], settingsSchema: String? = nil,
-                localizations: String? = nil) {
+                localizations: String? = nil, icon: String? = nil) {
         self.schemaVersion = schemaVersion; self.runtime = runtime; self.identifier = identifier
         self.displayName = displayName; self.version = version; self.summary = summary
         self.entryPoint = entryPoint; self.permissions = permissions; self.commands = commands
         self.settingsSchema = settingsSchema
         self.localizations = localizations
+        self.icon = icon
     }
 
     public func validate() throws {
@@ -69,6 +73,12 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
             try SourcePackageRules.validatePath(localizations)
             guard localizations.hasSuffix(".json") else {
                 throw SourcePackageError.invalid("The extension UI translation catalog must be a JSON resource.")
+            }
+        }
+        if let icon {
+            try SourcePackageRules.validatePath(icon)
+            guard icon.hasSuffix(".png") else {
+                throw SourcePackageError.invalid("The extension icon must be a PNG resource.")
             }
         }
         // Accept old immutable packages' clipboard declaration for compatibility;
@@ -115,6 +125,7 @@ public struct SourcePackageSnapshot: Sendable {
     public let isLocallyModified: Bool
     public let fileHashes: [String: String]
     public let localizations: SourceTextLocalizations?
+    public let iconData: Data?
 }
 
 public enum SourcePackageRules {
@@ -144,6 +155,29 @@ public enum SourcePackageRules {
     static func validVersion(_ value: String) -> Bool {
         value.utf8.count <= 80 && value.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$"#, options: .regularExpression) != nil
     }
+    public static func isNewerVersion(_ candidate: String, than installed: String) -> Bool {
+        guard validVersion(candidate), validVersion(installed) else { return false }
+        let new = candidate.split(separator: "-", maxSplits: 1)
+        let old = installed.split(separator: "-", maxSplits: 1)
+        let core = new[0].compare(old[0], options: .numeric)
+        if core != .orderedSame { return core == .orderedDescending }
+        if new.count != old.count { return new.count == 1 }
+        guard new.count == 2 else { return false }
+        let newPrerelease = new[1].split(separator: ".", omittingEmptySubsequences: false)
+        let oldPrerelease = old[1].split(separator: ".", omittingEmptySubsequences: false)
+        for (lhs, rhs) in zip(newPrerelease, oldPrerelease) where lhs != rhs {
+            let lhsNumeric = !lhs.isEmpty && lhs.allSatisfy(\.isASCII) && lhs.allSatisfy(\.isNumber)
+            let rhsNumeric = !rhs.isEmpty && rhs.allSatisfy(\.isASCII) && rhs.allSatisfy(\.isNumber)
+            if lhsNumeric != rhsNumeric { return rhsNumeric }
+            if lhsNumeric {
+                let result = lhs.compare(rhs, options: .numeric)
+                if result != .orderedSame { return result == .orderedDescending }
+            } else {
+                return lhs > rhs
+            }
+        }
+        return newPrerelease.count > oldPrerelease.count
+    }
     public static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     static func boundedData(_ url: URL, maximum: Int = maximumFileBytes) throws -> Data {
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -170,15 +204,19 @@ public enum SourcePackageRules {
 }
 
 public enum SourcePackageInspector {
+    private static let maximumIconBytes = 128 * 1024
+    private static let maximumIconDimension = 512
+
+    /// Reads only presentation metadata from a known package, such as an app-bundled seed.
+    public static func iconData(at input: URL, matchingIdentifier identifier: String) -> Data? {
+        guard let (root, manifest) = try? readManifest(at: input), manifest.identifier == identifier,
+              let icon = manifest.icon, let url = try? SourcePackageRules.containedURL(icon, root: root),
+              let data = try? SourcePackageRules.boundedData(url, maximum: maximumIconBytes) else { return nil }
+        return validatedIcon(data)
+    }
+
     public static func snapshot(at input: URL) throws -> SourcePackageSnapshot {
-        let rootValues = try input.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-        guard rootValues.isDirectory == true, rootValues.isSymbolicLink != true else {
-            throw SourcePackageError.invalid("Choose a source extension folder.")
-        }
-        let root = input.standardizedFileURL.resolvingSymlinksInPath()
-        let manifestURL = try SourcePackageRules.containedURL("extension.json", root: root)
-        let manifest = try JSONDecoder().decode(SourceExtensionManifest.self, from: SourcePackageRules.boundedData(manifestURL, maximum: 64 * 1024))
-        try manifest.validate()
+        let (root, manifest) = try readManifest(at: input)
         let files = try sourceFiles(in: root)
         if manifest.runtime == "native" {
             let swiftFiles = files.filter { URL(fileURLWithPath: $0).pathExtension.lowercased() == "swift" }
@@ -188,6 +226,7 @@ public enum SourcePackageInspector {
         }
         var resources: [String: String] = [:]
         var hashes: [String: String] = [:]
+        var iconData: Data?
         var packageBytes = 0
         var runtimeBytes = 0
         for relative in files {
@@ -195,6 +234,10 @@ public enum SourcePackageInspector {
             packageBytes += data.count
             guard packageBytes <= SourcePackageRules.maximumPackageBytes else { throw SourcePackageError.invalid("The source package is too large.") }
             hashes[relative] = SourcePackageRules.digest(data)
+            if relative == manifest.icon {
+                iconData = validatedIcon(data)
+                if iconData != nil || manifest.runtime == "javascript" { continue }
+            }
             if manifest.runtime == "native" {
                 guard let text = String(data: data, encoding: .utf8), !text.contains("\0") else {
                     throw SourcePackageError.invalid("Native source packages contain UTF-8 source and text resources, not prebuilt executable files.")
@@ -239,7 +282,39 @@ public enum SourcePackageInspector {
         let modified = receipt.map { $0.identifier != manifest.identifier || $0.hashes != hashes } ?? false
         return SourcePackageSnapshot(manifest: manifest, rootURL: root, entrySource: entry, resources: resources,
                                      fingerprint: SourcePackageRules.digest(digestInput), isLocallyModified: modified,
-                                     fileHashes: hashes, localizations: localizations)
+                                     fileHashes: hashes, localizations: localizations, iconData: iconData)
+    }
+
+    private static func readManifest(at input: URL) throws -> (URL, SourceExtensionManifest) {
+        let rootValues = try input.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard rootValues.isDirectory == true, rootValues.isSymbolicLink != true else {
+            throw SourcePackageError.invalid("Choose a source extension folder.")
+        }
+        let root = input.standardizedFileURL.resolvingSymlinksInPath()
+        let manifestURL = try SourcePackageRules.containedURL("extension.json", root: root)
+        let manifest = try JSONDecoder().decode(SourceExtensionManifest.self,
+                                               from: SourcePackageRules.boundedData(manifestURL, maximum: 64 * 1024))
+        try manifest.validate()
+        return (root, manifest)
+    }
+
+    private static func validatedIcon(_ data: Data) -> Data? {
+        guard data.count <= maximumIconBytes,
+              data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) else { return nil }
+        // Bounded source reads may map a mutable file. Freeze the bytes before
+        // validating them so presentation sees the same image.
+        let frozen = data.withUnsafeBytes { Data($0) }
+        guard let source = CGImageSourceCreateWithData(frozen as CFData, nil),
+              CGImageSourceGetType(source) == UTType.png.identifier as CFString,
+              CGImageSourceGetCount(source) == 1,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? Int,
+              (1...maximumIconDimension).contains(width), (1...maximumIconDimension).contains(height),
+              CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+              CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately as String: true] as CFDictionary) != nil
+        else { return nil }
+        return frozen
     }
 
     static func sourceFiles(in root: URL) throws -> [String] {

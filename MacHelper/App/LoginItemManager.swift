@@ -33,10 +33,10 @@ final class LoginItemManager {
     var isEnabled: Bool { status == .enabled }
     var requiresApproval: Bool { status == .requiresApproval }
 
-    var statusMessage: String {
+    var statusMessage: String? {
         switch status {
         case .notRegistered: return L("MacHelper will not open automatically.")
-        case .enabled: return L("MacHelper starts in the background when you log in. Open Settings from its Dock icon or menu bar.")
+        case .enabled: return nil
         case .requiresApproval:
             return L("Allow MacHelper in System Settings → General → Login Items & Extensions.")
         case .notFound:

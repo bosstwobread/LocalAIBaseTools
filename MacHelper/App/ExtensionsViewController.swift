@@ -6,10 +6,12 @@ import MacHelper
 @MainActor
 final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     typealias SourceFolderOpener = @MainActor ([URL], @escaping @MainActor (Error?) -> Void) -> Void
+    typealias SourceUpdateReviewer = @MainActor (SourceExtensionUpdatePreview) -> Bool
     var onOpenMarketplace: (() -> Void)?
 
     private let manager: SourceExtensionManager
     private let sourceFolderOpener: SourceFolderOpener?
+    private let sourceUpdateReviewer: SourceUpdateReviewer?
     private let overview = NSView()
     private let detail = NSView()
     private let overviewScroll = NSScrollView()
@@ -20,6 +22,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let availableList = NSStackView()
     private let installedCount = NSTextField(labelWithString: "")
     private let availableCount = NSTextField(labelWithString: "")
+    private let checkForUpdatesButton = NSButton(title: L("Check for Updates"), target: nil, action: nil)
     private let selectAllButton = NSButton(checkboxWithTitle: L("Select All"), target: nil, action: nil)
     private let selectionCount = NSTextField(labelWithString: L("%ld selected", 0))
     private let batchReloadButton = NSButton(title: L("Reload"), target: nil, action: nil)
@@ -27,8 +30,11 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let batchEnableButton = NSButton(title: L("Enable"), target: nil, action: nil)
     private let batchDisableButton = NSButton(title: L("Disable"), target: nil, action: nil)
     private let overviewMessage = NSTextField(wrappingLabelWithString: "")
+    private let detailIcon = SourceToolIconView()
     private let detailTitle = NSTextField(labelWithString: "")
     private let versionLabel = NSTextField(labelWithString: "")
+    private let updateVersionLabel = NSTextField(wrappingLabelWithString: "")
+    private let updateMessage = NSTextField(wrappingLabelWithString: "")
     private let backButton = NSButton(title: L("All Extensions"), target: nil, action: nil)
     private let toggle = NSButton(checkboxWithTitle: L("Enabled"), target: nil, action: nil)
     private let summary = NSTextField(wrappingLabelWithString: "")
@@ -43,6 +49,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let guideButton = NSButton(title: L("AI Extension Guide…"), target: nil, action: nil)
     private let editButton = NSButton(title: L("Edit Source"), target: nil, action: nil)
     private let reloadButton = NSButton(title: L("Reload"), target: nil, action: nil)
+    private let updateButton = NSButton(title: L("Update…"), target: nil, action: nil)
+    private let showBackupButton = NSButton(title: L("Show Backup in Finder"), target: nil, action: nil)
     private let accessibilityButton = NSButton(title: L("Accessibility Settings…"), target: nil, action: nil)
     private let permissionRow = NSStackView()
     private let aiRow = NSStackView()
@@ -56,6 +64,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private var cards: [String: SourceToolCard] = [:]
     private var overviewSelection = ExtensionBatchSelection()
     private var selectionCheckboxes: [String: NSButton] = [:]
+    private var updateButtons: [String: NSButton] = [:]
+    private var completedUpdates: [String: (message: String, backup: URL)] = [:]
     private var batchSummary: String?
     private var formToolID: String?
     private var formSignature = ""
@@ -73,9 +83,11 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private var workingToolID: String?
     private var requestedSelectionID: String?
 
-    init(manager: SourceExtensionManager, sourceFolderOpener: SourceFolderOpener? = nil) {
+    init(manager: SourceExtensionManager, sourceFolderOpener: SourceFolderOpener? = nil,
+         sourceUpdateReviewer: SourceUpdateReviewer? = nil) {
         self.manager = manager
         self.sourceFolderOpener = sourceFolderOpener
+        self.sourceUpdateReviewer = sourceUpdateReviewer
         super.init(nibName: nil, bundle: nil)
         manager.onChange = { [weak self] in self?.refreshDisplay() }
         manager.onApproveNativeExecution = { [weak self] manifest in
@@ -148,6 +160,11 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         editButton.target = self; editButton.action = #selector(editSource)
         editButton.toolTip = L("Open this tool’s installed source folder in VS Code, or Finder if VS Code is unavailable.")
         reloadButton.target = self; reloadButton.action = #selector(reloadSource)
+        checkForUpdatesButton.target = self; checkForUpdatesButton.action = #selector(checkForUpdates)
+        checkForUpdatesButton.identifier = NSUserInterfaceItemIdentifier("check-for-extension-updates")
+        updateButton.target = self; updateButton.action = #selector(updateSelectedTool)
+        updateButton.identifier = NSUserInterfaceItemIdentifier("update-current-extension")
+        showBackupButton.target = self; showBackupButton.action = #selector(showUpdateBackup)
         accessibilityButton.target = self; accessibilityButton.action = #selector(openAccessibility)
         toggle.target = self; toggle.action = #selector(toggleEnabled)
         backButton.target = self; backButton.action = #selector(backToOverview)
@@ -182,7 +199,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         overviewMessage.font = .systemFont(ofSize: 12)
         addFullWidth(overviewMessage, to: overviewStack)
         addFullWidth(Self.separator(), to: overviewStack)
-        addFullWidth(sectionHeading(L("Installed"), count: installedCount), to: overviewStack)
+        addFullWidth(sectionHeading(L("Installed"), count: installedCount, button: checkForUpdatesButton), to: overviewStack)
         selectionCount.font = .systemFont(ofSize: 11)
         selectionCount.textColor = .secondaryLabelColor
         let selectionActions = NSStackView(views: [selectAllButton, selectionCount, Self.flexibleSpace()])
@@ -220,17 +237,22 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         versionLabel.font = .systemFont(ofSize: 12)
         versionLabel.textColor = .secondaryLabelColor
         let identity = Self.column([detailTitle, versionLabel], spacing: 5)
-        let header = NSStackView(views: [identity, Self.flexibleSpace(), toggle])
+        detailIcon.isHidden = true
+        let header = NSStackView(views: [detailIcon, identity, Self.flexibleSpace(), toggle])
         header.alignment = .centerY
         header.spacing = 18
+        header.setCustomSpacing(12, after: detailIcon)
         addFullWidth(header, to: detailStack)
         summary.font = .systemFont(ofSize: 13)
         summary.textColor = .secondaryLabelColor
         summary.maximumNumberOfLines = 3
         addFullWidth(summary, to: detailStack)
-        let actions = NSStackView(views: [editButton, reloadButton])
+        let actions = NSStackView(views: [editButton, reloadButton, updateButton])
         actions.spacing = 8
         detailStack.addArrangedSubview(actions)
+        updateVersionLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        updateVersionLabel.textColor = .controlAccentColor
+        addFullWidth(updateVersionLabel, to: detailStack)
         sourceHelp.font = .systemFont(ofSize: 12)
         sourceHelp.textColor = .secondaryLabelColor
         sourceHelp.maximumNumberOfLines = 0
@@ -242,6 +264,10 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         }
         let state = Self.column([status, sourceState], spacing: 5)
         addFullWidth(state, to: detailStack)
+        updateMessage.font = .systemFont(ofSize: 12)
+        updateMessage.textColor = .secondaryLabelColor
+        addFullWidth(updateMessage, to: detailStack)
+        detailStack.addArrangedSubview(showBackupButton)
         errorLabel.font = .systemFont(ofSize: 12)
         errorLabel.textColor = .systemRed
         addFullWidth(errorLabel, to: detailStack)
@@ -304,11 +330,13 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
-    private func sectionHeading(_ title: String, count: NSTextField) -> NSStackView {
+    private func sectionHeading(_ title: String, count: NSTextField, button: NSButton? = nil) -> NSStackView {
         count.font = .systemFont(ofSize: 12)
         count.textColor = .secondaryLabelColor
         let row = NSStackView(views: [Self.label(title, size: 15, weight: .semibold), Self.flexibleSpace(), count])
         row.alignment = .centerY
+        row.spacing = 12
+        if let button { row.addArrangedSubview(button) }
         return row
     }
 
@@ -370,8 +398,17 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         detail.isHidden = selectedID == nil
         if selectedID == nil { refreshOverview(tools) }
         let item = tools.first { $0.id == selectedID }
+        detailIcon.show(item?.artwork)
+        detailIcon.isHidden = item?.artwork == nil
         detailTitle.stringValue = item?.displayName ?? L("Extension")
         versionLabel.stringValue = item.map { ($0.version.isEmpty ? $0.id : L("Version %@", $0.version)) + ($0.runtime == "native" ? " · " + L("Native Swift") : $0.runtime == "javascript" ? " · JavaScript" : "") } ?? ""
+        updateVersionLabel.stringValue = item?.availableVersion.map { L("Version %@ available", $0) } ?? ""
+        updateVersionLabel.isHidden = updateVersionLabel.stringValue.isEmpty
+        updateButton.isHidden = updateVersionLabel.isHidden
+        let completed = selectedID.flatMap { completedUpdates[$0] }
+        updateMessage.stringValue = completed?.message ?? ""
+        updateMessage.isHidden = completed == nil
+        showBackupButton.isHidden = completed == nil
         summary.stringValue = item?.summary ?? ""
         sourceHelp.isHidden = item?.sourceURL == nil
         sourceHelp.stringValue = item?.runtime == "native"
@@ -410,16 +447,19 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         overviewMessage.textColor = globalError == nil ? .secondaryLabelColor : .systemRed
         overviewMessage.isHidden = overviewMessage.stringValue.isEmpty
         let signature = tools.map { tool in
-            [tool.id, tool.displayName, tool.summary, tool.version, tool.runtime, String(tool.sourceURL != nil),
-             String(tool.isEnabled), String(tool.isRunning), tool.error ?? "", tool.status,
+            [tool.id, tool.displayName, tool.summary, tool.version, tool.runtime, tool.availableVersion ?? "", String(tool.sourceURL != nil),
+             String(tool.isEnabled), String(tool.isRunning), String(tool.isLocallyModified),
+             tool.artwork?.digest ?? "", tool.error ?? "", tool.status,
              operationErrors[tool.id]?.message ?? ""].joined(separator: "\u{1f}")
         }.joined(separator: "\u{1e}")
         guard signature != overviewSignature || cards.isEmpty else { refreshBatchControls(); return }
         overviewSignature = signature
         let focusID = (view.window?.firstResponder as? SourceToolCard)?.toolID
         let checkboxFocusID = selectionCheckboxes.first { $0.value === view.window?.firstResponder }?.key
+        let updateFocusID = updateButtons.first { $0.value === view.window?.firstResponder }?.key
         cards.removeAll()
         selectionCheckboxes.removeAll()
+        updateButtons.removeAll()
         for (list, items, emptyTitle, emptyText) in [
             (installedList, installed, "No tools installed yet", "Browse the marketplace or install a source folder to add your first tool."),
             (availableList, available, "No additional catalog tools", "Add another catalog or browse the marketplace to discover more tools.")
@@ -439,9 +479,41 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
                         checkbox.identifier = NSUserInterfaceItemIdentifier("select-extension-" + tool.id)
                         checkbox.widthAnchor.constraint(equalToConstant: 18).isActive = true
                         selectionCheckboxes[tool.id] = checkbox
-                        let row = NSStackView(views: [checkbox, card])
+                        // The card and its update action are separate keyboard and accessibility controls.
+                        let cardContainer = NSView()
+                        card.translatesAutoresizingMaskIntoConstraints = false
+                        cardContainer.addSubview(card)
+                        let row = NSStackView(views: [checkbox, cardContainer])
                         row.spacing = 10; row.alignment = .centerY
-                        card.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -28).isActive = true
+                        if let version = tool.availableVersion {
+                            let button = NSButton(title: "", target: self, action: #selector(updateListedTool(_:)))
+                            button.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)?
+                                .withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))
+                            button.imagePosition = .imageOnly
+                            button.isBordered = false
+                            button.contentTintColor = .controlAccentColor
+                            button.identifier = NSUserInterfaceItemIdentifier("update-extension-" + tool.id)
+                            button.setAccessibilityLabel(L("Update %@…", tool.displayName))
+                            let availability = L("Version %@ available", version)
+                            button.setAccessibilityHelp(availability)
+                            button.toolTip = availability
+                            button.translatesAutoresizingMaskIntoConstraints = false
+                            cardContainer.addSubview(button)
+                            NSLayoutConstraint.activate([
+                                button.topAnchor.constraint(equalTo: cardContainer.topAnchor, constant: 8),
+                                button.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -10),
+                                button.widthAnchor.constraint(equalToConstant: 26),
+                                button.heightAnchor.constraint(equalToConstant: 26)
+                            ])
+                            updateButtons[tool.id] = button
+                        }
+                        NSLayoutConstraint.activate([
+                            card.leadingAnchor.constraint(equalTo: cardContainer.leadingAnchor),
+                            card.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor),
+                            card.topAnchor.constraint(equalTo: cardContainer.topAnchor),
+                            card.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor),
+                            cardContainer.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -28)
+                        ])
                         addFullWidth(row, to: list)
                     } else { addFullWidth(card, to: list) }
                 }
@@ -449,6 +521,9 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         }
         if let focusID, let card = cards[focusID] { view.window?.makeFirstResponder(card) }
         if let checkboxFocusID, let checkbox = selectionCheckboxes[checkboxFocusID] { view.window?.makeFirstResponder(checkbox) }
+        if let updateFocusID, let control = updateButtons[updateFocusID] ?? cards[updateFocusID] {
+            view.window?.makeFirstResponder(control)
+        }
         refreshBatchControls()
     }
 
@@ -476,6 +551,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         batchEditButton.isEnabled = !busy && !overviewSelection.targets(for: .editSource, items: items).isEmpty
         batchEnableButton.isEnabled = !busy && !overviewSelection.targets(for: .enable, items: items).isEmpty
         batchDisableButton.isEnabled = !busy && !overviewSelection.targets(for: .disable, items: items).isEmpty
+        checkForUpdatesButton.isEnabled = !busy && installed > 0
+        updateButtons.values.forEach { $0.isEnabled = !busy }
     }
 
     private func refreshPermission() {
@@ -612,6 +689,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         catalogButton.isEnabled = !busy
         editButton.isEnabled = !busy && selectedID.flatMap { manager.sourceURL(for: $0) } != nil
         reloadButton.isEnabled = editButton.isEnabled && item?.isEnabled == true
+        updateButton.isEnabled = !busy && item?.availableVersion != nil
+        showBackupButton.isEnabled = !busy
         refreshBatchControls()
         Array(controls.values).forEach { $0.isEnabled = !busy }
         if let id = formToolID, let schema = manager.settingsSchema(for: id) {
@@ -761,6 +840,89 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         guard let id = selectedID else { return }
         view.window?.makeFirstResponder(nil)
         enqueue(title: L("Reloading source…"), toolID: id, operation: { [weak self] in try await self?.lifecycleAction(.reload, for: id) })
+    }
+
+    @objc private func checkForUpdates() {
+        guard !busy else { return }
+        enqueue(title: L("Checking for extension updates…"), operation: { [manager] in
+            try await manager.checkForUpdates()
+        }, success: { [weak self] in
+            guard let self else { return }
+            self.batchSummary = self.manager.tools.contains { $0.availableVersion != nil }
+                ? L("Extension updates are available.") : L("No extension updates found.")
+        })
+    }
+
+    @objc private func updateListedTool(_ sender: NSButton) {
+        guard let id = updateButtons.first(where: { $0.value === sender })?.key else { return }
+        updateExtension(id)
+    }
+
+    @objc private func updateSelectedTool() {
+        guard let selectedID else { return }
+        updateExtension(selectedID)
+    }
+
+    private func updateExtension(_ id: String) {
+        guard !busy, let item = manager.tools.first(where: { $0.id == id }), item.availableVersion != nil else { return }
+        view.window?.makeFirstResponder(nil)
+        guard !busy else { return }
+        let hasPromptDraft = promptDrafts.contains { $0.key.toolID == id && $0.value.isDirty }
+        if hasPromptDraft || pendingValues.keys.contains(where: { $0.toolID == id }) {
+            let message = hasPromptDraft ? L("Save or revert this extension’s prompt changes before updating.") : L("Finish your changes first")
+            globalError = message
+            operationErrors[id] = OperationFailure(message: message, reloadCount: item.reloadCount)
+            refreshDisplay()
+            return
+        }
+        enqueue(title: L("Reviewing update…"), toolID: id, operation: { [weak self] in
+            guard let self else { return }
+            do {
+                let preview = try await self.manager.previewUpdate(id)
+                guard self.reviewUpdate(preview) else { throw CancellationError() }
+                self.workingTitle = L("Updating %@…", item.displayName)
+                self.refreshDisplay()
+                let backup = try await self.manager.installUpdate(preview)
+                let message = L("Updated %@ to %@. The previous source is backed up.", item.displayName, preview.manifest.version)
+                self.completedUpdates[id] = (message, backup)
+                self.batchSummary = message
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                self.globalError = error.localizedDescription
+                throw error
+            }
+        })
+    }
+
+    private func reviewUpdate(_ preview: SourceExtensionUpdatePreview) -> Bool {
+        if let sourceUpdateReviewer { return sourceUpdateReviewer(preview) }
+        let alert = NSAlert()
+        alert.messageText = L("Update %@?", preview.manifest.displayName)
+        var address = URLComponents(url: preview.catalogURL, resolvingAgainstBaseURL: false)
+        address?.query = nil
+        let source = String((address?.string ?? preview.catalogURL.path).prefix(360))
+        let leftToRight: (String) -> String = {
+            AppLocalization.shared.isRightToLeft ? "\u{2066}\($0)\u{2069}" : $0
+        }
+        var sections = [
+            L("Version %@ → %@", leftToRight(preview.currentVersion), leftToRight(preview.manifest.version))
+                + "\n" + L("Catalog %@", leftToRight(source)),
+            L("Requested permissions") + "\n" + sourcePermissionReviewText(preview.manifest.permissions),
+            L("MacHelper will replace the installed source and keep a backup of the previous source folder. Your settings and enabled state are retained.")
+        ]
+        if preview.isLocallyModified {
+            sections.append(L("This extension has local edits. MacHelper will save them in the backup."))
+        }
+        alert.informativeText = sections.joined(separator: "\n\n")
+        alert.addButton(withTitle: L("Update"))
+        alert.addButton(withTitle: L("Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    @objc private func showUpdateBackup() {
+        guard let selectedID, let backup = completedUpdates[selectedID]?.backup else { return }
+        NSWorkspace.shared.open(backup)
     }
 
     @objc private func settingChanged(_ control: NSControl) {
@@ -1089,6 +1251,54 @@ private final class SourceSettingsDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 
+@MainActor
+private final class SourceToolIconView: NSView {
+    private let artworkView = NSImageView()
+    private var artworkSize: [NSLayoutConstraint] = []
+    private var signature: String?
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
+        artworkView.imageScaling = .scaleProportionallyUpOrDown
+        artworkView.translatesAutoresizingMaskIntoConstraints = false
+        artworkView.setAccessibilityElement(false)
+        addSubview(artworkView)
+        artworkSize = [artworkView.widthAnchor.constraint(equalToConstant: 44),
+                       artworkView.heightAnchor.constraint(equalToConstant: 44)]
+        NSLayoutConstraint.activate(artworkSize + [
+            widthAnchor.constraint(equalToConstant: 44),
+            heightAnchor.constraint(equalToConstant: 44),
+            artworkView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            artworkView.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        show(nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func show(_ artwork: SourceToolArtwork?) {
+        let digest = artwork?.digest ?? ""
+        guard signature != digest else { return }
+        signature = digest
+        if let artwork, let image = NSImage(data: artwork.data) {
+            artworkView.image = image
+            artworkView.symbolConfiguration = nil
+            artworkView.contentTintColor = nil
+            layer?.backgroundColor = nil
+            artworkSize.forEach { $0.constant = 44 }
+        } else {
+            artworkView.image = NSImage(systemSymbolName: "puzzlepiece.extension.fill", accessibilityDescription: nil)
+            artworkView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 21, weight: .medium)
+            artworkView.contentTintColor = .controlAccentColor
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
+            artworkSize.forEach { $0.constant = 24 }
+        }
+    }
+}
+
 /// One keyboard-accessible button per tool; labels never intercept its click.
 @MainActor
 private final class SourceToolCard: NSButton {
@@ -1117,24 +1327,14 @@ private final class SourceToolCard: NSButton {
         let problem = error ?? tool.error
         let state = problem != nil ? L("Needs attention") : !installed ? L("Available")
             : tool.isRunning ? L("Running") : tool.isEnabled ? L("Enabled") : L("Disabled")
-        setAccessibilityLabel(tool.displayName + ", " + state + ". " + tool.summary)
+        let availableVersion = tool.availableVersion.map { L("Version %@ available", $0) }
+        setAccessibilityLabel(tool.displayName + ", " + state + ". " + tool.summary
+            + (availableVersion.map { " " + $0 } ?? ""))
         setAccessibilityHelp(L("Open tool details and settings"))
         toolTip = problem ?? tool.summary
 
-        let icon = NSView()
-        icon.wantsLayer = true
-        icon.layer?.cornerRadius = 10
-        icon.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
-        let image = NSImageView()
-        image.image = NSImage(systemSymbolName: "puzzlepiece.extension.fill", accessibilityDescription: nil)
-        image.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 21, weight: .medium)
-        image.contentTintColor = .controlAccentColor
-        image.translatesAutoresizingMaskIntoConstraints = false
-        icon.addSubview(image)
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 44), icon.heightAnchor.constraint(equalToConstant: 44),
-            image.centerXAnchor.constraint(equalTo: icon.centerXAnchor), image.centerYAnchor.constraint(equalTo: icon.centerYAnchor)
-        ])
+        let icon = SourceToolIconView()
+        icon.show(tool.artwork)
         let name = NSTextField(labelWithString: tool.displayName)
         name.font = .systemFont(ofSize: 15, weight: .semibold)
         name.lineBreakMode = .byTruncatingTail

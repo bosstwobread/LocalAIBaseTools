@@ -59,9 +59,14 @@ enum ExtensionListVerification {
             let initialA = try pid(current, a), stableC = try pid(current, c)
             workers += [initialA, stableC]
             var opened: [[URL]] = []
+            var reviewedUpdates: [SourceExtensionUpdatePreview] = []
+            var approveUpdate = false
             let controller = ExtensionsViewController(manager: current, sourceFolderOpener: { urls, completion in
                 opened.append(urls)
                 completion(nil)
+            }, sourceUpdateReviewer: { preview in
+                reviewedUpdates.append(preview)
+                return approveUpdate
             })
             controller.loadViewIfNeeded()
             controller.view.frame = NSRect(x: 0, y: 0, width: 820, height: 700)
@@ -207,6 +212,85 @@ enum ExtensionListVerification {
                       "Localizing the form changed command execution or the original source prompt.")
             checks.append("extension-owned schema and option labels hot reload in the open form while settings, prompt bytes, command behavior, and other workers remain unchanged")
 
+            let updateCatalog = root.appendingPathComponent("update-catalog.json")
+            let originalSource = try SourcePackageInspector.snapshot(at: installedB)
+            try writeUpdate(b, version: "1.0.0", root: root, catalog: updateCatalog)
+            try await current.addCatalog(from: updateCatalog)
+            try check(try button("update-current-extension", in: controller).isHidden, "A matching version offered an update.")
+            controller.showOverview()
+            try await drain(controller)
+            try check(find("update-extension-" + b, in: controller.view) == nil, "A matching version showed an update icon.")
+            controller.view.layoutSubtreeIfNeeded()
+            let originalCardSize = try button("source-tool-" + b, in: controller).bounds.size
+
+            try writeUpdate(b, version: "2.0.0", root: root, catalog: updateCatalog,
+                            script: "MacHelper.define({commands:{greet(input){return {text:'Updated '+input.text};}}});\n")
+            try await click("check-for-extension-updates", in: controller)
+            controller.view.layoutSubtreeIfNeeded()
+            let updateIcon = try button("update-extension-" + b, in: controller)
+            let updatedCard = try button("source-tool-" + b, in: controller)
+            try check(updateIcon.isEnabled && updateIcon.image != nil && updateIcon.title.isEmpty &&
+                      updateIcon.toolTip == "Version 2.0.0 available" &&
+                      find("update-extension-" + c, in: controller.view) == nil,
+                      "A newer release did not show the matching icon and version tooltip.")
+            guard let container = updatedCard.superview, let row = container.superview else {
+                throw Failure(message: "The updated card is missing its list row.")
+            }
+            let iconCenter = updateIcon.convert(NSPoint(x: updateIcon.bounds.midX, y: updateIcon.bounds.midY), to: row)
+            let cardCenter = updatedCard.convert(NSPoint(x: updatedCard.bounds.midX, y: updatedCard.bounds.midY), to: row)
+            try check(originalCardSize.width > 0 && originalCardSize.height > 0 && updatedCard.bounds.size == originalCardSize &&
+                      updateIcon.superview === container && updatedCard.frame.contains(updateIcon.frame) &&
+                      updateIcon.frame.midX > updatedCard.frame.midX && updateIcon.frame.midY > updatedCard.frame.midY &&
+                      container.hitTest(iconCenter) === updateIcon && container.hitTest(cardCenter) === updatedCard,
+                      "The update icon changed the card size or interfered with the card's own action.")
+            controller.selectTool(b)
+            try await drain(controller)
+            let detailUpdate = try button("update-current-extension", in: controller)
+            try check(!detailUpdate.isHidden && detailUpdate.isEnabled, "A newer release did not show the detail Update button.")
+            try await click("update-current-extension", in: controller)
+            try check(reviewedUpdates.count == 1 && reviewedUpdates[0].currentVersion == "1.0.0" &&
+                      reviewedUpdates[0].manifest.version == "2.0.0" && reviewedUpdates[0].isLocallyModified &&
+                      current.workerPID(for: b) == afterLocalizedReload,
+                      "Update review omitted the local edits or versions, or cancellation restarted the worker.")
+            try check((try SourcePackageInspector.snapshot(at: installedB)).fingerprint == originalSource.fingerprint,
+                      "Cancelling the update changed the installed source.")
+            approveUpdate = true
+            controller.showOverview()
+            try await drain(controller)
+            try await click("update-extension-" + b, in: controller)
+            let updatedPID = try pid(current, b); workers.append(updatedPID)
+            let updatedSource = try SourcePackageInspector.snapshot(at: installedB)
+            let backupFolders = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasPrefix(".source-backup-" + b + "-") }
+            try check(backupFolders.count == 1, "Updating did not keep exactly one backup for the previous copy.")
+            let backedUpSource = try SourcePackageInspector.snapshot(at: backupFolders[0])
+            let updatedResult = try await current.performCommand(for: b, text: "fixture input")
+            try check(reviewedUpdates.count == 2 && updatedPID != afterLocalizedReload && current.workerPID(for: c) == stableC &&
+                      backedUpSource.fingerprint == originalSource.fingerprint &&
+                      updatedSource.manifest.version == "2.0.0" &&
+                      (try Data(contentsOf: settingsFile)) == settingsBytes && updatedResult.text == "Updated fixture input",
+                      "Updating did not preserve the previous source/settings or activate only the intended worker.")
+            controller.selectTool(b)
+            try await drain(controller)
+            try check(try button("update-current-extension", in: controller).isHidden, "The installed release still offered an update.")
+            controller.showOverview()
+            try await drain(controller)
+            try check(find("update-extension-" + b, in: controller.view) == nil, "The list retained Update after installation.")
+            checks.append("the installed list and detail show Update only for a newer catalog version, and updating backs up edited source while retaining settings")
+
+            try writeUpdate(b, version: "3.0.0", root: root, catalog: updateCatalog, script: "Deliberately invalid JavaScript !!!\n")
+            try await click("check-for-extension-updates", in: controller)
+            try await click("update-extension-" + b, in: controller)
+            let sourceAfterFailure = try SourcePackageInspector.snapshot(at: installedB)
+            let resultAfterFailure = try await current.performCommand(for: b, text: "fixture input")
+            try check(reviewedUpdates.count == 3 && reviewedUpdates[2].manifest.version == "3.0.0" &&
+                      (try field("extension-overview-message", in: controller)).stringValue.hasPrefix("Extension error:") &&
+                      current.workerPID(for: b) == updatedPID &&
+                      sourceAfterFailure.fingerprint == updatedSource.fingerprint &&
+                      resultAfterFailure.text == updatedResult.text,
+                      "A broken release replaced the last working source or worker.")
+            checks.append("a broken newer release leaves the current source and active worker intact")
+
             try check(getpid() == hostPID, "The host restarted during list actions.")
             await current.stopAll()
             try await eventually("List verification left a worker process running.") { workers.allSatisfy { !processExists($0) } }
@@ -220,10 +304,11 @@ enum ExtensionListVerification {
         }
     }
 
-    private static func writePackage(id: String, name: String, native: Bool, localized: Bool = false, to folder: URL) throws {
+    private static func writePackage(id: String, name: String, native: Bool, localized: Bool = false,
+                                     version: String = "1.0.0", script: String? = nil, to folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let manifest = SourceExtensionManifest(runtime: native ? "native" : "javascript", identifier: id,
-            displayName: name, version: "1.0.0", summary: "Synthetic extension-list fixture",
+            displayName: name, version: version, summary: "Synthetic extension-list fixture",
             entryPoint: native ? "Main.swift" : "main.js", permissions: native ? ["native.execute"] : [],
             commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")],
             settingsSchema: localized ? "settings.schema.json" : nil,
@@ -232,7 +317,7 @@ enum ExtensionListVerification {
         let source = native
             ? "@main struct NativeListFixture { static func main() { MacHelperNative.run(commands: [\"greet\": { input in [\"text\": input.text] }]) } }\n"
             : "MacHelper.define({commands:{greet(input){return {text:input.text};}}});\n"
-        try Data(source.utf8).write(to: folder.appendingPathComponent(manifest.entryPoint))
+        try Data((script ?? source).utf8).write(to: folder.appendingPathComponent(manifest.entryPoint))
         if localized {
             let schema = """
             {"schemaVersion":1,"fields":[
@@ -247,6 +332,23 @@ enum ExtensionListVerification {
                 .write(to: folder.appendingPathComponent("prompts/fixture.txt"))
             try writeLocalizations(to: folder, updated: false)
         }
+    }
+
+    private static func writeUpdate(_ identifier: String, version: String, root: URL, catalog: URL,
+                                    script: String? = nil) throws {
+        let directory = "updates/" + version
+        let folder = root.appendingPathComponent(directory)
+        try writePackage(id: identifier, name: "B fixture", native: false, localized: true,
+                         version: version, script: script, to: folder)
+        let package = try SourcePackageInspector.snapshot(at: folder)
+        let files = try package.fileHashes.sorted(by: { $0.key < $1.key }).map { path, hash in
+            let size = try Data(contentsOf: folder.appendingPathComponent(path)).count
+            return SourceCatalogFile(path: path, url: directory + "/" + path, sha256: hash, size: size)
+        }
+        let manifest = package.manifest
+        let entry = SourceCatalogEntry(identifier: identifier, displayName: manifest.displayName,
+                                       version: version, summary: manifest.summary, files: files)
+        try JSONEncoder().encode(SourceCatalog(extensions: [entry])).write(to: catalog, options: [.atomic])
     }
 
     private static func writeLocalizations(to folder: URL, updated: Bool) throws {

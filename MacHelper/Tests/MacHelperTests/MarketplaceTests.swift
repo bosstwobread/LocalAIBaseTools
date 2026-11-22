@@ -32,6 +32,17 @@ final class MarketplaceTests: XCTestCase {
     private let identifier = "com.localaibasetools.translation"
     private let catalogURL = URL(string: "https://market.example/extension-market/catalog.json")!
 
+    func testExtensionUpdateVersionsRequireStrictlyNewerReleaseOrPrerelease() {
+        XCTAssertTrue(SourcePackageRules.isNewerVersion("1.10.0", than: "1.9.9"))
+        XCTAssertTrue(SourcePackageRules.isNewerVersion("2.0.0", than: "2.0.0-rc.9"))
+        XCTAssertTrue(SourcePackageRules.isNewerVersion("2.0.0-rc.10", than: "2.0.0-rc.9"))
+        XCTAssertTrue(SourcePackageRules.isNewerVersion("2.0.0-rc.a", than: "2.0.0-rc.10"))
+        XCTAssertFalse(SourcePackageRules.isNewerVersion("2.0.0-rc.10", than: "2.0.0"))
+        XCTAssertFalse(SourcePackageRules.isNewerVersion("2.0.0-rc", than: "2.0.0-rc.1"))
+        XCTAssertFalse(SourcePackageRules.isNewerVersion("2.0.0", than: "2.0.0"))
+        XCTAssertFalse(SourcePackageRules.isNewerVersion("latest", than: "2.0.0"))
+    }
+
     private func link(catalog: String, id: String = "com.localaibasetools.translation") -> URL {
         var components = URLComponents()
         components.scheme = "machelper"; components.host = "install"

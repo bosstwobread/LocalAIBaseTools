@@ -293,6 +293,37 @@ final class SelectionMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testStopDiscardsAnInterruptedMouseDrag() async throws {
+        let monitor = SelectionMonitor()
+        defer { monitor.stop() }
+        monitor.handle(try mouse(.leftMouseDown), local: false)
+        monitor.handle(try mouse(.leftMouseDragged), local: false)
+        monitor.stop()
+        monitor.handle(try mouse(.leftMouseUp), local: false)
+        XCTAssertFalse(monitor.consumeCopyGesture())
+
+        monitor.handle(try mouse(.leftMouseDown), local: false)
+        monitor.handle(try mouse(.leftMouseDragged), local: false)
+        monitor.handle(try mouse(.leftMouseUp), local: false)
+        XCTAssertTrue(monitor.consumeCopyGesture())
+    }
+
+    @MainActor
+    func testStopCancelsTheReleaseOfAnInterruptedSelectAll() async throws {
+        let monitor = SelectionMonitor()
+        defer { monitor.stop() }
+        monitor.handle(try key(.keyDown, code: 0, flags: .command), local: false)
+        monitor.stop()
+        monitor.handle(try key(.keyUp, code: 0, flags: .command), local: false)
+        monitor.handle(try key(.flagsChanged, code: 55), local: false)
+        XCTAssertFalse(monitor.consumeCopyGesture())
+
+        monitor.handle(try key(.keyUp, code: 0, flags: .command), local: false)
+        monitor.handle(try key(.flagsChanged, code: 55), local: false)
+        XCTAssertTrue(monitor.consumeCopyGesture(), "A fresh shortcut still recovers a missed key-down")
+    }
+
+    @MainActor
     func testKeyboardSelectionRearmsButTypingAndEscapeDoNot() async throws {
         let monitor = SelectionMonitor()
         var gestures: [Bool] = []

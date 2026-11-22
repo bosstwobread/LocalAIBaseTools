@@ -60,7 +60,15 @@ enum MacHelperApplication {
 
 @MainActor
 final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
+    private static let enabledPreferenceKey = "MacHelperEnabled"
+    private static let shortcutPreferenceKey = "MacHelperGlobalShortcut"
     private let login = LoginItemManager()
+    private let globalHotKey = GlobalHotKey()
+    private let stateTip = MacHelperStateTip()
+    private var macHelperEnabled = UserDefaults.standard.object(forKey: MacHelperAppDelegate.enabledPreferenceKey) as? Bool ?? true
+    private var preferredShortcut = GlobalShortcut.load(from: UserDefaults.standard.data(forKey: MacHelperAppDelegate.shortcutPreferenceKey))
+    private var shortcutAvailable = false
+    private var isRecordingShortcut = false
     private var window: NSWindow!
     private var navigationButtons: [Int: SettingsNavigationButton] = [:]
     private var selectedSection = 1
@@ -87,14 +95,17 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         createMenus()
         let bin = Bundle.main.executableURL!.deletingLastPathComponent()
+        let marketplaceCatalog = try? MarketplaceConfiguration.websiteURL().appendingPathComponent("catalog.json")
         sourceManager = SourceExtensionManager(workerExecutableURL: bin.appendingPathComponent("MacHelperScriptWorker"),
             helperExecutableURL: bin.appendingPathComponent("mac-helper-host"),
             bundledCatalogURL: Bundle.main.resourceURL!.appendingPathComponent("SourceCatalog/extensions.json"),
-            bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds"))
+            bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds"),
+            marketplaceCatalogURL: marketplaceCatalog)
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
-        general = GeneralSettingsViewController(login: login)
-        general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
+        sourceManager.setSelectionActionsEnabled(macHelperEnabled)
+        shortcutAvailable = registerShortcut(preferredShortcut)
+        configureGeneralSettings()
         bindWebsiteConnectionControls()
         createWindow()
         startupTask = Task { [weak self] in
@@ -103,6 +114,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             guard !Task.isCancelled, !self.terminating else { return }
             self.sourceManagerReady = true
             self.processMarketplaceRequests()
+            try? await self.sourceManager.checkForUpdates(includeConfigured: false)
         }
         startBrowserSupportBootstrap()
         startWebsiteConnection()
@@ -136,7 +148,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let development = Bundle.main.object(forInfoDictionaryKey: MarketplaceConfiguration.developmentKey) as? Bool == true
         for url in urls.prefix(8) {
             if url.absoluteString == "machelper://open" {
-                if websiteService.state == .stopped { startWebsiteConnection() }
+                if sourceManager != nil, websiteService.state == .stopped { startWebsiteConnection() }
                 pendingSettingsTab = sourceManager == nil ? 0 : nil
                 if sourceManager != nil { showSettings(tab: 0) }
                 continue
@@ -152,6 +164,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminating = true
+        general?.cancelShortcutRecording()
+        globalHotKey.unregister()
+        stateTip.dismiss()
         browserSupportTask?.cancel()
         websiteService.stop()
         marketplaceTask?.cancel()
@@ -164,6 +179,10 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         if general != nil, currentController === general { general.refreshStatus() }
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        general?.cancelShortcutRecording()
     }
 
     private func createMenus() {
@@ -326,6 +345,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             if index == 2 { general.refreshStatus() }
             return
         }
+        if currentController === general { general.cancelShortcutRecording() }
         window.makeFirstResponder(nil)
         currentController?.view.removeFromSuperview()
         currentController?.removeFromParent()
@@ -357,13 +377,14 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             return false
         }
+        general.cancelShortcutRecording()
+        stateTip.dismiss()
         AppLocalization.shared.language = code
         extensions = ExtensionsViewController(manager: sourceManager)
         extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
         ai = AISettingsViewController()
         bindWebsiteConnectionControls()
-        general = GeneralSettingsViewController(login: login)
-        general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
+        configureGeneralSettings()
         createMenus()
         updateBrowserSupportMenus()
         createWindow()
@@ -411,13 +432,9 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private func reviewMarketplaceInstall(_ preview: MarketplaceInstallPreview) -> Bool {
         let alert = NSAlert()
         alert.messageText = L("Install %@?", preview.manifest.displayName)
-        let permissionNames = ["selection.read": "Read selected text across apps", "selection.replace": "Replace selected text only when you click Apply", "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
-                               "selection.paste": "Paste completed results into the original window",
-                               "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
-                               "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
-        let permissions = preview.manifest.permissions.map { "• " + L(permissionNames[$0] ?? $0) }.joined(separator: "\n")
+        let permissions = sourcePermissionReviewText(preview.manifest.permissions)
         let source = preview.request.catalogURL.host.map { $0 + preview.request.catalogURL.path } ?? preview.request.catalogURL.absoluteString
-        alert.informativeText = L("%@\n\nVersion: %@\nCatalog: %@\n\nPermissions:\n%@\n\nInstall source only from publishers you trust. The complete editable source will be downloaded and enabled after you approve.", String(preview.manifest.summary.prefix(360)), preview.manifest.version, String(source.prefix(360)), permissions.isEmpty ? L("None") : permissions)
+        alert.informativeText = L("%@\n\nVersion: %@\nCatalog: %@\n\nPermissions:\n%@\n\nInstall source only from publishers you trust. The complete editable source will be downloaded and enabled after you approve.", String(preview.manifest.summary.prefix(360)), preview.manifest.version, String(source.prefix(360)), permissions)
         alert.addButton(withTitle: L("Install & Enable"))
         alert.addButton(withTitle: L("Cancel"))
         NSApp.activate(ignoringOtherApps: true)
@@ -445,9 +462,10 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func bindWebsiteConnectionControls() {
+        ai.websiteConnectionEnabled = macHelperEnabled
         ai.websiteConnectionState = websiteService.state
         ai.onRestartWebsiteConnection = { [weak self] in
-            guard let self else { return }
+            guard let self, self.macHelperEnabled else { return }
             self.websiteService.stop()
             self.startWebsiteConnection()
         }
@@ -455,8 +473,68 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startWebsiteConnection() {
+        guard macHelperEnabled, !terminating else { return }
         do { try websiteService.start() }
         catch { ai.websiteConnectionState = .failed(error.localizedDescription) }
+    }
+
+    private func configureGeneralSettings() {
+        general = GeneralSettingsViewController(login: login)
+        general.onLanguageChange = { [weak self] code in self?.changeInterfaceLanguage(code) ?? false }
+        general.onMacHelperEnabledChange = { [weak self] enabled in self?.setMacHelperEnabled(enabled) }
+        general.onBeginShortcutRecording = { [weak self] in self?.beginShortcutRecording() }
+        general.onFinishShortcutRecording = { [weak self] shortcut in self?.finishShortcutRecording(shortcut) ?? false }
+        general.onResetShortcut = { [weak self] in self?.saveShortcut(.defaultShortcut) ?? false }
+        updateGeneralMacHelperState()
+    }
+
+    private func updateGeneralMacHelperState() {
+        general.updateMacHelperState(isEnabled: macHelperEnabled, shortcut: preferredShortcut.displayName,
+                                     shortcutAvailable: shortcutAvailable)
+    }
+
+    private func registerShortcut(_ shortcut: GlobalShortcut) -> Bool {
+        globalHotKey.register(shortcut) { [weak self] in
+            guard let self, !self.isRecordingShortcut else { return }
+            self.setMacHelperEnabled(!self.macHelperEnabled)
+        }
+    }
+
+    private func beginShortcutRecording() {
+        guard !terminating, !isRecordingShortcut else { return }
+        isRecordingShortcut = true
+        globalHotKey.unregister()
+    }
+
+    private func finishShortcutRecording(_ shortcut: GlobalShortcut?) -> Bool {
+        guard !terminating, isRecordingShortcut else { return false }
+        isRecordingShortcut = false
+        if let shortcut, saveShortcut(shortcut) { return true }
+        shortcutAvailable = registerShortcut(preferredShortcut)
+        updateGeneralMacHelperState()
+        return shortcut == nil
+    }
+
+    private func saveShortcut(_ shortcut: GlobalShortcut) -> Bool {
+        guard !terminating, !isRecordingShortcut, let preference = try? JSONEncoder().encode(shortcut),
+              registerShortcut(shortcut) else { return false }
+        preferredShortcut = shortcut
+        shortcutAvailable = true
+        UserDefaults.standard.set(preference, forKey: Self.shortcutPreferenceKey)
+        updateGeneralMacHelperState()
+        return true
+    }
+
+    private func setMacHelperEnabled(_ enabled: Bool) {
+        guard enabled != macHelperEnabled, !terminating else { return }
+        macHelperEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.enabledPreferenceKey)
+        sourceManager.setSelectionActionsEnabled(enabled)
+        ai.websiteConnectionEnabled = enabled
+        updateGeneralMacHelperState()
+        if enabled { startWebsiteConnection() }
+        else { websiteService.stop() }
+        stateTip.show(isEnabled: enabled)
     }
 
     private func startBrowserSupportBootstrap() {

@@ -18,7 +18,11 @@ final class AISettingsViewController: NSViewController {
     private var settings = HelperSettings()
     private var isLoading = false
     private let websiteStatus = NSTextField(wrappingLabelWithString: "")
+    private var websiteRestartButton: NSButton!
     var onRestartWebsiteConnection: (() -> Void)?
+    var websiteConnectionEnabled = true {
+        didSet { if isViewLoaded { updateWebsiteConnectionStatus() } }
+    }
     var websiteConnectionState: MarketplaceLocalService.State = .stopped {
         didSet { if isViewLoaded { updateWebsiteConnectionStatus() } }
     }
@@ -144,17 +148,23 @@ final class AISettingsViewController: NSViewController {
         websiteStatus.font = .systemFont(ofSize: 12)
         container.addArrangedSubview(websiteStatus)
         websiteStatus.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
-        updateWebsiteConnectionStatus()
         let websiteNote = NSTextField(wrappingLabelWithString: L("Click Find with AI on the Extension Market. MacHelper connects automatically. A new or reinstalled browser may ask you to allow local access."))
         websiteNote.font = .systemFont(ofSize: 12)
         websiteNote.textColor = .secondaryLabelColor
         container.addArrangedSubview(websiteNote)
         websiteNote.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
-        container.addArrangedSubview(NSButton(title: L("Restart Connection"), target: self, action: #selector(restartWebsiteConnection(_:))))
+        websiteRestartButton = NSButton(title: L("Restart Connection"), target: self, action: #selector(restartWebsiteConnection(_:)))
+        container.addArrangedSubview(websiteRestartButton)
+        updateWebsiteConnectionStatus()
     }
 
     private func updateWebsiteConnectionStatus() {
+        websiteRestartButton.isEnabled = websiteConnectionEnabled
         websiteStatus.textColor = .secondaryLabelColor
+        guard websiteConnectionEnabled else {
+            websiteStatus.stringValue = L("MacHelper is paused. Resume it in General.")
+            return
+        }
         switch websiteConnectionState {
         case .ready: websiteStatus.stringValue = L("Ready — no browser extension needed.")
         case .starting: websiteStatus.stringValue = L("Starting website connection…")

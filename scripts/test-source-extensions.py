@@ -109,6 +109,7 @@ def main():
         served, inventory = fixture_files(temporary)
         requested = []
         lock = threading.Lock()
+        release_catalog = threading.Event()
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -116,6 +117,16 @@ def main():
                 if path == "/__requests":
                     with lock:
                         data = json.dumps({"paths": list(requested)}).encode()
+                elif path == "/__release-catalog":
+                    release_catalog.set()
+                    data = b"{}"
+                elif path == "/held-catalog.json":
+                    with lock:
+                        requested.append(path)
+                    if not release_catalog.wait(timeout=15):
+                        self.send_error(503)
+                        return
+                    data = served["/catalog.json"]
                 elif path in served:
                     with lock:
                         requested.append(path)
@@ -171,6 +182,7 @@ def main():
                 process.communicate(timeout=10)
             raise RuntimeError("The headless harness exceeded its bounded deadline; the host was stopped.")
         finally:
+            release_catalog.set()
             if process is not None and process.poll() is None:
                 process.kill()
                 process.communicate(timeout=10)

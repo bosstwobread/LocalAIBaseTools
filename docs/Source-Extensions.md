@@ -48,7 +48,11 @@ Small user preferences are stored separately under the MacHelper support folder'
 
 Identifiers use lowercase reverse-domain notation and remain stable for an installed package. The entry point and optional settings schema use safe relative paths inside the package. A JavaScript entry ends in `.js`; a native entry ends in `.swift`. The initial native format compiles one Swift entry with the bundled SDK, without arbitrary build scripts or dependency installation. Commands have a unique lowercase identifier and use `selection` or `manual` triggers. A selection command must declare `selection.read`. A manifest declares 1–16 commands. On MacHelper 6.6+, one shared toolbar lists all enabled source commands whose trigger is `selection`, using the command titles; the chosen action invokes that exact command in its owning worker. `manual` is supported by the worker/test API, but Settings does not provide a general manual-command launcher. Only the listed host capabilities are accepted. JavaScript has no permission for shell execution, arbitrary files, credentials, or network access. Native packages additionally require `native.execute`; that capability approves trusted user-level executable code, not an OS sandbox. JavaScript packages cannot request `native.execute`.
 
+MacHelper 6.7.6 supports an optional `icon` field for JavaScript and native manifests. Use a safe package-relative path such as `assets/icon.png` and include the static PNG in the source inventory. Icons may be up to 512 pixels per side and 128 KiB. The icon belongs to the host settings UI and stays outside worker resources. For an existing first-party install, MacHelper can use the matching bundled source edition’s icon without replacing the installed source. Extensions without usable artwork show the standard puzzle icon.
+
 ### Shared toolbar and guarded replacement (MacHelper 6.6+)
+
+**General → Enable MacHelper** controls whether the host offers selection actions. Pausing closes the toolbar and result panel and cancels the current selection action. The installed extension's own enablement and permissions are remembered separately.
 
 The shared toolbar uses every enabled tool’s `selection` command, rather than separate overlapping icons. Selection must be verified and nonempty. Displaying the toolbar does not invoke code or AI. Each selected command uses the current validated extension activation and normal cancellation/stale-result checks.
 
@@ -82,7 +86,7 @@ For a web editor, an eligible depth/deadline-limited unknown control, or a verif
 
 The permission review covers both clipboard methods behind **Apply**: the paste shortcut for an exact range and the original editor’s Paste menu command for its current selection. Both leave the result on the clipboard. Neither edit reads or restores the previous clipboard contents. Adding `selection.paste` to an enabled tool requires renewed approval. Each edit requires a completed preview and a click on Apply.
 
-The shared **General → Improve compatibility with Electron apps** preference is off by default. With it enabled, the host tries a bounded Accessibility read after a recognized selection gesture. If the selection is still unreadable, the host may set the application's advertised, settable `AXManualAccessibility` attribute to `true`. It requires a verified focused AX window and tracks its identity with the process launch. MacHelper skips the request when the window cannot be identified. A distinct window in the same process can recover within the per-process and host limits. A handshake permits one initial request and at most one refresh after 2.2 seconds. The refresh checks the same process and window, the current selection context, Accessibility trust, settable support, and opt-in. After an interruption, another deliberate selection in the same window may resume its outstanding refresh at the original deadline. Polling alone cannot start or resume the handshake.
+The Electron compatibility preference defaults to off. MacHelper honors a saved opt-in from earlier versions. With that preference enabled, the host tries a bounded Accessibility read after a recognized selection gesture. If the selection is still unreadable, the host may set the application's advertised, settable `AXManualAccessibility` attribute to `true`. It requires a verified focused AX window and tracks its identity with the process launch. MacHelper skips the request when the window cannot be identified. A distinct window in the same process can recover within the per-process and host limits. A handshake permits one initial request and at most one refresh after 2.2 seconds. The refresh checks the same process and window, the current selection context, Accessibility trust, settable support, and opt-in. After an interruption, another deliberate selection in the same window may resume its outstanding refresh at the original deadline. Polling alone cannot start or resume the handshake.
 
 VS Code may enter Screen Reader Optimized mode, affecting folding and the minimap. Users may need to reselect the text if their first gesture occurred before the editor exposed it. Disabling compatibility stops future requests. Affected apps may need restarting. MacHelper leaves VS Code settings files, VoiceOver and macOS permissions alone. Extension code receives the ordinary selection capability. Editing still requires a verified target.
 
@@ -273,7 +277,13 @@ Catalog discovery downloads metadata only. On first enablement, MacHelper downlo
 
 HTTPS is required for remote catalogs and source. Local files and loopback HTTP are available for development and integration tests. Remote catalogs cannot request local file URLs or downgrade to plain HTTP. Download requests do not carry cookies or stored credentials; redirects are rejected. Paths cannot traverse outside the source package or use symbolic links.
 
-An existing local package is preserved on re-enable, even if the upstream catalog version changed. User edits are not silently overwritten. Explicit future update workflows must preserve or separately resolve local modifications rather than replacing the working folder during enablement.
+An existing local package is preserved on re-enable, even if the upstream catalog version changed.
+
+## Updating an installed extension
+
+MacHelper reads supported marketplace and registered catalog metadata at startup. **Extensions → Check for Updates** refreshes it on demand. A strictly newer catalog version adds an update icon in the top-right corner of the installed tool’s card and an **Update…** button on its detail page. MacHelper shows the installed and offered versions, the catalog address, the requested permissions, and whether the local source contains edits. The complete package downloads only after the user approves the update.
+
+MacHelper validates the staged files against the reviewed inventory. It prepares a working replacement before swapping source for an enabled tool. A disabled tool remains disabled. The previous source moves to a hidden `.source-backup-<identifier>-<UUID>` folder beside the installed package, retaining any local edits. The settings file remains separate from both copies. The new schema supplies defaults where a saved setting no longer applies. If the installed source changes during review or download, the update stops so the user can review the new state. Failed verification or activation leaves the existing source available.
 
 ## Editing and reload behavior
 
@@ -314,8 +324,8 @@ checks the catalog and hash-pinned manifest, then presents a native permissions
 review. Approving **Install & Enable** downloads the complete inventory. It does
 not run AI. Download/hash errors leave no partial installed package; a reviewed
 remote failure never substitutes the app's offline seed. Repeat links to an
-existing local package open its settings without replacing files, resetting
-preferences, or re-enabling a disabled tool.
+existing local package open its settings and keep its source, preferences, and
+enabled state. Use **Update…** in MacHelper to approve a newer release.
 
 The canonical website URL is embedded as `MacHelperMarketplaceURL` in the app
 bundle. `scripts/build-apps.py --marketplace-url HTTPS_URL` configures a different

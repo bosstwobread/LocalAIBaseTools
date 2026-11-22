@@ -1,14 +1,21 @@
 import AppKit
 import ApplicationServices
+import Darwin
 import Foundation
 import MacHelper
 import MacHelperCapabilities
+
+struct SourceToolArtwork {
+    let data: Data
+    let digest: String
+}
 
 struct SourceToolInfo {
     let id: String
     let displayName: String
     let summary: String
     let version: String
+    let availableVersion: String?
     let runtime: String
     let isEnabled: Bool
     let isRunning: Bool
@@ -17,11 +24,32 @@ struct SourceToolInfo {
     let reloadCount: Int
     let error: String?
     let status: String
+    let artwork: SourceToolArtwork?
+}
+
+struct SourceExtensionUpdatePreview {
+    let id: String
+    let currentVersion: String
+    let catalogURL: URL
+    let manifest: SourceExtensionManifest
+    let isLocallyModified: Bool
+    fileprivate let entry: SourceCatalogEntry
+    fileprivate let installed: SourcePackageSnapshot
+}
+
+func sourcePermissionReviewText(_ permissions: [String]) -> String {
+    let names = ["selection.read": "Read selected text across apps", "selection.replace": "Replace selected text only when you click Apply",
+                 "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
+                 "selection.paste": "Paste completed results into the original window",
+                 "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
+                 "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
+    return permissions.isEmpty ? L("None") : permissions.map { "• " + L(names[$0] ?? $0) }.joined(separator: "\n")
 }
 
 @MainActor
 final class SourceExtensionManager {
     static let translationID = "com.localaibasetools.translation"
+    private static let maximumCatalogCount = 32
     var onChange: (() -> Void)?
     var onApproveNativeExecution: ((SourceExtensionManifest) -> Bool)?
     var onApproveSelectionReplacement: ((SourceExtensionManifest) -> Bool)?
@@ -31,6 +59,7 @@ final class SourceExtensionManager {
     private let stateDirectory: URL
     private let bundledCatalogURL: URL
     private let bundledSeedDirectory: URL?
+    private let marketplaceCatalogURL: URL?
     private let workerURL: URL
     private let helperURL: URL
     private let nativeSDKURL: URL
@@ -38,7 +67,13 @@ final class SourceExtensionManager {
     private let testTransform: (([String: Any]) async throws -> [String: Any])?
     private let testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])?
     private var definitions: [String: Definition] = [:]
+    private var bundledCatalogIDs: Set<String> = []
+    private var updateCatalogs: [URL: [String: SourceCatalogEntry]] = [:]
+    private var pendingCatalogs: [String: Int] = [:]
+    private var updatesInProgress: Set<String> = []
+    private var updateCheckGeneration: UUID?
     private var snapshots: [String: SourcePackageSnapshot] = [:]
+    private var bundledArtwork: [String: SourceToolArtwork?] = [:]
     private var preparedSettings: [String: PreparedSettings] = [:]
     private var configurationErrors: [String: String] = [:]
     private var active: [String: Running] = [:]
@@ -52,6 +87,7 @@ final class SourceExtensionManager {
     private var state = State()
     private var shuttingDown = false
     private var started = false
+    private var selectionActionsEnabled = true
     private lazy var selectionCapability = SelectionActionCapability(title: "MacHelper")
     private var languageObserver: NSObjectProtocol?
 
@@ -60,6 +96,7 @@ final class SourceExtensionManager {
         var enabled: [String: Bool] = [:]
         var permissions: [String: [String]] = [:]
         var catalogs: [String] = []
+        var sourceCatalogs: [String: String]?
     }
     private struct Definition { let entry: SourceCatalogEntry; let base: URL }
     private struct PreparedSettings {
@@ -87,12 +124,13 @@ final class SourceExtensionManager {
     }
 
     init(workerExecutableURL: URL, helperExecutableURL: URL, bundledCatalogURL: URL,
-         bundledSeedDirectory: URL? = nil, stateDirectory: URL? = nil, nativeSDKURL: URL? = nil,
+         bundledSeedDirectory: URL? = nil, marketplaceCatalogURL: URL? = nil, stateDirectory: URL? = nil, nativeSDKURL: URL? = nil,
          sourceDirectory: URL = SourcePackageStore.defaultUserDirectory, headless: Bool = false,
          testTransform: (([String: Any]) async throws -> [String: Any])? = nil,
          testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])? = nil) {
         workerURL = workerExecutableURL; helperURL = helperExecutableURL
         self.bundledCatalogURL = bundledCatalogURL; self.bundledSeedDirectory = bundledSeedDirectory
+        self.marketplaceCatalogURL = marketplaceCatalogURL
         self.stateDirectory = stateDirectory ?? HelperSettingsStore.defaultFileURL.deletingLastPathComponent()
         self.nativeSDKURL = nativeSDKURL ?? Bundle.main.resourceURL?.appendingPathComponent("NativeExtensionSDK/MacHelperNativeSDK.swift")
             ?? URL(fileURLWithPath: "/unavailable/MacHelperNativeSDK.swift")
@@ -108,15 +146,33 @@ final class SourceExtensionManager {
             let snapshot = snapshots[id] ?? active[id]?.snapshot
             let definition = definitions[id]?.entry
             let exists = (try? store.installedURL(for: id)).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+            let artwork = snapshot.flatMap { source -> SourceToolArtwork? in
+                guard let path = source.manifest.icon, let data = source.iconData,
+                      let digest = source.fileHashes[path] else { return nil }
+                return SourceToolArtwork(data: data, digest: digest)
+            } ?? bundledIcon(for: id)
             return SourceToolInfo(id: id, displayName: localizedText(snapshot?.manifest.displayName ?? definition?.displayName ?? id, for: id),
                                   summary: localizedText(snapshot?.manifest.summary ?? definition?.summary ?? L("Editable source extension"), for: id),
                                   version: snapshot?.manifest.version ?? definition?.version ?? "",
+                                  availableVersion: exists ? snapshot.flatMap { newerDefinition(for: $0)?.entry.version } : nil,
                                   runtime: snapshot?.manifest.runtime ?? "",
                                   isEnabled: state.enabled[id] == true, isRunning: active[id]?.worker.generation != nil,
                                   sourceURL: exists ? try? store.installedURL(for: id) : nil,
                                   isLocallyModified: snapshot?.isLocallyModified ?? false, reloadCount: counts[id] ?? 0,
-                                  error: errors[id] ?? configurationErrors[id], status: L(statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source.")))
+                                  error: errors[id] ?? configurationErrors[id],
+                                  status: L(statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source.")),
+                                  artwork: artwork)
         }
+    }
+
+    private func bundledIcon(for id: String) -> SourceToolArtwork? {
+        guard let bundledSeedDirectory else { return nil }
+        if let cached = bundledArtwork[id] { return cached }
+        let seed = bundledSeedDirectory.appendingPathComponent(id + ".macsource", isDirectory: true)
+        let artwork = SourcePackageInspector.iconData(at: seed, matchingIdentifier: id)
+            .map { SourceToolArtwork(data: $0, digest: SourcePackageRules.digest($0)) }
+        bundledArtwork.updateValue(artwork, forKey: id)
+        return artwork
     }
 
     func start() async {
@@ -126,10 +182,14 @@ final class SourceExtensionManager {
             do {
                 state = try JSONDecoder().decode(State.self, from: Data(contentsOf: file))
                 guard state.schemaVersion == 1 else { throw SourcePackageError.invalid(L("Unsupported extension preferences.")) }
-                guard state.enabled.count <= 128, state.permissions.count <= 128, state.catalogs.count <= 32 else {
+                guard state.enabled.count <= 128, state.permissions.count <= 128,
+                      state.catalogs.count <= Self.maximumCatalogCount,
+                      (state.sourceCatalogs?.count ?? 0) <= 128 else {
                     throw SourcePackageError.invalid(L("Extension preferences exceed their size limits."))
                 }
-                for id in Set(state.enabled.keys).union(state.permissions.keys) { try SourcePackageRules.validateIdentifier(id) }
+                for id in Set(state.enabled.keys).union(state.permissions.keys).union((state.sourceCatalogs ?? [:]).keys) {
+                    try SourcePackageRules.validateIdentifier(id)
+                }
             } catch { state = State(); errors[Self.translationID] = L("Source extension preferences could not be read. Enable the tool explicitly.") }
         } else if !headless {
             // Translation was enabled by default in MacHelper 3. Preserve that
@@ -153,6 +213,16 @@ final class SourceExtensionManager {
             catch { errors[id] = error.localizedDescription; try? await recoverLastGood(id) }
         }
         notify()
+    }
+
+    func setSelectionActionsEnabled(_ enabled: Bool) {
+        guard !headless, !shuttingDown, selectionActionsEnabled != enabled else { return }
+        selectionActionsEnabled = enabled
+        if enabled {
+            synchronizeSelectionActions()
+        } else {
+            selectionCapability.stop()
+        }
     }
 
     func setEnabled(_ enabled: Bool, for id: String) async throws {
@@ -299,9 +369,136 @@ final class SourceExtensionManager {
         notify()
     }
     func addCatalog(from url: URL) async throws {
+        let catalog = url.absoluteString
+        try reserveCatalog(catalog)
+        defer { releaseCatalog(catalog) }
         try await readCatalog(url)
-        if !state.catalogs.contains(url.absoluteString) { state.catalogs.append(url.absoluteString); try saveState() }
+        try registerCatalog(catalog)
         notify()
+    }
+
+    func checkForUpdates(includeConfigured: Bool = true) async throws {
+        guard !shuttingDown else { throw CancellationError() }
+        if !includeConfigured, updateCheckGeneration != nil { return }
+        let generation = UUID()
+        updateCheckGeneration = generation
+        defer { if updateCheckGeneration == generation { updateCheckGeneration = nil } }
+        var urls = Set(includeConfigured ? state.catalogs.compactMap { URL(string: $0) } : [])
+        if let marketplaceCatalogURL { urls.insert(marketplaceCatalogURL) }
+        let results = await withTaskGroup(of: (URL, Result<SourceCatalog, Error>).self) { group in
+            for url in urls {
+                group.addTask {
+                    do { return (url, .success(try await SourceCatalogLoader.load(from: url))) }
+                    catch { return (url, .failure(error)) }
+                }
+            }
+            var results: [(URL, Result<SourceCatalog, Error>)] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+        try Task.checkCancellation()
+        guard updateCheckGeneration == generation, !shuttingDown else { throw CancellationError() }
+        var failure: Error?
+        for (url, result) in results {
+            switch result {
+            case .success(let catalog): rememberUpdateCatalog(catalog, from: url)
+            case .failure(let error): failure = error
+            }
+        }
+        for snapshot in store.discoverInstalled().packages {
+            snapshots[snapshot.manifest.identifier] = snapshot
+        }
+        notify()
+        if let failure { throw failure }
+    }
+
+    func previewUpdate(_ id: String) async throws -> SourceExtensionUpdatePreview {
+        guard !shuttingDown else { throw CancellationError() }
+        let installed = try store.snapshot(for: id)
+        guard let definition = newerDefinition(for: installed) else {
+            throw SourcePackageError.invalid(L("No newer version is available for this extension."))
+        }
+        let manifest = try await SourceCatalogLoader.loadManifest(for: definition.entry, relativeTo: definition.base)
+        try Task.checkCancellation()
+        guard !shuttingDown else { throw CancellationError() }
+        return SourceExtensionUpdatePreview(id: id, currentVersion: installed.manifest.version, catalogURL: definition.base,
+            manifest: manifest, isLocallyModified: installed.isLocallyModified, entry: definition.entry, installed: installed)
+    }
+
+    func installUpdate(_ preview: SourceExtensionUpdatePreview) async throws -> URL {
+        let id = preview.id
+        guard !shuttingDown, updatesInProgress.insert(id).inserted else { throw CancellationError() }
+        defer { updatesInProgress.remove(id) }
+        try requireUnchangedUpdateSource(preview)
+        let staged = try await store.stageUpdate(entry: preview.entry, baseURL: preview.catalogURL)
+        defer { store.discardStagedUpdate(staged) }
+        try Task.checkCancellation()
+        try requireUnchangedUpdateSource(preview)
+        guard !shuttingDown, staged.manifest == preview.manifest else { throw CancellationError() }
+
+        let epoch = UUID()
+        epochs[id] = epoch
+        reloadTasks.removeValue(forKey: id)?.cancel()
+        let enabled = state.enabled[id] == true
+        let previousStatus = statuses[id]
+        let configuration = try settingsConfiguration(staged, id: id)
+        var candidate: (ScriptWorkerClient, Gate)?
+        var backupURL: URL
+        let previousWorker = active[id]?.worker
+        do {
+            if enabled {
+                try reviewPermissions(for: staged.manifest, approved: state.permissions[id], approving: true, epoch: epoch)
+                try Task.checkCancellation()
+                candidate = try await makeWorker(snapshot: staged, settings: configuration.values, epoch: epoch)
+            }
+            try Task.checkCancellation()
+            guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+            var updatedState = state
+            var origins = updatedState.sourceCatalogs ?? [:]
+            if origins[id] != nil || origins.count < 128 { origins[id] = preview.catalogURL.absoluteString }
+            updatedState.sourceCatalogs = origins
+            if enabled { updatedState.permissions[id] = staged.manifest.permissions }
+            watchers.removeValue(forKey: id)?.stop()
+            defer { if enabled, !shuttingDown { watch(id) } }
+            let committed = try store.commitUpdate(staged, replacing: preview.installed) {
+                try saveState(updatedState)
+            }
+            backupURL = committed.backupURL
+            state = updatedState
+            let snapshot = committed.snapshot
+            snapshots[id] = snapshot
+            preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: configuration.schema, values: configuration.values)
+            configurationErrors.removeValue(forKey: id)
+            errors.removeValue(forKey: id)
+            statuses[id] = enabled ? "Running · watching local source for changes." : "Disabled. Your editable source and settings are retained."
+            if let (worker, gate) = candidate {
+                active[id] = Running(snapshot: snapshot, worker: worker, gate: gate,
+                                     schema: configuration.schema, settings: configuration.values)
+                if pending[id] === worker { pending.removeValue(forKey: id) }
+                counts[id, default: 0] += 1
+                try? saveLastGood(snapshot, id: id)
+                synchronizeSelectionActions()
+            }
+            notify()
+        } catch {
+            if let (worker, _) = candidate {
+                if pending[id] === worker { pending.removeValue(forKey: id) }
+                await worker.stop()
+            }
+            if epochs[id] == epoch, !shuttingDown {
+                statuses[id] = previousStatus
+                notify()
+            }
+            throw error
+        }
+        if let previousWorker { await previousWorker.stop() }
+        return backupURL
+    }
+
+    private func requireUnchangedUpdateSource(_ preview: SourceExtensionUpdatePreview) throws {
+        guard let current = try? store.snapshot(for: preview.id), current.fingerprint == preview.installed.fingerprint else {
+            throw SourcePackageError.invalid(L("This extension changed while the update was being prepared. Check for updates and try again."))
+        }
     }
 
     func previewMarketplaceInstall(_ request: MarketplaceInstallRequest) async throws -> MarketplaceInstallPreview {
@@ -317,15 +514,14 @@ final class SourceExtensionManager {
         let id = preview.request.extensionID
         guard sourceURL(for: id) == nil else { return false }
         let catalog = preview.request.catalogURL.absoluteString
-        guard state.catalogs.contains(catalog) || state.catalogs.count < 32 else {
-            throw MarketplaceError.invalidLink(L("Too many tool catalogs are configured. Remove an unused catalog before installing another."))
-        }
+        try reserveCatalog(catalog)
+        defer { releaseCatalog(catalog) }
         definitions[id] = Definition(entry: preview.entry, base: preview.request.catalogURL)
         do {
             try await activate(id, approving: true,
                 expectedFileHashes: Dictionary(uniqueKeysWithValues: preview.entry.files.map { ($0.path, $0.sha256.lowercased()) }))
         } catch MarketplaceError.existingSourceChanged { notify(); return false }
-        if !state.catalogs.contains(catalog) { state.catalogs.append(catalog); try saveState() }
+        try registerCatalog(catalog)
         notify()
         return true
     }
@@ -395,16 +591,72 @@ final class SourceExtensionManager {
     }
     private func cacheURL(_ id: String) -> URL { stateDirectory.appendingPathComponent("SourceCache/" + id + ".macsource", isDirectory: true) }
 
+    private func reserveCatalog(_ catalog: String) throws {
+        let registered = Set(state.catalogs)
+        let unregistered = pendingCatalogs.keys.filter { !registered.contains($0) }.count
+        // A download or activation can suspend while another operation adds a catalog.
+        guard registered.contains(catalog) || pendingCatalogs[catalog] != nil ||
+                state.catalogs.count + unregistered < Self.maximumCatalogCount else {
+            throw MarketplaceError.invalidLink(L("Too many tool catalogs are configured. Remove an unused catalog before installing another."))
+        }
+        pendingCatalogs[catalog, default: 0] += 1
+    }
+
+    private func releaseCatalog(_ catalog: String) {
+        guard let count = pendingCatalogs[catalog] else { return }
+        pendingCatalogs[catalog] = count > 1 ? count - 1 : nil
+    }
+
+    private func registerCatalog(_ catalog: String) throws {
+        guard !state.catalogs.contains(catalog) else { return }
+        var updated = state
+        updated.catalogs.append(catalog)
+        try saveState(updated)
+        state = updated
+    }
+
     private func readCatalog(_ url: URL) async throws {
         let catalog = try await SourceCatalogLoader.load(from: url)
+        if url == bundledCatalogURL { bundledCatalogIDs = Set(catalog.extensions.map(\.identifier)) }
+        else { rememberUpdateCatalog(catalog, from: url) }
         for entry in catalog.extensions where definitions[entry.identifier] == nil {
             definitions[entry.identifier] = Definition(entry: entry, base: url)
         }
     }
 
+    private func rememberUpdateCatalog(_ catalog: SourceCatalog, from url: URL) {
+        updateCatalogs[url] = Dictionary(uniqueKeysWithValues: catalog.extensions.map { ($0.identifier, $0) })
+    }
+
+    private func newerDefinition(for installed: SourcePackageSnapshot) -> Definition? {
+        let id = installed.manifest.identifier
+        let pinnedCatalog = state.sourceCatalogs?[id].flatMap { URL(string: $0) }
+        let catalog: URL
+        if let pinnedCatalog {
+            catalog = pinnedCatalog
+        } else if bundledCatalogIDs.contains(id), let marketplaceCatalogURL {
+            catalog = marketplaceCatalogURL
+        } else {
+            let registered = state.catalogs.compactMap { URL(string: $0) }.filter { updateCatalogs[$0]?[id] != nil }
+            guard let only = registered.first, Set(registered).count == 1 else { return nil }
+            catalog = only
+        }
+        guard let entry = updateCatalogs[catalog]?[id],
+              SourcePackageRules.isNewerVersion(entry.version, than: installed.manifest.version) else { return nil }
+        return Definition(entry: entry, base: catalog)
+    }
+
+    private func recordCatalogOrigin(_ catalog: URL, for id: String) {
+        var origins = state.sourceCatalogs ?? [:]
+        guard origins[id] != nil || origins.count < 128 else { return }
+        origins[id] = catalog.absoluteString
+        state.sourceCatalogs = origins
+    }
+
     private func activate(_ id: String, approving: Bool, expectedFileHashes: [String: String]? = nil) async throws {
         let epoch = UUID(); epochs[id] = epoch
-        statuses[id] = sourceURL(for: id) == nil ? "Downloading complete extension source…" : "Validating source…"
+        let wasMissing = sourceURL(for: id) == nil
+        statuses[id] = wasMissing ? "Downloading complete extension source…" : "Validating source…"
         notify()
         let snapshot: SourcePackageSnapshot
         do {
@@ -427,27 +679,7 @@ final class SourceExtensionManager {
             if let expectedFileHashes, snapshot.fileHashes != expectedFileHashes { throw MarketplaceError.existingSourceChanged }
             snapshots[id] = snapshot
             let approved = state.permissions[id]
-            guard approving || approved.map({ Set(snapshot.manifest.permissions).isSubset(of: Set($0)) }) == true else {
-                throw SourcePackageError.invalid(L("This edit requests new permissions. Disable and re-enable the extension to approve them."))
-            }
-            if snapshot.manifest.runtime == "native", !(approved ?? []).contains("native.execute"), !headless {
-                guard approving, onApproveNativeExecution?(snapshot.manifest) == true else {
-                    statuses[id] = active[id] == nil
-                        ? "Native execution was not approved. The extension remains disabled."
-                        : "Running the last working version; native execution was not approved."
-                    notify()
-                    throw CancellationError()
-                }
-                guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
-            }
-            if !headless, let review = SourceSelectionPermissionReview.required(requested: snapshot.manifest.permissions, approved: approved ?? []) {
-                guard approving else { throw CancellationError() }
-                switch review {
-                case .paste: guard onApproveSelectionPaste?(snapshot.manifest) == true else { throw CancellationError() }
-                case .replacement: guard onApproveSelectionReplacement?(snapshot.manifest) == true else { throw CancellationError() }
-                }
-                guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
-            }
+            try reviewPermissions(for: snapshot.manifest, approved: approved, approving: approving, epoch: epoch)
             let schema = try parseSchema(snapshot)
             let values = try loadSettings(id, schema: schema)
             let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values, epoch: epoch)
@@ -460,6 +692,10 @@ final class SourceExtensionManager {
             if pending[id] === worker { pending.removeValue(forKey: id) }
             state.enabled[id] = true
             if approving { state.permissions[id] = snapshot.manifest.permissions }
+            if wasMissing, let base = definitions[id]?.base,
+               let origin = base == bundledCatalogURL ? marketplaceCatalogURL : base {
+                recordCatalogOrigin(origin, for: id)
+            }
             synchronizeSelectionActions()
             if let old { await old.worker.stop() }
             guard epochs[id] == epoch, active[id] === runtime, !shuttingDown else { throw CancellationError() }
@@ -479,6 +715,33 @@ final class SourceExtensionManager {
                 notify()
             }
             throw error
+        }
+    }
+
+    private func reviewPermissions(for manifest: SourceExtensionManifest, approved: [String]?, approving: Bool,
+                                   epoch: UUID) throws {
+        let id = manifest.identifier
+        guard approving || approved.map({ Set(manifest.permissions).isSubset(of: Set($0)) }) == true else {
+            throw SourcePackageError.invalid(L("This edit requests new permissions. Disable and re-enable the extension to approve them."))
+        }
+        guard !headless else { return }
+        if manifest.runtime == "native", !(approved ?? []).contains("native.execute") {
+            guard approving, onApproveNativeExecution?(manifest) == true else {
+                statuses[id] = active[id] == nil
+                    ? "Native execution was not approved. The extension remains disabled."
+                    : "Running the last working version; native execution was not approved."
+                notify()
+                throw CancellationError()
+            }
+            guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+        }
+        if let review = SourceSelectionPermissionReview.required(requested: manifest.permissions, approved: approved ?? []) {
+            guard approving else { throw CancellationError() }
+            switch review {
+            case .paste: guard onApproveSelectionPaste?(manifest) == true else { throw CancellationError() }
+            case .replacement: guard onApproveSelectionReplacement?(manifest) == true else { throw CancellationError() }
+            }
+            guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
         }
     }
 
@@ -632,10 +895,15 @@ final class SourceExtensionManager {
     private func saveSettings(_ values: [String: Any], id: String) throws {
         try privateJSON(values, to: settingsURL(id))
     }
-    private func saveState() throws {
+    private func saveState(_ value: State? = nil) throws {
         try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(state).write(to: stateURL, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: stateURL.path)
+        let staged = stateDirectory.appendingPathComponent(".source-preferences-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: staged) }
+        try JSONEncoder().encode(value ?? state).write(to: staged)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staged.path)
+        guard Darwin.rename(staged.path, stateURL.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
     }
     private func privateJSON(_ value: Any, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -676,7 +944,7 @@ final class SourceExtensionManager {
         watch(id)
     }
     private func synchronizeSelectionActions(invalidateCurrent: Bool = false) {
-        guard !headless, !shuttingDown else { return }
+        guard !headless, !shuttingDown, selectionActionsEnabled else { return }
         let actions: [CapabilitySelectionAction] = active.keys.sorted().flatMap { id -> [CapabilitySelectionAction] in
             guard let runtime = active[id], state.enabled[id] == true, shouldMonitor(runtime.snapshot) else { return [] }
             return runtime.snapshot.manifest.commands.filter { $0.trigger == "selection" }.map { command in
@@ -684,7 +952,9 @@ final class SourceExtensionManager {
                     title: localizedText(command.title, for: id), systemSymbolName: command.systemSymbolName,
                     allowsReplacement: runtime.snapshot.manifest.permissions.contains("selection.replace"),
                     allowsPaste: runtime.snapshot.manifest.permissions.contains("selection.paste")) { [weak self, weak runtime] input, progress in
-                    guard let self, let runtime, self.active[id] === runtime else { throw CancellationError() }
+                    guard let self, let runtime, self.selectionActionsEnabled, self.active[id] === runtime else {
+                        throw CancellationError()
+                    }
                     return try await self.performCommand(for: id, text: input.text, sentence: input.sentence,
                         commandIdentifier: command.identifier, onProgress: progress)
                 }

@@ -1,4 +1,7 @@
+import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 @testable import MacHelper
 
@@ -58,10 +61,10 @@ final class SourcePackageTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [SourceFixtureURLProtocol.self]
         return URLSession(configuration: config)
     }
-    private func fixtureFiles(extra: [String: Data] = [:]) throws -> [String: Data] {
-        let manifest = SourceExtensionManifest(identifier: identity, displayName: "Translation", version: "1.0.0", summary: "Source fixture",
+    private func fixtureFiles(extra: [String: Data] = [:], icon: String? = nil, version: String = "1.0.0") throws -> [String: Data] {
+        let manifest = SourceExtensionManifest(identifier: identity, displayName: "Translation", version: version, summary: "Source fixture",
             permissions: ["selection.read", "ai.transform", "ui.panel"],
-            commands: [.init(identifier: "translate", title: "Translate", trigger: "selection")], settingsSchema: "settings.schema.json")
+            commands: [.init(identifier: "translate", title: "Translate", trigger: "selection")], settingsSchema: "settings.schema.json", icon: icon)
         var files = ["extension.json": try JSONEncoder().encode(manifest),
                      "main.js": Data("MacHelper.define({commands:{translate(input){return input;}}});".utf8),
                      "prompts/translate.txt": Data("Preserve numbers.".utf8),
@@ -70,8 +73,8 @@ final class SourcePackageTests: XCTestCase {
                      "LICENSE": Data("MIT".utf8)]
         files.merge(extra) { _, new in new }; return files
     }
-    private func entry(_ files: [String: Data]) -> SourceCatalogEntry {
-        .init(identifier: identity, displayName: "Translation", version: "1.0.0", summary: "Source fixture",
+    private func entry(_ files: [String: Data], version: String = "1.0.0") -> SourceCatalogEntry {
+        .init(identifier: identity, displayName: "Translation", version: version, summary: "Source fixture",
               files: files.keys.sorted().map { .init(path: $0, sha256: SourcePackageRules.digest(files[$0]!), size: files[$0]!.count) })
     }
     private func write(_ files: [String: Data], to root: URL) throws {
@@ -83,6 +86,77 @@ final class SourcePackageTests: XCTestCase {
     }
     private func replies(_ files: [String: Data]) -> [String: SourceFixtureURLProtocol.Reply] {
         Dictionary(uniqueKeysWithValues: files.map { (URL(string: $0.key, relativeTo: baseURL)!.absoluteURL.absoluteString, .init(data: $0.value)) })
+    }
+
+    private func iconPNG(width: Int = 1) throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let bytes = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return bytes as Data
+    }
+
+    func testSourceIconIsOptionalAndDownloadedAsVerifiedPresentationData() async throws {
+        let parent = try temporary()
+        let old = parent.appendingPathComponent("old")
+        try write(fixtureFiles(), to: old)
+        XCTAssertNil(try SourcePackageInspector.snapshot(at: old).iconData)
+
+        let path = "artwork/tool.png"
+        let artwork = try iconPNG()
+        let files = try fixtureFiles(extra: [path: artwork], icon: path)
+        SourceFixtureURLProtocol.reset(replies(files))
+        let store = SourcePackageStore(directory: parent.appendingPathComponent("installed"), session: session())
+        let snapshot = try await store.materialize(entry: entry(files), baseURL: baseURL)
+        XCTAssertEqual(snapshot.manifest.icon, path)
+        XCTAssertEqual(snapshot.iconData, artwork)
+        XCTAssertNil(snapshot.resources[path])
+        XCTAssertEqual(snapshot.fileHashes[path], SourcePackageRules.digest(artwork))
+        XCTAssertEqual(SourcePackageInspector.iconData(at: snapshot.rootURL, matchingIdentifier: identity), artwork)
+        XCTAssertNil(SourcePackageInspector.iconData(at: snapshot.rootURL, matchingIdentifier: "com.example.other"))
+    }
+
+    func testMissingOrInvalidArtworkFallsBackWithoutBreakingJavaScriptSource() throws {
+        let root = try temporary()
+        let path = "artwork/tool.png"
+        try write(fixtureFiles(icon: path), to: root)
+        XCTAssertNil(try SourcePackageInspector.snapshot(at: root).iconData)
+        let png = try iconPNG()
+        for artwork in [Data(png.prefix(24)), try iconPNG(width: 513), png + Data(repeating: 0, count: 128 * 1024)] {
+            try write([path: artwork], to: root)
+            let snapshot = try SourcePackageInspector.snapshot(at: root)
+            XCTAssertNil(snapshot.iconData)
+            XCTAssertNil(snapshot.resources[path])
+            XCTAssertEqual(snapshot.fileHashes[path], SourcePackageRules.digest(artwork))
+            XCTAssertNil(SourcePackageInspector.iconData(at: root, matchingIdentifier: identity))
+        }
+        for invalid in ["../tool.png", "https://example.com/tool.png", "artwork/tool.svg"] {
+            try write(fixtureFiles(icon: invalid), to: root)
+            XCTAssertThrowsError(try SourcePackageInspector.snapshot(at: root))
+        }
+    }
+
+    func testNativeSourceOnlyAllowsTheDeclaredValidatedBinaryIcon() throws {
+        let root = try temporary()
+        let path = "artwork/tool.png"
+        let artwork = try iconPNG()
+        let manifest = SourceExtensionManifest(runtime: "native", identifier: identity, displayName: "Native tool",
+            version: "1.0.0", summary: "Native fixture", entryPoint: "Main.swift", permissions: ["native.execute"],
+            commands: [.init(identifier: "greet", title: "Greet", trigger: "manual")], icon: path)
+        try write(["extension.json": JSONEncoder().encode(manifest), "Main.swift": Data("import Foundation\n".utf8),
+                   path: artwork], to: root)
+        let snapshot = try SourcePackageInspector.snapshot(at: root)
+        XCTAssertEqual(snapshot.iconData, artwork)
+        XCTAssertNil(snapshot.resources[path])
+        try write(["other.png": artwork], to: root)
+        XCTAssertThrowsError(try SourcePackageInspector.snapshot(at: root), "Other native binary assets remain unsupported")
+        try FileManager.default.removeItem(at: root.appendingPathComponent("other.png"))
+        try write([path: Data([0xcf, 0xfa, 0xed, 0xfe, 0, 0])], to: root)
+        XCTAssertThrowsError(try SourcePackageInspector.snapshot(at: root), "A PNG path cannot exempt an arbitrary binary")
+        XCTAssertEqual(snapshot.iconData, artwork, "The earlier snapshot retains the validated PNG bytes")
     }
 
     func testCatalogListsMetadataWithoutDownloadingAnySource() async throws {
@@ -119,6 +193,102 @@ final class SourcePackageTests: XCTestCase {
         XCTAssertTrue(retained.isLocallyModified)
         XCTAssertEqual(retained.entrySource, edited)
         XCTAssertTrue(SourceFixtureURLProtocol.requests.isEmpty)
+    }
+
+    func testExplicitUpdateInstallsNewSourceAndRetainsTheEntirePreviousFolder() async throws {
+        let (store, installed) = try installUpdateFixture()
+        let edited = Data("Keep this local prompt.".utf8)
+        let privateNote = Data("A note outside the published inventory.".utf8)
+        try edited.write(to: installed.rootURL.appendingPathComponent("prompts/translate.txt"))
+        try privateNote.write(to: installed.rootURL.appendingPathComponent(".notes"))
+        let expected = try store.snapshot(for: identity)
+        XCTAssertTrue(expected.isLocallyModified)
+
+        let newer = try fixtureFiles(extra: ["prompts/translate.txt": Data("A new published prompt.".utf8)], version: "1.1.0")
+        SourceFixtureURLProtocol.reset(replies(newer))
+        let stage = try await store.stageUpdate(entry: entry(newer, version: "1.1.0"), baseURL: baseURL)
+        XCTAssertEqual(try store.snapshot(for: identity).fingerprint, expected.fingerprint)
+        let result = try store.commitUpdate(stage, replacing: expected) {
+            XCTAssertEqual(try store.snapshot(for: identity).manifest.version, "1.1.0")
+        }
+        store.discardStagedUpdate(stage)
+
+        XCTAssertEqual(result.snapshot.rootURL.path, installed.rootURL.path)
+        XCTAssertEqual(result.snapshot.manifest.version, "1.1.0")
+        XCTAssertFalse(result.snapshot.isLocallyModified)
+        XCTAssertEqual(result.snapshot.resources["prompts/translate.txt"], "A new published prompt.")
+        XCTAssertEqual(try Data(contentsOf: result.backupURL.appendingPathComponent("prompts/translate.txt")), edited)
+        XCTAssertEqual(try Data(contentsOf: result.backupURL.appendingPathComponent(".notes")), privateNote)
+        XCTAssertEqual(store.discoverInstalled().packages.count, 1)
+    }
+
+    func testExplicitUpdateRejectsAnEditMadeAfterTheUpdateWasReviewed() async throws {
+        let (store, installed) = try installUpdateFixture()
+        let newer = try fixtureFiles(version: "1.1.0")
+        SourceFixtureURLProtocol.reset(replies(newer))
+        let stage = try await store.stageUpdate(entry: entry(newer, version: "1.1.0"), baseURL: baseURL)
+        defer { store.discardStagedUpdate(stage) }
+
+        let edited = "Saved after the download started."
+        try Data(edited.utf8).write(to: installed.rootURL.appendingPathComponent("prompts/translate.txt"))
+        XCTAssertThrowsError(try store.commitUpdate(stage, replacing: installed) {
+            XCTFail("Approvals must not be written for a stale update.")
+        })
+        XCTAssertEqual(try store.snapshot(for: identity).resources["prompts/translate.txt"], edited)
+    }
+
+    func testExplicitUpdateRejectsAStagedPackageChangedAfterVerification() async throws {
+        let (store, installed) = try installUpdateFixture()
+        let newer = try fixtureFiles(version: "1.1.0")
+        SourceFixtureURLProtocol.reset(replies(newer))
+        let stage = try await store.stageUpdate(entry: entry(newer, version: "1.1.0"), baseURL: baseURL)
+        defer { store.discardStagedUpdate(stage) }
+
+        try Data("Changed staged data.".utf8).write(to: stage.rootURL.appendingPathComponent("prompts/translate.txt"))
+        XCTAssertThrowsError(try store.commitUpdate(stage, replacing: installed) {
+            XCTFail("Approvals must not be written for a changed staged update.")
+        })
+        XCTAssertEqual(try store.snapshot(for: identity).fingerprint, installed.fingerprint)
+    }
+
+    func testExplicitUpdateRestoresInstalledSourceIfApprovalsCannotBeWritten() async throws {
+        let (store, installed) = try installUpdateFixture()
+        let newer = try fixtureFiles(version: "1.1.0")
+        SourceFixtureURLProtocol.reset(replies(newer))
+        let stage = try await store.stageUpdate(entry: entry(newer, version: "1.1.0"), baseURL: baseURL)
+        defer { store.discardStagedUpdate(stage) }
+
+        XCTAssertThrowsError(try store.commitUpdate(stage, replacing: installed) {
+            XCTAssertEqual(try store.snapshot(for: identity).manifest.version, "1.1.0")
+            throw CocoaError(.fileWriteNoPermission)
+        }) { error in
+            XCTAssertEqual((error as? CocoaError)?.code, .fileWriteNoPermission)
+        }
+        XCTAssertEqual(try store.snapshot(for: identity).fingerprint, installed.fingerprint)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.directory.path), [identity + ".macsource"])
+    }
+
+    func testExplicitUpdateRejectsCorruptDownloadWithoutTouchingInstalledSource() async throws {
+        let (store, installed) = try installUpdateFixture()
+        let newer = try fixtureFiles(version: "1.1.0")
+        var corrupt = newer
+        corrupt["main.js"] = Data("Incomplete script".utf8)
+        SourceFixtureURLProtocol.reset(replies(corrupt))
+        do {
+            _ = try await store.stageUpdate(entry: entry(newer, version: "1.1.0"), baseURL: baseURL)
+            XCTFail("The corrupt update package must be rejected.")
+        } catch {
+            XCTAssertEqual(try store.snapshot(for: identity).fingerprint, installed.fingerprint)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.directory.path), [identity + ".macsource"])
+        }
+    }
+
+    private func installUpdateFixture() throws -> (SourcePackageStore, SourcePackageSnapshot) {
+        let parent = try temporary()
+        let fixture = parent.appendingPathComponent("release")
+        try write(fixtureFiles(), to: fixture)
+        let store = SourcePackageStore(directory: parent.appendingPathComponent("Extensions"), session: session())
+        return (store, try store.importSource(from: fixture))
     }
 
     func testHashMismatchAndPartialFailureNeverInstallAPartialPackage() async throws {

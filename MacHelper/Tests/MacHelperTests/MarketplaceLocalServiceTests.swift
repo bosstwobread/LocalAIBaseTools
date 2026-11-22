@@ -100,7 +100,7 @@ final class MarketplaceLocalServiceTests: XCTestCase {
         var calls = 0
         let service = try await service(search: { _, _ in calls += 1; throw DiscoveryError.unavailable })
         let (http, object) = try await response(request(service, path: "/v1/status"))
-        XCTAssertEqual(http.statusCode, 200); XCTAssertEqual(object["version"] as? String, "6.7.5")
+        XCTAssertEqual(http.statusCode, 200); XCTAssertEqual(object["version"] as? String, "6.7.6")
         XCTAssertEqual(object["protocolVersion"] as? Int, 1)
         XCTAssertEqual(http.value(forHTTPHeaderField: "Access-Control-Allow-Origin"), MarketplaceLocalService.origin)
         XCTAssertEqual(http.value(forHTTPHeaderField: "Cache-Control"), "no-store")

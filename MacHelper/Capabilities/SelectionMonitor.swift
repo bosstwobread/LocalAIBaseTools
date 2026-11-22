@@ -461,6 +461,7 @@ final class SelectionMonitor {
     func start() {
         guard timer == nil else { return }
         trusted = AXIsProcessTrusted()
+        selectionPoint = NSEvent.mouseLocation
         installEventMonitors()
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -486,9 +487,9 @@ final class SelectionMonitor {
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor); self.globalMonitor = nil }
         if let localMonitor { NSEvent.removeMonitor(localMonitor); self.localMonitor = nil }
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver); self.workspaceObserver = nil }
+        dragging = false
         commandHeld = false
         invalidateReadContext()
-        cancelledSelectionKeyUps.removeAll()
     }
 
     private func installEventMonitors() {
@@ -498,7 +499,8 @@ final class SelectionMonitor {
         commandHeld = NSEvent.modifierFlags.contains(.command)
         commandSelectionPending = false
         keyboardSelectionKey = nil
-        cancelledSelectionKeyUps.removeAll()
+        // A release from a gesture interrupted by a pause must not arm Copy.
+        cancelledSelectionKeyUps = cancelledSelectionKeyUps.filter(isKeyDown)
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .leftMouseDragged,
                                           .leftMouseUp, .rightMouseUp, .keyDown, .keyUp, .flagsChanged]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in

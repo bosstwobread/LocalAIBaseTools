@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct SourcePackageDiscoveryIssue: Sendable {
@@ -12,6 +13,8 @@ public struct SourcePackageDiscovery: Sendable {
 }
 
 public struct SourcePackageStore: @unchecked Sendable {
+    private static let updateCommitLock = NSLock()
+
     public static var defaultUserDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/LocalAIBaseTools/Extensions", isDirectory: true)
     }
@@ -93,21 +96,120 @@ public struct SourcePackageStore: @unchecked Sendable {
         if FileManager.default.fileExists(atPath: destination.path) { return try snapshot(for: entry.identifier) }
         let stage = try createStage()
         defer { try? FileManager.default.removeItem(at: stage) }
+        let candidate = try await download(entry: entry, baseURL: baseURL, to: stage)
+        try Task.checkCancellation()
+        if FileManager.default.fileExists(atPath: destination.path) { return try snapshot(for: entry.identifier) }
+        return try activate(stage: stage, destination: destination, identifier: entry.identifier, hashes: candidate.fileHashes)
+    }
+
+    /// Staging leaves the installed working folder available while the caller
+    /// validates settings, reviews permissions, and prepares the new worker.
+    public func stageUpdate(entry: SourceCatalogEntry, baseURL: URL) async throws -> SourcePackageSnapshot {
+        try entry.validate()
+        let stage = try createStage(prefix: ".source-update-")
+        do {
+            let candidate = try await download(entry: entry, baseURL: baseURL, to: stage)
+            try writeReceipt(for: candidate)
+            try Task.checkCancellation()
+            return candidate
+        } catch {
+            try? FileManager.default.removeItem(at: stage)
+            throw error
+        }
+    }
+
+    public func discardStagedUpdate(_ staged: SourcePackageSnapshot) {
+        guard ownsUpdateStage(staged.rootURL) else { return }
+        try? FileManager.default.removeItem(at: staged.rootURL)
+    }
+
+    /// Replace the complete directory atomically and retain the previous source.
+    /// `persist` must write the updated approvals atomically or throw.
+    public func commitUpdate(_ staged: SourcePackageSnapshot, replacing expected: SourcePackageSnapshot,
+                             persist: () throws -> Void) throws -> (snapshot: SourcePackageSnapshot, backupURL: URL) {
+        Self.updateCommitLock.lock()
+        defer { Self.updateCommitLock.unlock() }
+
+        let identifier = staged.manifest.identifier
+        let destination = try installedURL(for: identifier)
+        guard ownsUpdateStage(staged.rootURL),
+              expected.manifest.identifier == identifier,
+              expected.rootURL.path == destination.standardizedFileURL.resolvingSymlinksInPath().path
+        else { throw SourcePackageError.invalid("The update does not match this installed extension.") }
+        guard SourcePackageRules.isNewerVersion(staged.manifest.version, than: expected.manifest.version) else {
+            throw SourcePackageError.invalid("The catalog does not have a newer version of this extension.")
+        }
+        try Task.checkCancellation()
+        _ = try verifiedUpdate(at: staged.rootURL, matching: staged)
+        guard try snapshot(for: identifier).fingerprint == expected.fingerprint else {
+            throw SourcePackageError.invalid("Installed source changed during the update. Try again after saving your files.")
+        }
+
+        // Move the candidate first so the stage path can never refer to the
+        // user's previous working copy, even if rollback fails.
+        let backup = directory.appendingPathComponent(".source-backup-" + identifier + "-" + UUID().uuidString,
+                                                       isDirectory: true)
+        let files = FileManager.default
+        try files.moveItem(at: staged.rootURL, to: backup)
+        var keepBackup = false
+        defer { if !keepBackup { try? files.removeItem(at: backup) } }
+        try swapSource(backup, destination)
+        keepBackup = true
+        do {
+            let previous = try SourcePackageInspector.snapshot(at: backup)
+            guard previous.fingerprint == expected.fingerprint else {
+                throw SourcePackageError.invalid("Installed source changed during the update. Try again after saving your files.")
+            }
+            let installed = try verifiedUpdate(at: destination, matching: staged)
+            try persist()
+            return (installed, previous.rootURL)
+        } catch {
+            do {
+                try swapSource(backup, destination)
+                keepBackup = false
+            } catch {
+                throw SourcePackageError.invalid("The previous source could not be restored automatically. Its backup is at \(backup.path).")
+            }
+            throw error
+        }
+    }
+
+    private func ownsUpdateStage(_ root: URL) -> Bool {
+        let prefix = ".source-update-"
+        return root.deletingLastPathComponent().path == directory.standardizedFileURL.resolvingSymlinksInPath().path
+            && root.lastPathComponent.hasPrefix(prefix)
+            && UUID(uuidString: String(root.lastPathComponent.dropFirst(prefix.count))) != nil
+    }
+
+    private func verifiedUpdate(at root: URL, matching staged: SourcePackageSnapshot) throws -> SourcePackageSnapshot {
+        let candidate = try SourcePackageInspector.snapshot(at: root)
+        let receiptURL = root.appendingPathComponent(SourcePackageRules.receiptName)
+        let receipt = try JSONDecoder().decode(SourcePackageReceipt.self,
+            from: SourcePackageRules.boundedData(receiptURL, maximum: 128 * 1024))
+        guard candidate.manifest.identifier == staged.manifest.identifier,
+              candidate.fingerprint == staged.fingerprint,
+              receipt.identifier == candidate.manifest.identifier,
+              receipt.version == candidate.manifest.version,
+              receipt.hashes == candidate.fileHashes
+        else { throw SourcePackageError.invalid("The downloaded update changed before it could be installed.") }
+        return candidate
+    }
+
+    private func swapSource(_ first: URL, _ second: URL) throws {
+        guard Darwin.renamex_np(first.path, second.path, UInt32(RENAME_SWAP)) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+    }
+
+    private func download(entry: SourceCatalogEntry, baseURL: URL, to stage: URL) async throws -> SourcePackageSnapshot {
         var hashes: [String: String] = [:]
         var total = 0
         for file in entry.files {
             try Task.checkCancellation()
-            guard let url = URL(string: file.url, relativeTo: baseURL)?.absoluteURL else { throw SourcePackageError.invalid("A catalog file URL is invalid.") }
-            if !baseURL.isFileURL {
-                guard !url.isFileURL else { throw SourcePackageError.invalid("A remote catalog cannot read local files.") }
-                let localBase = ["localhost", "127.0.0.1", "::1", "[::1]"].contains(baseURL.host?.lowercased() ?? "")
-                try SourceDownloadTransport.validateURL(url, localBaseAllowed: localBase)
-            }
-            let data = try await transport.read(url, maximumBytes: SourcePackageRules.maximumFileBytes)
+            let data = try await transport.readSourceFile(file, relativeTo: baseURL, maximumBytes: SourcePackageRules.maximumFileBytes)
             total += data.count
-            guard total <= SourcePackageRules.maximumPackageBytes,
-                  SourcePackageRules.digest(data) == file.sha256.lowercased(), file.size.map({ $0 == data.count }) ?? true else {
-                throw SourcePackageError.invalid("A downloaded source file failed its SHA-256/size check. No partial extension was installed.")
+            guard total <= SourcePackageRules.maximumPackageBytes else {
+                throw SourcePackageError.invalid("The source package is too large.")
             }
             let target = stage.appendingPathComponent(file.path)
             try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true,
@@ -121,13 +223,12 @@ public struct SourcePackageStore: @unchecked Sendable {
               candidate.manifest.displayName == entry.displayName, candidate.manifest.summary == entry.summary,
               candidate.fileHashes == hashes else { throw SourcePackageError.invalid("The downloaded source manifest does not match its catalog entry.") }
         try Task.checkCancellation()
-        if FileManager.default.fileExists(atPath: destination.path) { return try snapshot(for: entry.identifier) }
-        return try activate(stage: stage, destination: destination, identifier: entry.identifier, hashes: hashes)
+        return candidate
     }
 
-    private func createStage() throws -> URL {
+    private func createStage(prefix: String = ".source-install-") throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let stage = directory.appendingPathComponent(".source-install-" + UUID().uuidString, isDirectory: true)
+        let stage = directory.appendingPathComponent(prefix + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         return stage
     }
@@ -136,10 +237,16 @@ public struct SourcePackageStore: @unchecked Sendable {
         guard candidate.manifest.identifier == identifier, candidate.fileHashes == hashes else {
             throw SourcePackageError.invalid("The source package changed during installation.")
         }
-        let receipt = SourcePackageReceipt(identifier: identifier, version: candidate.manifest.version, hashes: hashes)
-        try JSONEncoder().encode(receipt).write(to: stage.appendingPathComponent(SourcePackageRules.receiptName), options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: stage.appendingPathComponent(SourcePackageRules.receiptName).path)
+        try writeReceipt(for: candidate)
         try FileManager.default.moveItem(at: stage, to: destination)
         return try SourcePackageInspector.snapshot(at: destination)
+    }
+
+    private func writeReceipt(for snapshot: SourcePackageSnapshot) throws {
+        let receipt = SourcePackageReceipt(identifier: snapshot.manifest.identifier, version: snapshot.manifest.version,
+                                           hashes: snapshot.fileHashes)
+        let url = snapshot.rootURL.appendingPathComponent(SourcePackageRules.receiptName)
+        try JSONEncoder().encode(receipt).write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

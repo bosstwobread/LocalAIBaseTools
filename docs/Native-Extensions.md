@@ -16,6 +16,8 @@ Native Swift is trusted code running as the current user. It can import macOS fr
 
 Create an ordinary folder containing these files. The host supplies its SDK while compiling; do not bundle a duplicate SDK or a compiled binary in the editable package.
 
+The optional manifest `icon` can point to a small static PNG for MacHelper’s settings UI. Include it in the inventory alongside the source. MacHelper renders the icon and supplies UTF-8 resources to the worker.
+
 ```text
 NativeGreeting/
 ├── extension.json

@@ -73,6 +73,25 @@ public enum SourceCatalogLoader {
         try catalog.validate()
         return catalog
     }
+
+    public static func loadManifest(for entry: SourceCatalogEntry, relativeTo baseURL: URL,
+                                    session: URLSession = .shared) async throws -> SourceExtensionManifest {
+        try entry.validate()
+        guard let manifestFile = entry.files.first(where: { $0.path == "extension.json" }) else {
+            throw SourcePackageError.invalid("The tool manifest is missing from this catalog.")
+        }
+        let transport = SourceDownloadTransport(session: session)
+        let data = try await transport.readSourceFile(manifestFile, relativeTo: baseURL, maximumBytes: 64 * 1024)
+        let manifest = try JSONDecoder().decode(SourceExtensionManifest.self, from: data)
+        try manifest.validate()
+        let paths = Set(entry.files.map(\.path))
+        guard manifest.identifier == entry.identifier, manifest.version == entry.version,
+              manifest.displayName == entry.displayName, manifest.summary == entry.summary,
+              paths.contains(manifest.entryPoint), manifest.settingsSchema.map(paths.contains) ?? true else {
+            throw SourcePackageError.invalid("The tool manifest does not match the catalog or its complete source inventory.")
+        }
+        return manifest
+    }
 }
 
 /// Downloads source only. It has no credential, cookie, proxy, cache, or redirect
@@ -100,6 +119,23 @@ final class SourceDownloadTransport: @unchecked Sendable {
         guard host != nil, (scheme == "https" || (scheme == "http" && local && localBaseAllowed)) else {
             throw SourcePackageError.invalid("Source downloads require HTTPS. Local files and loopback HTTP are supported for development.")
         }
+    }
+
+    func readSourceFile(_ file: SourceCatalogFile, relativeTo baseURL: URL, maximumBytes: Int) async throws -> Data {
+        guard let url = URL(string: file.url, relativeTo: baseURL)?.absoluteURL else {
+            throw SourcePackageError.invalid("A catalog file URL is invalid.")
+        }
+        if !baseURL.isFileURL {
+            guard !url.isFileURL else { throw SourcePackageError.invalid("A remote catalog cannot read local files.") }
+            let localBase = ["localhost", "127.0.0.1", "::1", "[::1]"].contains(baseURL.host?.lowercased() ?? "")
+            try Self.validateURL(url, localBaseAllowed: localBase)
+        }
+        let data = try await read(url, maximumBytes: maximumBytes)
+        guard SourcePackageRules.digest(data) == file.sha256.lowercased(),
+              file.size.map({ $0 == data.count }) ?? true else {
+            throw SourcePackageError.invalid("A downloaded source file failed its SHA-256/size check. No partial extension was installed.")
+        }
+        return data
     }
 
     func read(_ url: URL, maximumBytes: Int) async throws -> Data {
