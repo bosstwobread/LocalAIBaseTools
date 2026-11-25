@@ -173,6 +173,64 @@
   @keyframes revision-replacement { 0% { opacity:0; } 76%,100% { opacity:1; } }
   @keyframes revision-review-step { 0%,27%,72%,100% { opacity:.4; } 32%,65% { opacity:1; } }
   @keyframes revision-apply-step { 0%,65% { opacity:.4; } 72%,100% { opacity:1; } }
+
+  .captions-demo {
+    display:grid; gap:12px; height:auto; padding:clamp(12px,3%,20px); container-type:inline-size;
+    background:#e8ece8;
+  }
+  .captions-demo > .stage-topline { position:relative; inset:auto; color:#354d4a; }
+  .captions-demo > .demo-canvas { position:relative; inset:auto; direction:inherit; }
+  .captions-player {
+    position:relative; isolation:isolate; aspect-ratio:16/9; min-height:196px; overflow:hidden;
+    border-radius:12px; background:radial-gradient(ellipse at 72% 36%,#ffdb9a8c,transparent 45%),
+      linear-gradient(#375359 0%,#91b7ac 42%,#e7c797 65%,#658d7e 65%,#365e60 100%);
+  }
+  .captions-terrain { position:absolute; inset:0; z-index:-1; }
+  .captions-terrain::before,.captions-terrain::after { content:''; position:absolute; inset:0; }
+  .captions-terrain::before {
+    clip-path:polygon(0 51%,11% 45%,19% 50%,39% 33%,50% 39%,62% 34%,82% 50%,90% 47%,100% 52%,100% 70%,0 71%);
+    background:linear-gradient(148deg,#416769,#7c9b86 68%,#a3a990);
+  }
+  .captions-terrain::after {
+    clip-path:polygon(0 54%,12% 47%,30% 59%,56% 68%,69% 62%,83% 59%,100% 50%,100% 100%,0 100%);
+    background:radial-gradient(ellipse at 69% 65%,#b2b18a75,transparent 42%),linear-gradient(#315c54,#507e78 71%,#213b40);
+  }
+  .captions-timeline {
+    position:absolute; inset-inline:4%; bottom:14px; height:3px; border-radius:3px;
+    background:linear-gradient(90deg,#f3e2ad 31%,#ffffff44 31%); pointer-events:none;
+  }
+  .captions-text,.captions-meaning {
+    border:1px solid #ffffff38; border-radius:9px; color:#f7f6f2; background:#182222e6;
+    box-shadow:0 5px 15px #14253244; backdrop-filter:blur(12px);
+  }
+  .captions-text {
+    position:absolute; left:50%; bottom:30px; width:max-content; max-width:calc(100% - 28px);
+    padding:7px 12px; transform:translate(-50%,var(--caption-offset,0px)); text-align:center; line-height:1.42;
+  }
+  .captions-text[tabindex] { cursor:ns-resize; touch-action:none; user-select:none; }
+  .captions-original { font-size:clamp(13px,3.1cqi,17px); font-weight:650; }
+  .captions-translated { margin-top:2px; color:#dbe7e3; font-size:clamp(12px,2.8cqi,15px); }
+  .captions-word {
+    display:inline; padding:0 2px; border:0; border-radius:3px; color:#f5dda3; background:#f5dda32b;
+    font:inherit; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:.16em;
+  }
+  button.captions-word:hover, button.captions-word[aria-expanded="true"] { color:#2d2a1e; background:#f5dda3; }
+  .captions-meaning {
+    position:absolute; top:12px; inset-inline-start:12px; width:clamp(150px,58%,240px); max-width:calc(100% - 24px);
+    padding:7px 10px 9px; font-size:12px; line-height:1.4; outline-offset:1px;
+  }
+  .captions-meaning-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .captions-meaning-header strong { font-size:13px; overflow-wrap:anywhere; }
+  .captions-close { padding:0 5px; border:0; color:#e0e8e4; background:transparent; font-size:17px; line-height:1.5; }
+  .captions-meaning p { color:#f4f6ef; text-align:start; }
+  .captions-player :focus-visible { outline-color:#f5dda3; outline-offset:2px; }
+  .captions-instructions { color:#405952; font-size:13px; line-height:1.55; }
+  .captions-demo.demo-playing .captions-text { animation:caption-lift 9s ease-in-out infinite; }
+  .captions-demo.demo-playing .captions-meaning { animation:demo-panel 9s ease-out infinite; }
+  @keyframes caption-lift {
+    0%,63%,100% { translate:0 0; }
+    75%,91% { translate:0 -14px; }
+  }
   .principles { display:flex; justify-content:space-between; gap:24px; padding-top:22px; padding-bottom:22px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); font-size:12px; color:#66705f; }
   .principles>span { display:flex; align-items:center; gap:12px; }
   .principles i { font-style:normal; color:var(--blue); font-size:19px; }

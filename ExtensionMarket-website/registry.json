@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "extensions": [
     "https://github.com/bosstwobread/LocalAIBaseTools/tree/ec371a870e017045a14524d5be32a974d4b11b1f/Extensions/Translation",
-    "https://github.com/bosstwobread/LocalAIBaseTools/tree/ec371a870e017045a14524d5be32a974d4b11b1f/Extensions/Polish-input"
+    "https://github.com/bosstwobread/LocalAIBaseTools/tree/ec371a870e017045a14524d5be32a974d4b11b1f/Extensions/Polish-input",
+    "https://github.com/bosstwobread/OnlineSubtitle-MacHelper/tree/ed47163e5a13d9aacf6a5f3847879bff8ce93b75/MacHelperExtension"
   ]
 }

@@ -83,14 +83,14 @@ test('search, direct DOM reset click, category and platform filters stay consist
     assert.equal(view.document.querySelector('#platform').value, 'all');
     assert.equal(count(), catalog.extensions.length);
     input(view, '#category', 'Translation', 'change');
-    assert.equal(count(), 1);
+    assert.equal(count(), catalog.extensions.filter(tool => tool.category === 'Translation').length);
     input(view, '#platform', 'Chrome', 'change');
-    assert.equal(count(), 0);
+    assert.equal(count(), catalog.extensions.filter(tool => tool.category === 'Translation' && tool.platforms.includes('Chrome')).length);
     view.document.querySelector('#clear-filters').click();
     assert.equal(count(), catalog.extensions.length);
     input(view, '#platform', 'macOS', 'change');
     assert.equal(count(), catalog.extensions.length);
-    assert.deepEqual(catalog.extensions.map(tool=>tool.slug).sort(), ['polish-input','translation']);
+    assert.ok(['polish-input', 'translation'].every(slug => catalog.extensions.some(tool => tool.slug === slug)));
     assert.ok(catalog.extensions.every(tool=>tool.kind==='mac-source'));
   } finally { view.close(); }
 });
@@ -329,8 +329,9 @@ test('browser language detection, explicit choice and storage failures have pred
 test('switching language updates marketing, filters, metadata and an open installation dialog without new fetches', async () => {
   const view = await page();
   try {
+    const translationCard = () => view.document.querySelector('a.card-visual[href="#extension/translation"]').closest('.extension-card');
     input(view, '#category', 'Translation', 'change');
-    view.document.querySelector('.card-install').click();
+    translationCard().querySelector('.card-install').click();
     await until(() => view.document.querySelector('#tool-dialog').open);
     const catalogURL = view.document.querySelector('#install-panel a[href^="machelper:"]').href;
     input(view, '#site-language', 'zh-Hans', 'change');
@@ -339,10 +340,10 @@ test('switching language updates marketing, filters, metadata and an open instal
     assert.equal(view.document.querySelector('#search').placeholder, '搜索工具、功能、平台…');
     assert.equal(view.document.querySelector('#category').value, 'Translation');
     assert.equal(view.document.querySelector('#category option[value=Translation]').textContent, '翻译');
-    assert.equal(view.document.querySelectorAll('.extension-card').length, 1);
+    assert.equal(view.document.querySelectorAll('.extension-card').length, catalog.extensions.filter(tool => tool.category === 'Translation').length);
     assert.equal(view.document.querySelector('#install-panel').hidden, false);
     assert.equal(view.document.querySelector('#install-tab').textContent, '安装');
-    assert.match(view.document.querySelector('.card-summary').textContent, /可编辑/);
+    assert.match(translationCard().querySelector('.card-summary').textContent, /可编辑/);
     assert.match(view.document.querySelector('#install-panel').textContent, /审核/);
     assert.equal(view.document.querySelector('#install-panel a[href^="machelper:"]').href, catalogURL);
     assert.equal(view.document.querySelector('#dialog-title').textContent, 'Translation');
@@ -351,9 +352,9 @@ test('switching language updates marketing, filters, metadata and an open instal
     view.document.querySelector('.dialog-close').click();
     input(view, '#search', '上下文');
     // Search uses translated metadata as well as the canonical English source.
-    assert.equal(view.document.querySelectorAll('.extension-card').length, 0);
+    assert.equal(view.document.querySelector('a.card-visual[href="#extension/translation"]'), null);
     input(view, '#search', '单词');
-    assert.equal(view.document.querySelectorAll('.extension-card').length, 1);
+    assert.ok(translationCard());
     input(view, '#site-language', 'en', 'change');
     assert.equal(view.document.querySelector('#search').placeholder, 'Search tools, features, platforms…');
     assert.match(view.document.querySelector('#hero-title').textContent, /Your AI/);
@@ -817,7 +818,7 @@ test('illustration copy and every preview location follow all interface language
     await until(() => view.document.querySelector('#tool-dialog').open);
     for (const code of interfaceLocales) {
       input(view, '#site-language', code, 'change');
-      for (const element of view.document.querySelectorAll('[data-preview-field]')) {
+      for (const element of view.document.querySelectorAll('.lookup-demo [data-preview-field], .revision-demo [data-preview-field]')) {
         const table = element.closest('.lookup-demo') ? lookupCopy : revisionCopy;
         assert.equal(element.textContent, table[code][element.dataset.previewField], `${code}: decorative illustration copy`);
       }
@@ -902,6 +903,75 @@ test('third-party lookup, image and icon-only previews render from catalog data'
     assert.equal(view.document.querySelector('.detail-preview img').src, imageURL);
     assert.equal(view.document.querySelector('.detail-preview figcaption').textContent, 'Example workflow');
     assert.equal(view.document.querySelector('.detail-preview figcaption').lang, 'en');
+    assert.equal(view.requests.length, 1);
+    assert.deepEqual(view.localRequests, []);
+  } finally { view.close(); }
+});
+
+test('caption demos keep the original language and support private, keyboard-accessible lookup and dragging', async () => {
+  const data = clone(catalog);
+  const sourceCaption = { language: 'es', before: 'Nos vemos en el ', word: 'banco', after: ' del parque.' };
+  const strings = Object.fromEntries(interfaceLocales.map(code => [code, {
+    description: `Sample instructions (${code})`, translatedCaption: `Translation (${code})`,
+    meaning: `Meaning (${code})`, close: `Close (${code})`, moveCaption: `Move (${code})`,
+    ...(code === 'es' ? { translationLanguage: 'en' } : {})
+  }]));
+  data.extensions.push({ id: 'example.captions', slug: 'example-captions', name: 'Caption example',
+    kind: 'mac-source', permissions: ['ai.transform', 'companion.message'],
+    preview: { schemaVersion: 1, layout: 'captions', sourceCaption, strings } });
+  const view = await page({ data });
+  try {
+    const card = view.document.querySelector('a[href="#extension/example-captions"] .captions-demo');
+    assert.ok(card.querySelector('.captions-meaning'));
+    assert.equal(card.querySelector('button'), null, 'Card previews must not nest controls in links.');
+    view.window.location.hash = '#extension/example-captions';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /automatically through approved browser companion commands/);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /Receive approved commands from the registered browser companion/);
+    for (const code of interfaceLocales) {
+      input(view, '#site-language', code, 'change');
+      const demo = view.document.querySelector('#overview-panel .captions-demo');
+      const caption = demo.querySelector('.captions-text');
+      const original = demo.querySelector('.captions-original');
+      const moved = () => caption.style.getPropertyValue('--caption-offset');
+      assert.equal(original.lang, 'es');
+      assert.equal(original.textContent, 'Nos vemos en el banco del parque.');
+      const translated = demo.querySelector('.captions-translated');
+      assert.equal(translated.textContent, strings[code].translatedCaption);
+      assert.equal(translated.lang, strings[code].translationLanguage || code);
+      assert.equal(translated.querySelector('button'), null);
+      assert.equal(caption.getAttribute('aria-label'), strings[code].moveCaption);
+      assert.equal(demo.querySelector('figcaption').textContent, strings[code].description);
+      const word = original.querySelector('button');
+      const popup = view.document.getElementById(word.getAttribute('aria-controls'));
+      assert.equal(popup.hidden, true);
+      word.click();
+      assert.equal(word.getAttribute('aria-expanded'), 'true');
+      assert.equal(view.document.activeElement, popup);
+      assert.equal(popup.querySelector('p').textContent, strings[code].meaning);
+      assert.equal(popup.querySelector('button').getAttribute('aria-label'), strings[code].close);
+      popup.dispatchEvent(new view.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      assert.equal(popup.hidden, true);
+      assert.equal(view.document.activeElement, word);
+      Object.defineProperty(demo.querySelector('.captions-player'), 'clientHeight', { value: 220 });
+      Object.defineProperty(caption, 'offsetHeight', { value: 58 });
+      caption.dispatchEvent(new view.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      assert.equal(moved(), '-12px');
+      const pointer = (type, target, clientY) => {
+        const event = new view.window.MouseEvent(type, { button: 0, clientY, bubbles: true, cancelable: true });
+        Object.defineProperties(event, { pointerId: { value: 7 }, isPrimary: { value: true } });
+        target.dispatchEvent(event);
+      };
+      pointer('pointerdown', word, 150);
+      pointer('pointermove', caption, 120);
+      assert.equal(moved(), '-12px', 'Pressing an original word must not start a drag.');
+      pointer('pointerdown', caption, 150);
+      pointer('pointermove', caption, 120);
+      assert.equal(moved(), '-42px');
+      pointer('pointerup', caption, 120);
+      pointer('pointermove', caption, 90);
+      assert.equal(moved(), '-42px', 'Releasing the pointer ends dragging.');
+    }
     assert.equal(view.requests.length, 1);
     assert.deepEqual(view.localRequests, []);
   } finally { view.close(); }

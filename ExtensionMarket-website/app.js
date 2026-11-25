@@ -419,7 +419,11 @@
           h('figcaption', { lang: shot.captionLang }, (shot.captionLang ? shot.caption : t(shot.caption)) || t("Interface preview · Example content"))));
       }
     }
-    if (tool.permissions.length) main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")), h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission)))));
+    if (tool.permissions.length) {
+      const hasCompanion = tool.permissions.includes('companion.message');
+      main.append(h('h3', { class: 'detail-subheading' }, t("Access this tool uses")),
+        h('ul', { class: 'detail-list' }, tool.permissions.map(permission => h('li', {}, permissionLabel(permission, hasCompanion)))));
+    }
     const facts = h('dl', {}, h('dt', {}, t("Platforms")), h('dd', {}, tool.platforms.join(' · ')), h('dt', {}, t("Package")), h('dd', {}, tool.kind === 'mac-source' ? (tool.runtime === 'native' ? t("Editable native Swift source") : t("Editable JavaScript source")) : t("Browser extension ZIP")), h('dt', {}, t("Version")), h('dd', {}, tool.version || '—'));
     if (tool.updatedAt) {
       const date = new Date(`${String(tool.updatedAt).slice(0, 10)}T00:00:00`);
@@ -436,7 +440,9 @@
     }
     return h('div', { class: 'detail-grid' }, main, side);
   }
-  function permissionLabel(value) {
+  function permissionLabel(value, hasCompanion) {
+    if (value === 'ai.transform' && hasCompanion) return t('Send text to your shared AI connection, including automatically through approved browser companion commands.');
+    if (value === 'companion.message') return t('Receive approved commands from the registered browser companion.');
     return ({ 'selection.read': t("Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe."), 'selection.replace': t("Replace unchanged selected text in a supported editable field only when you click Apply."), 'selection.paste': t("When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
   }
   function installContent(tool) {
@@ -553,7 +559,7 @@
       h('div', { class: 'demo-output' }, content),
       h('div', { class: 'popover-footer' }, fieldNode('span', 'settings'), footerAction));
   }
-  function lookupIllustration(name) {
+  function lookupIllustration({ name }) {
     const source = h('p', { class: 'demo-source', dir: 'auto' },
       fieldNode('span', 'sentenceBefore'), fieldNode('mark', 'word'), fieldNode('span', 'sentenceAfter'));
     const editor = editorWindow(
@@ -568,7 +574,7 @@
       { d: 'M3 2 21 17 13 18 9 26Z', fill: '#263329', stroke: '#fff', 'stroke-width': '2', 'stroke-linejoin': 'round' });
     return [editor, panel, pointer];
   }
-  function revisionIllustration(name) {
+  function revisionIllustration({ name }) {
     const pen = picturePath({ width: '18', height: '18', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7',
       'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, { d: 'm4 16-1 5 5-1L20 8l-4-4L4 16Zm9-9 4 4M3 23h17' });
     const toolbar = h('div', { class: 'revision-toolbar' }, h('span', { class: 'revision-pen' }, pen), h('span', { class: 'revision-translate' }, 'A文'));
@@ -581,21 +587,90 @@
       fieldNode('span', 'copy', { class: 'copy-illustration' }), fieldNode('span', 'apply', { class: 'revision-apply' }));
     return [editor, resultPanel(name, h('span', { class: 'revision-ink' }, '✎'), revisionResult, actions)];
   }
+  function captionIllustration({ preview }, interactive, id) {
+    const source = preview.sourceCaption;
+    const word = h(interactive ? 'button' : 'mark', { class: 'captions-word',
+      type: interactive ? 'button' : null, 'aria-expanded': interactive ? 'false' : null,
+      'aria-controls': interactive ? `${id}-word-meaning` : null }, source.word);
+    const caption = h('div', { class: 'captions-text', tabindex: interactive ? '0' : null,
+      role: interactive ? 'group' : null, 'data-preview-label': interactive ? 'moveCaption' : null },
+        h('p', { class: 'captions-original', lang: source.language, dir: 'auto' }, source.before, word, source.after),
+        fieldNode('p', 'translatedCaption', { class: 'captions-translated', dir: 'auto' }));
+    const close = h(interactive ? 'button' : 'span', { class: 'captions-close',
+      type: interactive ? 'button' : null, 'data-preview-label': interactive ? 'close' : null }, '×');
+    const popup = h('div', { class: 'captions-meaning', id: `${id}-word-meaning`,
+      role: interactive ? 'region' : null, tabindex: interactive ? '-1' : null,
+      'aria-labelledby': interactive ? `${id}-word-heading` : null,
+      'aria-describedby': interactive ? `${id}-meaning-text` : null, hidden: interactive ? '' : null },
+      h('div', { class: 'captions-meaning-header' },
+        h('strong', { id: `${id}-word-heading`, lang: source.language, dir: 'auto' }, source.word), close),
+      fieldNode('p', 'meaning', { id: `${id}-meaning-text`, dir: 'auto' }));
+    const player = h('div', { class: 'captions-player' }, h('div', { class: 'captions-terrain', 'aria-hidden': 'true' }),
+      caption, popup, h('div', { class: 'captions-timeline', 'aria-hidden': 'true' }));
+    if (interactive) {
+      function showMeaning(open) {
+        popup.hidden = !open;
+        word.setAttribute('aria-expanded', String(open));
+        (open ? popup : word).focus({ preventScroll: true });
+      }
+      word.addEventListener('click', () => showMeaning(popup.hidden));
+      close.addEventListener('click', () => showMeaning(false));
+      player.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !popup.hidden) {
+          event.preventDefault();
+          event.stopPropagation();
+          showMeaning(false);
+        }
+      });
+      let offset = 0;
+      let drag = null;
+      function move(to) {
+        const room = Math.max(0, player.clientHeight - caption.offsetHeight - 52);
+        offset = Math.min(10, Math.max(-room, to));
+        caption.style.setProperty('--caption-offset', `${offset}px`);
+      }
+      caption.addEventListener('keydown', event => {
+        if (event.target !== caption || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        move(offset + (event.key === 'ArrowUp' ? -12 : 12));
+      });
+      caption.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || !event.isPrimary || word.contains(event.target)) return;
+        drag = { pointer: event.pointerId, start: event.clientY, offset };
+        caption.focus({ preventScroll: true });
+        caption.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      });
+      caption.addEventListener('pointermove', event => {
+        if (event.pointerId === drag?.pointer) move(drag.offset + event.clientY - drag.start);
+      });
+      for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        caption.addEventListener(type, event => {
+          if (event.pointerId === drag?.pointer) drag = null;
+        });
+      }
+    }
+    return player;
+  }
   function setupExtensionDemos() {
-    const layouts = new Map([['lookup', lookupIllustration], ['revision', revisionIllustration]]);
+    const layouts = new Map([['lookup', lookupIllustration], ['revision', revisionIllustration], ['captions', captionIllustration]]);
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const demos = new Map();
     let sequence = 0;
     function localize(demo, entry) {
       demo.querySelectorAll('[data-preview-field]').forEach(node => {
-        const { text, lang } = previewCopy(entry.preview, node.dataset.previewField);
+        const field = node.dataset.previewField;
+        const { text, lang } = previewCopy(entry.preview, field);
         node.textContent = text;
-        node.lang = lang;
+        node.lang = field === 'translatedCaption' ? entry.preview.strings[lang]?.translationLanguage || lang : lang;
+      });
+      demo.querySelectorAll('[data-preview-label]').forEach(node => {
+        node.setAttribute('aria-label', previewCopy(entry.preview, node.dataset.previewLabel).text);
       });
     }
     function update(demo, entry) {
       const insideDialog = demo.closest('dialog');
-      const playing = demo.isConnected && entry.visible && !document.hidden && !reducedMotion?.matches
+      const playing = !entry.interactive && demo.isConnected && entry.visible && !document.hidden && !reducedMotion?.matches
         && !demo.closest('[hidden]') && (!insideDialog || insideDialog.open) && (!dialog.open || insideDialog === dialog);
       demo.classList.toggle('demo-playing', Boolean(playing));
     }
@@ -613,17 +688,20 @@
       const render = layouts.get(preview?.layout);
       if (!render || preview.schemaVersion !== 1 || !preview.strings?.en
         || window.CSS?.supports?.('animation-name', 'none') === false) return null;
+      const captions = preview.layout === 'captions';
+      if (captions && (!preview.sourceCaption || typeof preview.sourceCaption.word !== 'string')) return null;
+      const interactive = captions && placement === 'detail';
       const id = `extension-demo-${++sequence}`;
-      const steps = ['selectStep', 'reviewStep', 'resultStep'].map((field, index) =>
+      const steps = captions ? null : ['selectStep', 'reviewStep', 'resultStep'].map((field, index) =>
         h('li', {}, h('span', { 'aria-hidden': 'true' }, `0${index + 1}`), fieldNode('span', field)));
       const demo = h('figure', {
         class: `hero-stage ${preview.layout}-demo demo-${placement}`, id,
         'aria-labelledby': `${id}-title`, 'aria-describedby': `${id}-summary`
       }, h('strong', { class: 'stage-topline', id: `${id}-title`, dir: 'auto' }, tool.name),
-      fieldNode('p', 'description', { class: 'sr-only', id: `${id}-summary` }),
-      h('div', { class: 'demo-canvas', 'aria-hidden': 'true' }, render(tool.name)),
-      h('ol', { class: 'demo-steps' }, steps));
-      const entry = { visible: !observer, preview };
+      h('div', { class: 'demo-canvas', 'aria-hidden': interactive ? null : 'true' }, render(tool, interactive, id)),
+      steps && h('ol', { class: 'demo-steps' }, steps),
+      fieldNode('figcaption', 'description', { class: interactive ? 'captions-instructions' : 'sr-only', id: `${id}-summary` }));
+      const entry = { visible: !observer, preview, interactive };
       demos.set(demo, entry);
       localize(demo, entry);
       observer?.observe(demo);

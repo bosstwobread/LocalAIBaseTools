@@ -12,8 +12,15 @@ PREVIEW_FIELDS = {
                    "meaning sentenceLabel sentenceTranslation settings copy selectStep reviewStep resultStep").split()),
     "revision": set(("description editorTitle draft result resultLabel settings copy apply "
                      "selectStep reviewStep resultStep").split()),
+    "captions": {"description", "translatedCaption", "meaning", "close", "moveCaption"},
     "image": {"description"},
 }
+
+
+def preview_language(value):
+    if not isinstance(value, str) or not LOCALE.fullmatch(value):
+        raise ValueError("Invalid marketplace preview language.")
+    return value
 
 
 def image_url(source, value):
@@ -31,7 +38,7 @@ def presentation(source, raw):
     value = json.loads(raw)
     if not isinstance(value, dict) or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
         raise ValueError("Unsupported marketplace preview schema.")
-    if set(value) - {"schemaVersion", "layout", "strings", "image", "fallbackImage", "icon", "category", "slug", "releaseZip"}:
+    if set(value) - {"schemaVersion", "layout", "strings", "image", "fallbackImage", "icon", "category", "slug", "releaseZip", "sourceCaption"}:
         raise ValueError("Unknown marketplace preview fields.")
     layout, strings = value.get("layout"), value.get("strings")
     if not isinstance(layout, str) or layout not in PREVIEW_FIELDS:
@@ -39,17 +46,33 @@ def presentation(source, raw):
     if not isinstance(strings, dict) or "en" not in strings or len(strings) > 32:
         raise ValueError("Marketplace preview needs English and at most 32 locale tables.")
     required = PREVIEW_FIELDS[layout]
-    allowed = required | ({"caption"} if layout == "image" else set())
+    optional_fields = {"image": {"caption"}, "captions": {"translationLanguage"}}
+    allowed = required | optional_fields.get(layout, set())
     for locale, table in strings.items():
         if not LOCALE.fullmatch(locale) or not isinstance(table, dict) or not required <= table.keys() <= allowed:
             raise ValueError("Invalid marketplace preview locale or text fields.")
         for key, copy in table.items():
-            if key in {"sentenceBefore", "sentenceAfter"} and isinstance(copy, str) and not copy.strip():
+            if key == "translationLanguage":
+                preview_language(copy)
+            elif key in {"sentenceBefore", "sentenceAfter"} and isinstance(copy, str) and not copy.strip():
                 if len(copy) > 80 or "\0" in copy:
                     raise ValueError("Invalid marketplace sentence fragment.")
             else:
                 text(copy, "marketplace preview text", 1000 if key == "description" else 360, 4000)
     preview = {"schemaVersion": 1, "layout": layout, "strings": strings}
+    if layout == "captions":
+        caption = value.get("sourceCaption")
+        if not isinstance(caption, dict) or set(caption) != {"language", "before", "word", "after"}:
+            raise ValueError("A captions preview requires one original caption and lookup word.")
+        preview_language(caption["language"])
+        for key in ("before", "after"):
+            fragment = caption[key]
+            if not isinstance(fragment, str) or "\0" in fragment or len(fragment.encode("utf-16-le")) > 480:
+                raise ValueError("Invalid marketplace source caption fragment.")
+        text(caption["word"], "marketplace lookup word", 80, 320)
+        preview["sourceCaption"] = caption
+    elif "sourceCaption" in value:
+        raise ValueError("Only the captions preview layout accepts an original caption.")
     if layout == "image":
         preview["image"] = image_url(source, value.get("image"))
     elif "image" in value:

@@ -84,7 +84,28 @@ class NativeSourcePackagingTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 presentation(source, json.dumps({**preview, "fallbackImage": invalid}))
 
+    def test_captions_preview_validates_static_original_and_translation_language(self):
+        source = Mock()
+        original = {"language": "es", "before": "Nos vemos en el ", "word": "banco", "after": " del parque."}
+        preview = {"schemaVersion": 1, "layout": "captions", "sourceCaption": original,
+                   "strings": {"en": dict.fromkeys(PREVIEW_FIELDS["captions"], "Example")}}
+        preview["strings"]["en"]["translationLanguage"] = "de"
+        result, _ = presentation(source, json.dumps(preview))
+        self.assertEqual(result, preview)
+        source.read.assert_not_called()
+        for caption in ({}, {**original, "extra": "value"}, {**original, "language": "<img>"},
+                        {**original, "before": None}, {**original, "after": "\0"}, {**original, "word": " "}):
+            with self.subTest(caption=caption), self.assertRaises(ValueError):
+                presentation(source, json.dumps({**preview, "sourceCaption": caption}))
+        preview["strings"]["en"]["translationLanguage"] = "invalid_ locale"
+        with self.assertRaises(ValueError):
+            presentation(source, json.dumps(preview))
+
     def test_standalone_github_extension_is_indexed_without_hosting_its_source(self):
+        self.manifest["permissions"].append("companion.message")
+        self.manifest["commands"].append({"identifier": "listen", "title": "Listen", "trigger": "companion"})
+        self.manifest["companion"] = {"chromeExtensionID": "abcdefghijklmnop" * 2}
+        self.write_manifest()
         commit = "1234567890abcdef1234567890abcdef12345678"
         source_url = f"https://github.com/independent/example/tree/{commit}"
         raw_prefix = f"https://raw.githubusercontent.com/independent/example/{commit}/"
@@ -127,6 +148,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
             self.assertEqual(tool["sourceUrl"], source_url)
             self.assertEqual(tool["preview"]["image"], raw_prefix + "marketplace/preview.png")
             self.assertEqual(tool["packageUrl"], "https://github.com/independent/example/releases/download/v1.0.0/native-example.macsource.zip")
+            self.assertIn("companion.message", tool["permissions"])
             self.assertEqual(discovery["extensions"][0]["description"], "A synthetic native tool.")
             expected = {path: data for path, data in files.items() if not path.startswith("marketplace/")}
             self.assertEqual({record["path"] for record in entry["files"]}, set(expected))
@@ -140,6 +162,40 @@ class NativeSourcePackagingTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.build()
             self.assertEqual((output / "catalog.json").read_bytes(), original)
+
+    def test_registered_companion_manifest_requires_permission_exact_id_and_command(self):
+        plain = {
+            **self.manifest,
+            "runtime": "javascript",
+            "entryPoint": "main.js",
+            "permissions": [],
+        }
+        files = {"main.js": b"// Synthetic JS source"}
+        chrome_id = "abcdefghijklmnop" * 2
+        command = {"identifier": "listen", "title": "Listen", "trigger": "companion"}
+        companion = {
+            **plain,
+            "permissions": ["companion.message"],
+            "commands": plain["commands"] + [command],
+            "companion": {"chromeExtensionID": chrome_id},
+        }
+        market.validate_registered_files(plain, files)
+        market.validate_registered_files(companion, files)
+        cases = [
+            {**plain, "companion": {"chromeExtensionID": chrome_id}},
+            {**plain, "permissions": ["companion.message"]},
+            {**plain, "commands": [command]},
+            {**companion, "permissions": []},
+            {**companion, "companion": None},
+            {**companion, "commands": plain["commands"]},
+        ]
+        for malformed in ({}, [], {"chromeExtensionID": 4}, {"chromeExtensionID": chrome_id + "\n"},
+                          {"chromeExtensionID": chrome_id.upper()}, {"chromeExtensionID": "q" * 32},
+                          {"chromeExtensionID": chrome_id[:-1]}):
+            cases.append({**companion, "companion": malformed})
+        for manifest in cases:
+            with self.subTest(manifest=manifest), self.assertRaisesRegex(ValueError, "[Cc]ompanion"):
+                market.validate_registered_files(manifest, files)
 
     def test_native_package_uses_unified_catalog_full_inventory_and_public_sdk(self):
         tools, _ = self.build()

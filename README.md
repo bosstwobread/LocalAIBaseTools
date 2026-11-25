@@ -86,7 +86,7 @@ Shared AI preferences are stored in the MacHelper support folder's `settings.jso
 
 The marketplace and MacHelper support English, Simplified Chinese, Traditional Chinese, Spanish, French, German, Japanese, Korean, Portuguese, Arabic, Hindi, Russian, and Italian. Choose a language in the website header or **MacHelper → General → Interface language**. The website initially follows browser preferences; MacHelper's **System language** follows macOS. Each remembers its own explicit choice. Arabic uses right-to-left layout. Language changes use bundled translations and make no AI requests.
 
-The collection cards and detail pages show animated examples of Translation and Polish-input. Each tool keeps its artwork and `marketplace/preview.json` with its source on GitHub. The website renders the shared layouts and selects localized text or a still illustration using the visitor’s language preference.
+The marketplace shows examples of Translation, Polish-input, and OnlineSubtitle. OnlineSubtitle’s demo lets visitors move bilingual captions and look up a Spanish word without contacting MacHelper or an AI service. Each tool keeps its artwork and `marketplace/preview.json` with its source on GitHub. The website renders the shared layouts and selects localized text or a still illustration using the visitor’s language preference.
 
 MacHelper updates its interface without restarting workers. Finish unsaved prompt/AI settings edits and pending operations before switching. Interface language is separate from Translation's target language, AI provider, and model. Source prompts, user text, model IDs, and code stay unchanged. The technical AI guide and provider/system diagnostics may remain in their original language.
 

@@ -146,7 +146,8 @@ def validate_source_files(manifest, files):
 def validate_registered_files(manifest, files):
     runtime = source_runtime(manifest)
     validate_source_files(manifest, files)
-    allowed = {"selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel"}
+    allowed = {"selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel",
+               "companion.message"}
     if runtime == "native":
         allowed.add("native.execute")
     declared = manifest["permissions"]
@@ -171,12 +172,23 @@ def validate_registered_files(manifest, files):
                 or identifier in identifiers or not isinstance(title, str) or not title.strip()
                 or len(title.encode("utf-8")) > 160
                 or any(unicodedata.category(char) in {"Cc", "Cf"} for char in title)
-                or trigger not in ("selection", "manual") or (trigger == "selection" and "selection.read" not in permissions)):
+                or trigger not in ("selection", "manual", "companion")
+                or (trigger == "selection" and "selection.read" not in permissions)):
             raise ValueError("Invalid registered extension command.")
         symbol = command.get("systemSymbolName")
         if symbol is not None and (not isinstance(symbol, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,99}", symbol)):
             raise ValueError("Invalid registered extension command icon.")
         identifiers.add(identifier)
+
+    companion = manifest.get("companion")
+    has_companion_permission = "companion.message" in permissions
+    has_companion_command = any(command["trigger"] == "companion" for command in commands)
+    if companion is not None or has_companion_permission or has_companion_command:
+        if not isinstance(companion, dict) or not has_companion_permission:
+            raise ValueError("Companion commands require a companion declaration and companion.message permission.")
+        chrome_id = companion.get("chromeExtensionID")
+        if not isinstance(chrome_id, str) or not re.fullmatch(r"[a-p]{32}", chrome_id) or not has_companion_command:
+            raise ValueError("A companion needs an exact Chrome extension ID and a companion command.")
 
 
 def digest(data):

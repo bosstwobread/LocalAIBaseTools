@@ -107,10 +107,11 @@ minimap. Apply still requires a verified edit target.
 - The collection cards and the **Overview** tabs render previews supplied by
   their extensions. The homepage hero uses the first usable preview in registry
   order. The setup steps and source-folder illustration apply to any extension.
-- Both previews loop in CSS over nine seconds. A shared visibility observer
+- Animated previews loop in CSS over nine seconds. A shared visibility observer
   starts each at 20% visibility and suspends it offscreen, in hidden tabs, or
   behind a dialog. Each preview has an accessible summary. Visitors who prefer
-  reduced motion see the completed example immediately.
+  reduced motion see the completed example immediately. The captions preview
+  offers an interactive example in Overview.
 - `marketplace.config.json`: site-wide settings, including the public URL,
   and MacHelper download metadata.
 - [Legacy marketplace packages](../legacy/MarketplacePackages/packages/) contain
@@ -270,7 +271,17 @@ strings as text. Publishers supply data and image assets.
 | --- | --- |
 | `lookup` | `description`, `editorTitle`, `documentHeading`, `sentenceBefore`, `word`, `sentenceAfter`, `meaningLabel`, `meaning`, `sentenceLabel`, `sentenceTranslation`, `settings`, `copy`, `selectStep`, `reviewStep`, `resultStep` |
 | `revision` | `description`, `editorTitle`, `draft`, `result`, `resultLabel`, `settings`, `copy`, `apply`, `selectStep`, `reviewStep`, `resultStep` |
+| `captions` | `description`, `translatedCaption`, `meaning`, `close`, `moveCaption`. This layout also requires a `sourceCaption` object. |
 | `image` | `description` and optional `caption`. This layout also requires an `image` path. |
+
+For `captions`, put the original sample in `sourceCaption` with a `language`
+tag, `before`, `word`, and `after` strings. The `word` opens the supplied
+`meaning` when clicked in Overview. The caption can move by dragging its
+background or pressing Up and Down while it has focus. Each locale supplies
+its own `translatedCaption` and may set `translationLanguage` if the sample
+translation uses a different language from the website. Use the localized
+`description` for interaction instructions. The demo uses only the authored
+sample and can be tried before installing anything.
 
 Optional `category` and `icon` fields customize the listing. Animated
 layouts can also declare `fallbackImage` for use when the animated preview
