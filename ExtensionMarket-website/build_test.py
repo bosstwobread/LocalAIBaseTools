@@ -101,6 +101,29 @@ class NativeSourcePackagingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             presentation(source, json.dumps(preview))
 
+    def test_captions_preview_validates_fixed_target_without_localized_samples(self):
+        source = Mock()
+        target = {"language": "zh-Hans", "text": "把水烧开。", "meaning": "这里指加热到沸腾。"}
+        preview = {
+            "schemaVersion": 1, "layout": "captions",
+            "sourceCaption": {"language": "en", "before": "", "word": "Boil", "after": " the water."},
+            "targetCaption": target,
+            "strings": {"en": {"description": "Try the sample", "close": "Close", "moveCaption": "Move captions"}},
+        }
+        result, _ = presentation(source, json.dumps(preview))
+        self.assertEqual(result, preview)
+        source.read.assert_not_called()
+        for invalid in (None, {}, {**target, "language": "invalid_tag"}, {**target, "meaning": " "},
+                        {**target, "text": "x" * 361}, {**target, "extra": "value"}):
+            with self.subTest(target=invalid), self.assertRaises(ValueError):
+                presentation(source, json.dumps({**preview, "targetCaption": invalid}))
+        conflicting = {**preview["strings"]["en"], "translatedCaption": "Boil the water."}
+        with self.assertRaises(ValueError):
+            presentation(source, json.dumps({**preview, "strings": {"en": conflicting}}))
+        with self.assertRaises(ValueError):
+            presentation(source, json.dumps({"schemaVersion": 1, "layout": "image", "targetCaption": target,
+                                             "strings": {"en": {"description": "Image"}}}))
+
     def test_standalone_github_extension_is_indexed_without_hosting_its_source(self):
         self.manifest["permissions"].append("companion.message")
         self.manifest["commands"].append({"identifier": "listen", "title": "Listen", "trigger": "companion"})

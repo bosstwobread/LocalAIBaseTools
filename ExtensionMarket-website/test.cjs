@@ -977,6 +977,50 @@ test('caption demos keep the original language and support private, keyboard-acc
   } finally { view.close(); }
 });
 
+test('fixed caption targets retain sample text and language when the interface changes', async () => {
+  const data = clone(catalog);
+  const sourceCaption = { language: 'en', before: '', word: 'Boil', after: ' the water.' };
+  const targetCaption = { language: 'zh-Hans', text: '把水烧开。', meaning: '这里指加热到沸腾。' };
+  const strings = {
+    en: { description: 'Try it', close: 'Close', moveCaption: 'Move captions' },
+    ar: { description: 'جرّب المثال', close: 'إغلاق', moveCaption: 'تحريك الترجمة' }
+  };
+  data.extensions.push({ id: 'example.fixed-captions', slug: 'fixed-captions', name: 'Fixed caption example',
+    kind: 'mac-source', preview: { schemaVersion: 1, layout: 'captions', sourceCaption, targetCaption, strings } });
+  const view = await page({ data });
+  try {
+    const card = view.document.querySelector('a[href="#extension/fixed-captions"] .captions-demo');
+    assert.equal(card.querySelector('.captions-translated').textContent, targetCaption.text);
+    view.window.location.hash = '#extension/fixed-captions';
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    for (const locale of ['en', 'ar']) {
+      input(view, '#site-language', locale, 'change');
+      const demo = view.document.querySelector('#overview-panel .captions-demo');
+      const original = demo.querySelector('.captions-original');
+      const translated = demo.querySelector('.captions-translated');
+      assert.equal(original.lang, 'en');
+      assert.equal(original.textContent, 'Boil the water.');
+      assert.equal(translated.lang, 'zh-Hans');
+      assert.equal(translated.getAttribute('dir'), 'auto');
+      assert.equal(translated.textContent, targetCaption.text);
+      assert.equal(demo.querySelector('figcaption').textContent, strings[locale].description);
+      assert.equal(demo.querySelector('.captions-text').getAttribute('aria-label'), strings[locale].moveCaption);
+      const word = original.querySelector('button');
+      word.click();
+      const popup = view.document.getElementById(word.getAttribute('aria-controls'));
+      const meaning = popup.querySelector('p');
+      assert.equal(popup.hidden, false);
+      assert.equal(meaning.lang, 'zh-Hans');
+      assert.equal(meaning.textContent, targetCaption.meaning);
+      const close = popup.querySelector('button');
+      assert.equal(close.getAttribute('aria-label'), strings[locale].close);
+      close.click();
+    }
+    assert.equal(view.requests.length, 1);
+    assert.deepEqual(view.localRequests, []);
+  } finally { view.close(); }
+});
+
 test('extension preview copy and markup come from the catalog renderer', () => {
   const dom = new JSDOM(html);
   try {

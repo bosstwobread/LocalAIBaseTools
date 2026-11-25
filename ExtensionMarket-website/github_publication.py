@@ -38,7 +38,7 @@ def presentation(source, raw):
     value = json.loads(raw)
     if not isinstance(value, dict) or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
         raise ValueError("Unsupported marketplace preview schema.")
-    if set(value) - {"schemaVersion", "layout", "strings", "image", "fallbackImage", "icon", "category", "slug", "releaseZip", "sourceCaption"}:
+    if set(value) - {"schemaVersion", "layout", "strings", "image", "fallbackImage", "icon", "category", "slug", "releaseZip", "sourceCaption", "targetCaption"}:
         raise ValueError("Unknown marketplace preview fields.")
     layout, strings = value.get("layout"), value.get("strings")
     if not isinstance(layout, str) or layout not in PREVIEW_FIELDS:
@@ -48,6 +48,8 @@ def presentation(source, raw):
     required = PREVIEW_FIELDS[layout]
     optional_fields = {"image": {"caption"}, "captions": {"translationLanguage"}}
     allowed = required | optional_fields.get(layout, set())
+    if layout == "captions" and "targetCaption" in value:
+        required = allowed = required - {"translatedCaption", "meaning"}
     for locale, table in strings.items():
         if not LOCALE.fullmatch(locale) or not isinstance(table, dict) or not required <= table.keys() <= allowed:
             raise ValueError("Invalid marketplace preview locale or text fields.")
@@ -71,8 +73,16 @@ def presentation(source, raw):
                 raise ValueError("Invalid marketplace source caption fragment.")
         text(caption["word"], "marketplace lookup word", 80, 320)
         preview["sourceCaption"] = caption
-    elif "sourceCaption" in value:
-        raise ValueError("Only the captions preview layout accepts an original caption.")
+        if "targetCaption" in value:
+            target = value["targetCaption"]
+            if not isinstance(target, dict) or set(target) != {"language", "text", "meaning"}:
+                raise ValueError("A fixed target caption requires a language, translation, and word meaning.")
+            preview_language(target["language"])
+            text(target["text"], "marketplace target caption", 360, 4000)
+            text(target["meaning"], "marketplace lookup meaning", 360, 4000)
+            preview["targetCaption"] = target
+    elif "sourceCaption" in value or "targetCaption" in value:
+        raise ValueError("Only the captions preview layout accepts source and target captions.")
     if layout == "image":
         preview["image"] = image_url(source, value.get("image"))
     elif "image" in value:

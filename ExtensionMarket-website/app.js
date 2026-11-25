@@ -589,13 +589,17 @@
   }
   function captionIllustration({ preview }, interactive, id) {
     const source = preview.sourceCaption;
+    const target = preview.targetCaption;
+    const translatedAttributes = { class: 'captions-translated', dir: 'auto' };
+    const meaningAttributes = { id: `${id}-meaning-text`, dir: 'auto' };
     const word = h(interactive ? 'button' : 'mark', { class: 'captions-word',
       type: interactive ? 'button' : null, 'aria-expanded': interactive ? 'false' : null,
       'aria-controls': interactive ? `${id}-word-meaning` : null }, source.word);
     const caption = h('div', { class: 'captions-text', tabindex: interactive ? '0' : null,
       role: interactive ? 'group' : null, 'data-preview-label': interactive ? 'moveCaption' : null },
         h('p', { class: 'captions-original', lang: source.language, dir: 'auto' }, source.before, word, source.after),
-        fieldNode('p', 'translatedCaption', { class: 'captions-translated', dir: 'auto' }));
+        target ? h('p', { ...translatedAttributes, lang: target.language }, target.text)
+          : fieldNode('p', 'translatedCaption', translatedAttributes));
     const close = h(interactive ? 'button' : 'span', { class: 'captions-close',
       type: interactive ? 'button' : null, 'data-preview-label': interactive ? 'close' : null }, '×');
     const popup = h('div', { class: 'captions-meaning', id: `${id}-word-meaning`,
@@ -604,7 +608,8 @@
       'aria-describedby': interactive ? `${id}-meaning-text` : null, hidden: interactive ? '' : null },
       h('div', { class: 'captions-meaning-header' },
         h('strong', { id: `${id}-word-heading`, lang: source.language, dir: 'auto' }, source.word), close),
-      fieldNode('p', 'meaning', { id: `${id}-meaning-text`, dir: 'auto' }));
+      target ? h('p', { ...meaningAttributes, lang: target.language }, target.meaning)
+        : fieldNode('p', 'meaning', meaningAttributes));
     const player = h('div', { class: 'captions-player' }, h('div', { class: 'captions-terrain', 'aria-hidden': 'true' }),
       caption, popup, h('div', { class: 'captions-timeline', 'aria-hidden': 'true' }));
     if (interactive) {

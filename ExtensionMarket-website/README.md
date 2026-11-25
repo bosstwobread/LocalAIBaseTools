@@ -159,10 +159,10 @@ Changing language updates navigation, explanations, search/filter labels,
 localized tool descriptions, access notices, installation steps, errors, and
 an open detail dialog. Search matches both translated and original metadata;
 category/platform values, filter selections, package URLs, and tool names stay
-stable. Arabic uses right-to-left reading order. Text inside animated and SVG
-previews follows the selected language, including the labels, captions,
-accessible descriptions, and sample results. The Polish-input example uses
-a draft and a revision in the same language.
+stable. Arabic uses right-to-left reading order. Preview controls and
+instructions follow the selected language, and examples can supply localized
+samples or keep an authored caption pair in its declared languages. The
+Polish-input example uses a draft and a revision in the same language.
 
 The technical AI guide and its downloadable reference documents remain English
 and are labelled accordingly. Source code, prompts, model IDs, and user data are
@@ -271,17 +271,20 @@ strings as text. Publishers supply data and image assets.
 | --- | --- |
 | `lookup` | `description`, `editorTitle`, `documentHeading`, `sentenceBefore`, `word`, `sentenceAfter`, `meaningLabel`, `meaning`, `sentenceLabel`, `sentenceTranslation`, `settings`, `copy`, `selectStep`, `reviewStep`, `resultStep` |
 | `revision` | `description`, `editorTitle`, `draft`, `result`, `resultLabel`, `settings`, `copy`, `apply`, `selectStep`, `reviewStep`, `resultStep` |
-| `captions` | `description`, `translatedCaption`, `meaning`, `close`, `moveCaption`. This layout also requires a `sourceCaption` object. |
+| `captions` | `description`, `close`, `moveCaption`, plus `translatedCaption` and `meaning` for a localized target. This layout also requires a `sourceCaption` object. |
 | `image` | `description` and optional `caption`. This layout also requires an `image` path. |
 
 For `captions`, put the original sample in `sourceCaption` with a `language`
 tag, `before`, `word`, and `after` strings. The `word` opens the supplied
 `meaning` when clicked in Overview. The caption can move by dragging its
-background or pressing Up and Down while it has focus. Each locale supplies
-its own `translatedCaption` and may set `translationLanguage` if the sample
-translation uses a different language from the website. Use the localized
-`description` for interaction instructions. The demo uses only the authored
-sample and can be tried before installing anything.
+background or pressing Up and Down while it has focus. For a fixed target,
+set `targetCaption` to an object with a `language` tag, translated `text`, and
+contextual `meaning`. The caption and meaning then stay in that language.
+For a localized target, supply `translatedCaption` and `meaning` in each
+locale and optionally set `translationLanguage` when the caption's language
+differs from that locale. Use the localized `description` for interaction
+instructions. The demo uses only the authored sample and can be tried before
+installing anything.
 
 Optional `category` and `icon` fields customize the listing. Animated
 layouts can also declare `fallbackImage` for use when the animated preview
