@@ -9,10 +9,12 @@ public final class CompanionService {
     public struct Route: Hashable, Sendable {
         public let extensionID: String
         public let companionID: String
+        public let browser: SourceCompanionBrowser
 
-        public init(extensionID: String, companionID: String) {
+        public init(extensionID: String, companionID: String, browser: SourceCompanionBrowser = .chrome) {
             self.extensionID = extensionID
             self.companionID = companionID
+            self.browser = browser
         }
     }
 
@@ -38,6 +40,8 @@ public final class CompanionService {
     private var endpoint: Endpoint?
     private var connections: [UUID: Connection] = [:]
     private var activeInvocations: [String: UUID] = [:]
+    private var safariStatusDeadlines: [Route: Task<Void, Never>] = [:]
+    public var onConnectivityChange: (() -> Void)?
 
     private enum Request {
         case watch(Route)
@@ -48,10 +52,18 @@ public final class CompanionService {
                   let type = object["type"] as? String, let extensionID = object["extension"] as? String,
                   extensionID.rangeOfCharacter(from: .controlCharacters) == nil,
                   (try? SourcePackageRules.validateIdentifier(extensionID)) != nil,
-                  let companionID = object["companion"] as? String, companionID.utf8.count == 32,
-                  companionID.utf8.allSatisfy({ (97...112).contains($0) }) else { throw Failure.invalid }
-            let route = Route(extensionID: extensionID, companionID: companionID)
-            let keys = Set(object.keys)
+                  let companionID = object["companion"] as? String else { throw Failure.invalid }
+            var keys = Set(object.keys)
+            // Version 1 requests from the original Chrome bridge omitted the browser.
+            let browser: SourceCompanionBrowser
+            if keys.remove("browser") != nil {
+                guard let name = object["browser"] as? String, let declared = SourceCompanionBrowser(rawValue: name) else {
+                    throw Failure.invalid
+                }
+                browser = declared
+            } else { browser = .chrome }
+            guard browser.acceptsIdentifier(companionID) else { throw Failure.invalid }
+            let route = Route(extensionID: extensionID, companionID: companionID, browser: browser)
             switch type {
             case "watchStatus" where keys == ["type", "extension", "companion"]:
                 self = .watch(route)
@@ -90,6 +102,7 @@ public final class CompanionService {
         var deadline: Task<Void, Never>?
         var invocation: Task<Void, Never>?
         var lastStatus: Bool?
+        var deliveredStatus = false
         var writingStatus = false
         var pendingStatus: Bool?
 
@@ -108,10 +121,19 @@ public final class CompanionService {
         self.invoke = invoke
     }
 
+    public func isConnected(_ route: Route) -> Bool {
+        safariStatusDeadlines[route] != nil ||
+            connections.values.contains { $0.role == .watcher(route) && $0.deliveredStatus }
+    }
+
     /// Keep a key with a nil generation to publish disabled status for an installed
     /// grant. Removing a key revokes it. Replacing a generation cancels its work.
     public func setRoutes(_ next: [Route: String?]) {
         routes = next
+        for route in Array(safariStatusDeadlines.keys) where next.index(forKey: route) == nil {
+            safariStatusDeadlines.removeValue(forKey: route)?.cancel()
+            if !isConnected(route) { onConnectivityChange?() }
+        }
         guard !next.isEmpty else { stopListener(); return }
         for id in Array(connections.keys) {
             guard let connection = connections[id] else { continue }
@@ -279,12 +301,32 @@ public final class CompanionService {
                 connection.deadline?.cancel()
                 connection.deadline = nil
                 connection.writingStatus = false
+                if !connection.deliveredStatus, case .watcher(let route) = connection.role {
+                    let wasConnected = self.isConnected(route)
+                    connection.deliveredStatus = true
+                    if route.browser == .safari { self.rememberSafariStatus(route) }
+                    if !wasConnected { self.onConnectivityChange?() }
+                }
                 if let pending = connection.pendingStatus {
                     connection.pendingStatus = nil
                     self.writeStatus(pending, id: id)
                 }
             }
         })
+    }
+
+    private func rememberSafariStatus(_ route: Route) {
+        // Safari's native extension completes a short message, then polls again while in use.
+        safariStatusDeadlines[route]?.cancel()
+        safariStatusDeadlines[route] = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(12))
+                try Task.checkCancellation()
+            } catch { return }
+            guard let self else { return }
+            self.safariStatusDeadlines.removeValue(forKey: route)
+            if !self.isConnected(route) { self.onConnectivityChange?() }
+        }
     }
 
     private func monitorDisconnect(_ connection: Connection, id: UUID) {
@@ -360,5 +402,8 @@ public final class CompanionService {
         connection.deadline?.cancel()
         connection.invocation?.cancel()
         connection.network.cancel()
+        if connection.deliveredStatus, case .watcher(let route) = connection.role, !isConnected(route) {
+            onConnectivityChange?()
+        }
     }
 }

@@ -184,11 +184,63 @@ def validate_registered_files(manifest, files):
     has_companion_permission = "companion.message" in permissions
     has_companion_command = any(command["trigger"] == "companion" for command in commands)
     if companion is not None or has_companion_permission or has_companion_command:
-        if not isinstance(companion, dict) or not has_companion_permission:
+        if not isinstance(companion, dict) or not has_companion_permission or not has_companion_command:
             raise ValueError("Companion commands require a companion declaration and companion.message permission.")
-        chrome_id = companion.get("chromeExtensionID")
-        if not isinstance(chrome_id, str) or not re.fullmatch(r"[a-p]{32}", chrome_id) or not has_companion_command:
-            raise ValueError("A companion needs an exact Chrome extension ID and a companion command.")
+        validate_browser_companions(companion)
+
+
+def validate_browser_companions(companion):
+    chrome_id, browsers = companion.get("chromeExtensionID"), companion.get("browsers")
+    if browsers is None and isinstance(chrome_id, str) and re.fullmatch(r"[a-p]{32}", chrome_id):
+        return
+    if chrome_id is not None or not isinstance(browsers, list) or not 1 <= len(browsers) <= 4:
+        raise ValueError("Declare one companion per browser or use the legacy Chrome extension identifier.")
+    identifiers = {
+        "chrome": r"[a-p]{32}",
+        "edge": r"[a-p]{32}",
+        "firefox": r"(?:[A-Za-z0-9._-]*@[A-Za-z0-9._-]+|\{[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\})",
+        "safari": r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+",
+    }
+    declared = set()
+    for item in browsers:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid browser companion descriptor.")
+        browser, identifier = item.get("browser"), item.get("identifier")
+        if (not isinstance(browser, str) or browser not in identifiers or browser in declared
+                or not isinstance(identifier, str) or len(identifier.encode("utf-8")) > (80 if browser == "firefox" else 128)
+                or not re.fullmatch(identifiers[browser], identifier)):
+            raise ValueError("Invalid or duplicate browser companion identity.")
+        declared.add(browser)
+        validate_browser_companion_links(browser, identifier, item)
+
+
+def validate_browser_companion_links(browser, identifier, item):
+    store = item.get("storeURL")
+    if store is not None:
+        store_patterns = {
+            "chrome": rf"chromewebstore\.google\.com/detail/(?:[A-Za-z0-9_-]+/)?{re.escape(identifier)}/?",
+            "edge": rf"microsoftedge\.microsoft\.com/addons/detail/(?:[A-Za-z0-9_-]+/)?{re.escape(identifier)}/?",
+            "firefox": r"addons\.mozilla\.org/(?:[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*/)?firefox/addon/[A-Za-z0-9_-]+/?",
+            "safari": r"apps\.apple\.com/(?:[A-Za-z]{2}/)?app/(?:[A-Za-z0-9_-]+/)?id[0-9]+/?",
+        }
+        if not isinstance(store, str) or len(store) > 2048 or not re.fullmatch("https://" + store_patterns[browser], store):
+            raise ValueError("A browser companion must link to its official store listing.")
+    source, package, checksum = (item.get(name) for name in ("sourceURL", "packageURL", "packageSHA256"))
+    if source is not None and not pinned_browser_source(source, raw=False):
+        raise ValueError("Browser companion source must be a pinned GitHub file or folder.")
+    if package is not None or checksum is not None:
+        if (browser == "safari" or not pinned_browser_source(package, raw=True)
+                or not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum)):
+            raise ValueError("The browser companion development package needs a pinned GitHub JSON file and SHA-256.")
+
+
+def pinned_browser_source(address, *, raw):
+    host = r"raw\.githubusercontent\.com" if raw else r"github\.com"
+    ref = r"[0-9a-f]{40}" if raw else r"(?:tree|blob)/[0-9a-f]{40}"
+    pattern = rf"https://{host}/[A-Za-z0-9-]{{1,39}}/[A-Za-z0-9_.-]{{1,100}}/{ref}(?:/[A-Za-z0-9_.-]+)+"
+    return (isinstance(address, str) and len(address) <= 2048 and re.fullmatch(pattern, address)
+            and all(part not in {".", ".."} for part in urlsplit(address).path.split("/"))
+            and (not raw or address.endswith(".json")))
 
 
 def digest(data):

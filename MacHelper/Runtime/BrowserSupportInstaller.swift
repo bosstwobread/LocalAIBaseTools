@@ -156,6 +156,140 @@ public struct BrowserSupportInstaller: Sendable {
     }
 }
 
+/// Native Messaging registration for source companions using MacHelper's scoped
+/// IPC. The standard AI browser host keeps its own separate manifest and binary.
+public struct ManagedCompanionInstaller: Sendable {
+    public static let hostName = "com.localaibasetools.companion"
+    private static let bridgeName = "mac-helper-companion"
+    private static let supportPath = "Library/Application Support/LocalAIBaseTools/BrowserCompanions"
+    private static let maximumArchiveBytes = 2 * 1024 * 1024
+    public let homeDirectory: URL
+
+    public init(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        self.homeDirectory = homeDirectory.standardizedFileURL
+    }
+
+    public func register(_ browser: SourceCompanionBrowser, identifiers: Set<String>, from appURL: URL) throws {
+        guard let directory = Self.manifestFolder(browser),
+              !identifiers.isEmpty, identifiers.count <= 128,
+              identifiers.allSatisfy(browser.acceptsIdentifier) else {
+            throw BrowserSupportError.invalid(L("The browser companion declaration is invalid."))
+        }
+        guard BrowserSupportInstaller.isInstalledApplication(appURL, homeDirectory: homeDirectory) else {
+            throw BrowserSupportError.notInstalled
+        }
+        let app = appURL.standardizedFileURL
+        let fromUserApplications = app.path.hasPrefix(homeDirectory.appendingPathComponent("Applications").path + "/")
+        let applications = fromUserApplications ? homeDirectory.appendingPathComponent("Applications") : URL(fileURLWithPath: "/Applications")
+        let relativeApp = String(app.path.dropFirst(applications.path.count + 1))
+        let maxBinaryBytes = 64 * 1024 * 1024
+        guard let binary = try BrowserSafeDirectory(root: applications).read(
+            relativeApp + "/Contents/MacOS/" + Self.bridgeName, maximum: maxBinaryBytes,
+            requireUserOwner: false, executable: true
+        ) else {
+            throw BrowserSupportError.invalid(L("This MacHelper build is missing its companion bridge."))
+        }
+        let home = try BrowserSafeDirectory(root: homeDirectory)
+        let executable = Self.supportPath + "/" + Self.bridgeName + "-" + browser.rawValue
+        let absoluteExecutable = homeDirectory.appendingPathComponent(executable).path
+        let path = directory + "/" + Self.hostName + ".json"
+        let allowedKey = browser == .firefox ? "allowed_extensions" : "allowed_origins"
+        let allowed = identifiers.sorted().map { browser == .firefox ? $0 : "chrome-extension://" + $0 + "/" }
+        let manifest: [String: Any] = [
+            "name": Self.hostName, "description": "MacHelper source companion bridge",
+            "path": absoluteExecutable, "type": "stdio", allowedKey: allowed,
+        ]
+        // Never replace a registration that points to a different, user-owned program.
+        let original = try home.read(path, maximum: 64 * 1024)
+        if let original {
+            guard let registered = try JSONSerialization.jsonObject(with: original) as? [String: Any],
+                  registered["name"] as? String == Self.hostName, registered["path"] as? String == absoluteExecutable,
+                  registered["type"] as? String == "stdio" else {
+                throw BrowserSupportError.invalid(L("An existing registration uses a different companion bridge."))
+            }
+        }
+        let oldBinary = try home.read(executable, maximum: maxBinaryBytes)
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+        try home.makePrivateDirectory(Self.supportPath)
+        if oldBinary != binary { try home.write(binary, path: executable, mode: 0o700) }
+        if original != data { try home.write(data, path: path, mode: 0o600) }
+    }
+
+    public func fetchDevelopmentPackage(_ companion: SourceBrowserCompanion) async throws -> Data {
+        try companion.validate()
+        guard let address = companion.packageURL, let url = URL(string: address),
+              let checksum = companion.packageSHA256 else {
+            throw BrowserSupportError.invalid(L("The browser companion declaration is invalid."))
+        }
+        let transport = SourceDownloadTransport(session: URLSession(configuration: .ephemeral))
+        let data = try await transport.read(url, maximumBytes: Self.maximumArchiveBytes)
+        guard SourcePackageRules.digest(data) == checksum else {
+            throw BrowserSupportError.invalid(L("The downloaded browser package failed verification."))
+        }
+        return data
+    }
+
+    public func stageDevelopmentPackage(_ data: Data, for companion: SourceBrowserCompanion, toolID: String) throws -> URL {
+        try SourcePackageRules.validateIdentifier(toolID)
+        try companion.validate()
+        let failure = BrowserSupportError.invalid(L("The downloaded browser package failed verification."))
+        guard let checksum = companion.packageSHA256,
+              data.count <= Self.maximumArchiveBytes, SourcePackageRules.digest(data) == checksum,
+              let archive = try? JSONDecoder().decode(DevelopmentPackage.self, from: data),
+              archive.schemaVersion == 1, (1...128).contains(archive.files.count),
+              Set(archive.files.keys.map { $0.lowercased() }).count == archive.files.count else { throw failure }
+        var files: [String: Data] = [:]
+        for (path, contents) in archive.files {
+            try SourcePackageRules.validatePath(path)
+            let kind = URL(fileURLWithPath: path).pathExtension.lowercased()
+            guard ["json", "js", "css", "html", "png"].contains(kind),
+                  let decoded = Data(base64Encoded: contents), decoded.count <= 512 * 1024 else { throw failure }
+            files[path] = decoded
+        }
+        guard let manifest = files["manifest.json"],
+              let object = try JSONSerialization.jsonObject(with: manifest) as? [String: Any],
+              object["manifest_version"] as? Int == 3,
+              (object["permissions"] as? [String])?.contains("nativeMessaging") == true,
+              Self.manifestIdentifier(object, browser: companion.browser) == companion.identifier else { throw failure }
+        let directory = Self.supportPath + "/Packages/" + toolID + "/" + companion.browser.rawValue + "/" + checksum
+        let home = try BrowserSafeDirectory(root: homeDirectory)
+        try home.makePrivateDirectory(directory)
+        // Publish the manifest last, so a browser cannot open a partially staged package.
+        for path in files.keys.sorted() where path != "manifest.json" {
+            if let contents = files[path] { try home.write(contents, path: directory + "/" + path, mode: 0o600) }
+        }
+        try home.write(manifest, path: directory + "/manifest.json", mode: 0o600)
+        return homeDirectory.appendingPathComponent(directory, isDirectory: true)
+    }
+
+    private struct DevelopmentPackage: Decodable {
+        let schemaVersion: Int
+        let files: [String: String]
+    }
+
+    private static func manifestFolder(_ browser: SourceCompanionBrowser) -> String? {
+        switch browser {
+        case .chrome: return "Library/Application Support/Google/Chrome/NativeMessagingHosts"
+        case .edge: return "Library/Application Support/Microsoft Edge/NativeMessagingHosts"
+        case .firefox: return "Library/Application Support/Mozilla/NativeMessagingHosts"
+        case .safari: return nil
+        }
+    }
+
+    private static func manifestIdentifier(_ object: [String: Any], browser: SourceCompanionBrowser) -> String? {
+        if browser == .firefox {
+            let settings = object["browser_specific_settings"] as? [String: Any]
+            return (settings?["gecko"] as? [String: Any])?["id"] as? String
+        }
+        guard browser == .chrome || browser == .edge, let key = object["key"] as? String,
+              let decoded = Data(base64Encoded: key), (1...8192).contains(decoded.count) else { return nil }
+        let alphabet = Array("abcdefghijklmnop")
+        return String(SourcePackageRules.digest(decoded).prefix(32).compactMap { digit in
+            digit.hexDigitValue.map { alphabet[$0] }
+        })
+    }
+}
+
 /// Descriptor-relative traversal rejects symlinks at every directory/file edge.
 /// Atomic rename publishes each complete file while existing browser processes
 /// can finish using the previous executable. No subprocess is launched here.

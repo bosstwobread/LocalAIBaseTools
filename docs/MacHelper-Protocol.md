@@ -30,7 +30,7 @@ When `systemPrompt` is supplied, `text` is opaque extension-prepared data and ma
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"6.8.0","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.9.0","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -38,7 +38,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"6.8.0","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.9.0","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.
@@ -53,7 +53,7 @@ Do not auto-send, paste without an approved, explicit Apply action, collect enti
 
 ### Local companion protocol (MacHelper 6.8.0)
 
-The companion project owns its Chrome Native Messaging registration and bridge. Register only its exact Chrome origin and verify the origin Chrome supplies before forwarding a message. The bridge is a same-user local client. MacHelper rechecks the declared extension ID and approved command scope. Its socket is separate from website discovery and the legacy framed host.
+MacHelper 6.8 Chrome companions register their own bridge. MacHelper 6.9 supplies the `com.localaibasetools.companion` Native Messaging host for Chrome, Edge, and Firefox after managed setup. Browser code sends `{"type":"invoke","extension":"com.example.tool","command":"receive","payload":"..."}` or `{"type":"watchStatus","extension":"com.example.tool"}` to that host. MacHelper's executable derives the browser and companion identity from its registration and browser-supplied launch arguments. The browser message has no caller identity fields. MacHelper rechecks the exact identity and approved scope. Its socket is separate from website discovery and the legacy framed host.
 
 Resolve the macOS per-user temporary directory using `confstr(_CS_DARWIN_USER_TEMP_DIR)` and open `mh-companion/endpoint` in that directory. The app creates the directory with mode `0700`. The regular endpoint file contains a generated socket basename of 32 lowercase hexadecimal characters followed by `.sock`. Verify same-user ownership and file types, and refuse symlinks. Connect to the Unix socket in the same directory.
 
@@ -64,6 +64,8 @@ Frames use a four-byte little-endian length followed by UTF-8 JSON. The complete
 ```
 
 The result is `{"ok":true,"payload":"..."}` with the worker’s `text` string. Errors use `{"ok":false,"error":"..."}` with `invalid`, `unavailable`, `busy`, or `failed`. Parallel work is bounded and each source extension has at most one in-flight companion command. Closing the connection, disabling the tool, pausing MacHelper, or replacing the worker generation cancels pending work.
+
+The managed bridge adds a `"browser"` field with `chrome`, `edge`, `firefox`, or `safari` to its broker frame. Legacy frames without the field use the Chrome route. Safari packages handle Native Messaging through their own signed app extension and containing app. That adapter sends the exact approved Safari identity to MacHelper. The native protocol supports a one-response Safari status check for adapters that use Safari's one-shot messaging API.
 
 A separate connection can send `{"type":"watchStatus","extension":"com.example.tool","companion":"abcdefghijklmnopabcdefghijklmnop"}`. It receives `{"type":"status","enabled":true}` or `{"type":"status","enabled":false}` immediately and when effective state changes. It can remain open while the approved source is installed. Changing or removing its scope closes the connection. The bridge should reconnect and request fresh status after disconnect.
 
@@ -81,7 +83,7 @@ This native action remains available for compatible local clients, including his
 {
   "id": "discovery-example",
   "ok": true,
-  "version": "6.8.0",
+  "version": "6.9.0",
   "search": {
     "revision": "<64 lowercase hexadecimal characters>",
     "updatedAt": "2026-11-17T00:00:00Z",

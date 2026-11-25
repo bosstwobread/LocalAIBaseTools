@@ -28,7 +28,7 @@ Localize visible interface text inside any artwork your tool or its listing supp
 
 JavaScript has no arbitrary file, network, shell, audio-recording, or native framework API. Native code runs as a trusted executable under the current user and requires the additional `native.execute` approval. A separate process is not an operating-system sandbox. Use native code only for a concrete need and keep automatic inference, client-message submission, and unrelated data access out of extension behavior. Legacy schema-1 `.machextension` bundles need migration to the new source SDK; their `NSViewController` interface cannot be copied across the process boundary.
 
-Build an extension with its own source folder and the installed MacHelper app. Swift uses the public SDK bundled in the app or downloaded from the extension guide. A tool with a local Chrome companion can declare [reviewed companion commands](docs/Source-Extensions.md#local-browser-companions-machelper-680) while keeping its bridge, request format, and prompts in its own project. The website’s discovery connection serves marketplace search.
+Build an extension with its own source folder and the installed MacHelper app. Swift uses the public SDK bundled in the app or downloaded from the extension guide. A tool with a browser companion declares its supported browsers and [reviewed companion commands](docs/Source-Extensions.md#local-browser-companions-machelper-680). Publish the companion source alongside the tool and supply verified setup links. MacHelper handles browser detection and setup. The tool owns its browser code, request format, and prompts. The website’s discovery connection serves marketplace search.
 
 ## 2. Small complete source example
 

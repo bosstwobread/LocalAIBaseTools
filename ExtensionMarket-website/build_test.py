@@ -220,6 +220,32 @@ class NativeSourcePackagingTests(unittest.TestCase):
             with self.subTest(manifest=manifest), self.assertRaisesRegex(ValueError, "[Cc]ompanion"):
                 market.validate_registered_files(manifest, files)
 
+    def test_browser_companion_declarations_pin_exact_install_and_development_sources(self):
+        identity = "abcdefghijklmnop" * 2
+        commit = "a" * 40
+        raw = f"https://raw.githubusercontent.com/example/source/{commit}/browser.json"
+        guide = f"https://github.com/example/source/blob/{commit}/README.md"
+        chrome = {
+            "browser": "chrome", "identifier": identity,
+            "storeURL": "https://chromewebstore.google.com/detail/example/" + identity,
+            "packageURL": raw, "packageSHA256": "b" * 64, "sourceURL": guide,
+        }
+        safari = {"browser": "safari", "identifier": "org.example.safari", "sourceURL": guide}
+        market.validate_browser_companions({"browsers": [
+            chrome, {"browser": "edge", "identifier": identity}, safari,
+            {"browser": "firefox", "identifier": "@example"},
+        ]})
+        for items in (
+            [chrome, chrome],
+            [{**chrome, "storeURL": chrome["storeURL"].replace(identity, "a" * 32)}],
+            [{**chrome, "packageURL": raw.replace(commit, "main")}],
+            [{**chrome, "sourceURL": guide.replace("/README.md", "/../README.md")}],
+            [{**chrome, "packageSHA256": None}],
+            [{**safari, "packageURL": raw, "packageSHA256": "b" * 64}],
+        ):
+            with self.subTest(items=items), self.assertRaises(ValueError):
+                market.validate_browser_companions({"browsers": items})
+
     def test_native_package_uses_unified_catalog_full_inventory_and_public_sdk(self):
         tools, _ = self.build()
         self.assertEqual(len(tools), 1)

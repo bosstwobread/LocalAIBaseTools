@@ -92,13 +92,17 @@ final class SourceExtensionManager {
     private var started = false
     private var selectionActionsEnabled = true
     private lazy var selectionCapability = SelectionActionCapability(title: "MacHelper")
-    private lazy var companionService = CompanionService(directory: companionSocketDirectory,
-        authorize: { [weak self] route, generation, command in
-            self?.companionRuntime(route, generation: generation, command: command) != nil
-        }, invoke: { [weak self] route, generation, command, payload in
-            guard let self else { throw CompanionService.Failure.unavailable }
-            return try await self.performCompanionCommand(route, generation: generation, command: command, payload: payload)
-        })
+    private lazy var companionService: CompanionService = {
+        let service = CompanionService(directory: companionSocketDirectory,
+            authorize: { [weak self] route, generation, command in
+                self?.companionRuntime(route, generation: generation, command: command) != nil
+            }, invoke: { [weak self] route, generation, command, payload in
+                guard let self else { throw CompanionService.Failure.unavailable }
+                return try await self.performCompanionCommand(route, generation: generation, command: command, payload: payload)
+            })
+        service.onConnectivityChange = { [weak self] in self?.onChange?() }
+        return service
+    }()
     private var languageObserver: NSObjectProtocol?
 
     private struct State: Codable {
@@ -1032,29 +1036,40 @@ final class SourceExtensionManager {
         !headless && snapshot.manifest.permissions.contains("selection.read") && snapshot.manifest.permissions.contains("ui.panel") &&
             snapshot.manifest.commands.contains { $0.trigger == "selection" }
     }
-    private func retainsCompanionGrant(for route: CompanionService.Route) -> Bool {
-        let id = route.extensionID
+    func approvedBrowserCompanions(for id: String) -> [SourceBrowserCompanion] {
+        guard state.enabled[id] == true else { return [] }
+        return retainedCompanionGrant(for: id)?.browserCompanions ?? []
+    }
+
+    func hasConnectedBrowserCompanion(for id: String, browser: SourceCompanionBrowser) -> Bool {
+        guard let companion = approvedBrowserCompanions(for: id).first(where: { $0.browser == browser }) else { return false }
+        return companionService.isConnected(.init(extensionID: id, companionID: companion.identifier, browser: browser))
+    }
+
+    private func retainedCompanionGrant(for id: String) -> SourceCompanionGrant? {
         guard !shuttingDown, state.permissions[id]?.contains(SourceCompanionGrant.permission) == true,
-              let grant = state.companionGrants?[id], grant.chromeExtensionID == route.companionID,
+              let grant = state.companionGrants?[id],
               let source = sourceURL(for: id),
               let directory = try? source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-              directory.isDirectory == true, directory.isSymbolicLink != true else { return false }
+              directory.isDirectory == true, directory.isSymbolicLink != true else { return nil }
         let url = source.appendingPathComponent("extension.json")
         let limit = 64 * 1024
         guard let file = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
               file.isRegularFile == true, file.isSymbolicLink != true, (file.fileSize ?? limit + 1) <= limit,
               let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= limit,
               let manifest = try? JSONDecoder().decode(SourceExtensionManifest.self, from: data),
-              manifest.identifier == id, (try? manifest.validate()) != nil else { return false }
-        return manifest.companionGrant == grant
+              manifest.identifier == id, (try? manifest.validate()) != nil,
+              manifest.companionGrant == grant else { return nil }
+        return grant
     }
 
     private func companionRuntime(_ route: CompanionService.Route, generation: String, command: String?) -> Running? {
         let id = route.extensionID
         guard selectionActionsEnabled, state.enabled[id] == true, let runtime = active[id],
               runtime.activationGeneration == generation,
-              let grant = runtime.snapshot.manifest.companionGrant, grant == state.companionGrants?[id],
-              command.map(grant.commands.contains) ?? true, retainsCompanionGrant(for: route) else { return nil }
+              let grant = retainedCompanionGrant(for: id), runtime.snapshot.manifest.companionGrant == grant,
+              command.map(grant.commands.contains) ?? true,
+              grant.browserCompanions.contains(where: { $0.browser == route.browser && $0.identifier == route.companionID }) else { return nil }
         return runtime
     }
 
@@ -1089,12 +1104,14 @@ final class SourceExtensionManager {
     private func synchronizeCompanions() {
         guard !headless else { return }
         var routes: [CompanionService.Route: String?] = [:]
-        for (id, grant) in state.companionGrants ?? [:] {
-            let route = CompanionService.Route(extensionID: id, companionID: grant.chromeExtensionID)
-            guard retainsCompanionGrant(for: route) else { continue }
+        for id in (state.companionGrants ?? [:]).keys {
+            guard let grant = retainedCompanionGrant(for: id) else { continue }
             let runtime = active[id]
             let enabled = selectionActionsEnabled && state.enabled[id] == true && runtime?.snapshot.manifest.companionGrant == grant
-            routes.updateValue(enabled ? runtime?.activationGeneration : nil, forKey: route)
+            for companion in grant.browserCompanions {
+                let route = CompanionService.Route(extensionID: id, companionID: companion.identifier, browser: companion.browser)
+                routes.updateValue(enabled ? runtime?.activationGeneration : nil, forKey: route)
+            }
             watch(id)
         }
         companionService.setRoutes(routes)

@@ -8,6 +8,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     typealias SourceFolderOpener = @MainActor ([URL], @escaping @MainActor (Error?) -> Void) -> Void
     typealias SourceUpdateReviewer = @MainActor (SourceExtensionUpdatePreview) -> Bool
     var onOpenMarketplace: (() -> Void)?
+    var onBrowserSetupAvailable: ((Bool) -> Void)?
 
     private let manager: SourceExtensionManager
     private let sourceFolderOpener: SourceFolderOpener?
@@ -54,6 +55,10 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let accessibilityButton = NSButton(title: L("Accessibility Settings…"), target: nil, action: nil)
     private let permissionRow = NSStackView()
     private let aiRow = NSStackView()
+    private let browserSetupRows = NSStackView()
+    private let browserDiscovery: BrowserCompanionDiscovery
+    private var browserSetupSignature: [String] = []
+    private var browserButtons: [ObjectIdentifier: SourceBrowserCompanion] = [:]
     private let settingsScroll = NSScrollView()
     private let settingsDocument = SourceSettingsDocumentView()
     private let detailStack = NSStackView()
@@ -84,12 +89,14 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private var requestedSelectionID: String?
 
     init(manager: SourceExtensionManager, sourceFolderOpener: SourceFolderOpener? = nil,
-         sourceUpdateReviewer: SourceUpdateReviewer? = nil) {
+         sourceUpdateReviewer: SourceUpdateReviewer? = nil, browserDiscovery: BrowserCompanionDiscovery? = nil) {
         self.manager = manager
         self.sourceFolderOpener = sourceFolderOpener
         self.sourceUpdateReviewer = sourceUpdateReviewer
+        self.browserDiscovery = browserDiscovery ?? BrowserCompanionDiscovery()
         super.init(nibName: nil, bundle: nil)
         manager.onChange = { [weak self] in self?.refreshDisplay() }
+        self.browserDiscovery.onChange = { [weak self] in self?.refreshDisplay() }
         manager.onApproveNativeExecution = { [weak self] manifest in
             guard self != nil else { return false }
             let alert = NSAlert()
@@ -121,10 +128,12 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             guard self != nil else { return false }
             let alert = NSAlert()
             alert.messageText = L("Allow a browser companion for “%@”?", manifest.displayName)
-            // Keep these exact identifiers legible in right-to-left interface languages.
-            let chromeID = "\u{2066}\(grant.chromeExtensionID)\u{2069}"
+            // Keep browser names and exact identifiers legible in RTL languages.
+            let identities = grant.browserCompanions.map {
+                "• \u{2066}\($0.browser.displayName) · \($0.identifier)\u{2069}"
+            }.joined(separator: "\n")
             let commands = grant.commands.sorted().map { "• \u{2066}\($0)\u{2069}" }.joined(separator: "\n")
-            var disclosure = L("Chrome extension %@ can request only these commands.\n\n%@\n\nDisable the extension in MacHelper or pause MacHelper to stop companion requests.", chromeID, commands)
+            var disclosure = L("These browser companion identities can request only the listed commands.\n\n%@\n\n%@\n\nDisable the extension in MacHelper or pause MacHelper to stop companion requests.", identities, commands)
             if grant.allowsAI {
                 disclosure += "\n\n" + L("These commands can send data automatically through your saved AI Connection. If you choose ChatGPT, it processes that data online.")
             }
@@ -304,6 +313,9 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         permissionRow.addArrangedSubview(accessibilityButton); permissionRow.addArrangedSubview(permissionStatus)
         permissionRow.spacing = 10; permissionRow.alignment = .centerY
         addFullWidth(permissionRow, to: detailStack)
+        configureList(browserSetupRows)
+        browserSetupRows.isHidden = true
+        addFullWidth(browserSetupRows, to: detailStack)
     }
 
     private func configureScroll(_ scroll: NSScrollView, document: NSView, stack: NSStackView,
@@ -358,6 +370,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     override func viewWillAppear() {
         super.viewWillAppear()
+        refreshBrowserDetection()
         refreshDisplay()
         permissionTimer?.invalidate()
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -373,6 +386,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private var busy: Bool { operationTask != nil }
     var hasPendingOperations: Bool { busy || !operations.isEmpty }
     var hasUnsavedPromptChanges: Bool { promptDrafts.values.contains { $0.isDirty } || !pendingValues.isEmpty }
+
+    func refreshBrowserDetection() { browserDiscovery.refresh() }
 
     func selectTool(_ id: String) {
         requestedSelectionID = id
@@ -390,6 +405,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     }
 
     func refreshDisplay() {
+        onBrowserSetupAvailable?(nextBrowserSetupTool != nil)
         guard isViewLoaded else { return }
         let tools = manager.tools
         for tool in tools {
@@ -447,9 +463,73 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         let permissions = selectedID.map { manager.permissions(for: $0) } ?? []
         permissionRow.isHidden = !permissions.contains("selection.read")
         aiRow.isHidden = !permissions.contains("ai.transform")
+        refreshBrowserSetup(for: selectedID)
         refreshPermission()
         updateEnabledControls()
         applyAppLanguageDirection(to: view)
+    }
+
+    var nextBrowserSetupTool: String? {
+        manager.tools.first { tool in
+            tool.isEnabled && manager.approvedBrowserCompanions(for: tool.id).contains { companion in
+                hasSetup(companion) && browserDiscovery.applications[companion.browser] != nil &&
+                    !manager.hasConnectedBrowserCompanion(for: tool.id, browser: companion.browser)
+            }
+        }?.id
+    }
+
+    private func hasSetup(_ companion: SourceBrowserCompanion) -> Bool {
+        companion.storeURL != nil || companion.packageURL != nil || companion.sourceURL != nil
+    }
+
+    private func refreshBrowserSetup(for toolID: String?) {
+        let companions = toolID.map { manager.approvedBrowserCompanions(for: $0).filter(hasSetup) } ?? []
+        browserSetupRows.isHidden = companions.isEmpty
+        let rows = companions.map { companion in
+            let installed = browserDiscovery.applications[companion.browser] != nil
+            let connected = toolID.map { manager.hasConnectedBrowserCompanion(for: $0, browser: companion.browser) } ?? false
+            let status = connected ? L("Connected") : installed ? L("Setup available") : L("Browser not installed")
+            return (companion, installed, status)
+        }
+        let heading = L("Browser Companions")
+        let action = L("Set Up…")
+        let signature = [toolID ?? "", heading, action] + rows.flatMap { companion, _, status in
+            [companion.browser.rawValue, companion.identifier, companion.storeURL ?? "", companion.packageURL ?? "",
+             companion.packageSHA256 ?? "", companion.sourceURL ?? "", status]
+        }
+        if signature == browserSetupSignature {
+            for view in browserSetupRows.arrangedSubviews {
+                (view as? NSStackView)?.arrangedSubviews.compactMap { $0 as? NSButton }.first?.isEnabled = !busy
+            }
+            return
+        }
+        browserSetupSignature = signature
+        for view in browserSetupRows.arrangedSubviews { view.removeFromSuperview() }
+        browserButtons.removeAll()
+        if companions.isEmpty { return }
+        browserSetupRows.addArrangedSubview(Self.label(heading, size: 15, weight: .semibold))
+        for (companion, installed, status) in rows {
+            let label = Self.label(companion.browser.displayName, size: 13, weight: .semibold)
+            let detail = Self.label(status, size: 12, color: .secondaryLabelColor)
+            let row = NSStackView(views: [label, detail, Self.flexibleSpace()])
+            if installed {
+                let setup = NSButton(title: action, target: self, action: #selector(setupBrowserCompanion(_:)))
+                setup.setAccessibilityLabel(L("Set Up Browser Companion in %@", companion.browser.displayName))
+                setup.isEnabled = !busy
+                browserButtons[ObjectIdentifier(setup)] = companion
+                row.addArrangedSubview(setup)
+            }
+            row.alignment = .centerY
+            row.spacing = 10
+            addFullWidth(row, to: browserSetupRows)
+        }
+    }
+
+    @objc private func setupBrowserCompanion(_ sender: NSButton) {
+        guard let id = selectedID, let companion = browserButtons[ObjectIdentifier(sender)] else { return }
+        enqueue(title: L("Preparing browser setup…"), toolID: id, operation: { [manager, browserDiscovery] in
+            try await BrowserCompanionSetup.begin(companion, for: id, manager: manager, discovery: browserDiscovery)
+        })
     }
 
     private func refreshOverview(_ tools: [SourceToolInfo]) {

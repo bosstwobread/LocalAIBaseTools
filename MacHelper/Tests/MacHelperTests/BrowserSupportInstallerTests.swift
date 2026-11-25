@@ -286,4 +286,67 @@ final class BrowserSupportInstallerTests: XCTestCase {
         XCTAssertEqual(try manifest(nativeHosts.appendingPathComponent(BrowserSupportInstaller.hostName + ".json"))["path"] as? String,
                        installed.binaryURL.path)
     }
+
+    func testManagedRegistrationKeepsExactBrowserIdentitiesAndSeparateHosts() throws {
+        let (home, app, legacy) = try fixture()
+        let binary = Data("managed bridge fixture".utf8)
+        try write(binary, to: app.appendingPathComponent("Contents/MacOS/mac-helper-companion"), mode: 0o700)
+        let original = try legacy.install(from: app)
+        let oldManifests = try original.manifestURLs.map { try Data(contentsOf: $0) }
+        let installer = ManagedCompanionInstaller(homeDirectory: home)
+        let firefox = "Library/Application Support/Mozilla/NativeMessagingHosts"
+        for (browser, identity, folder) in [
+            (SourceCompanionBrowser.chrome, customID, chrome), (.edge, customID, edge), (.firefox, "sample@example.com", firefox),
+        ] {
+            try installer.register(browser, identifiers: [identity], from: app)
+            let url = home.appendingPathComponent(folder + "/" + ManagedCompanionInstaller.hostName + ".json")
+            let value = try manifest(url)
+            let executable = URL(fileURLWithPath: try XCTUnwrap(value["path"] as? String))
+            XCTAssertEqual(executable.lastPathComponent, "mac-helper-companion-" + browser.rawValue)
+            XCTAssertEqual(try Data(contentsOf: executable), binary)
+            XCTAssertEqual(try permissions(executable), 0o700)
+            XCTAssertEqual(try permissions(url), 0o600)
+            XCTAssertEqual(value[browser == .firefox ? "allowed_extensions" : "allowed_origins"] as? [String],
+                           [browser == .firefox ? identity : "chrome-extension://" + identity + "/"])
+            XCTAssertNil(value[browser == .firefox ? "allowed_origins" : "allowed_extensions"])
+        }
+        XCTAssertThrowsError(try installer.register(.safari, identifiers: ["org.example.safari"], from: app))
+        XCTAssertEqual(try original.manifestURLs.map { try Data(contentsOf: $0) }, oldManifests)
+        let external = home.appendingPathComponent(chrome + "/" + ManagedCompanionInstaller.hostName + ".json")
+        var custom = try manifest(external)
+        custom["path"] = "/usr/local/bin/another-helper"
+        let contents = try json(custom)
+        try write(contents, to: external)
+        XCTAssertThrowsError(try installer.register(.chrome, identifiers: [customID], from: app))
+        XCTAssertEqual(try Data(contentsOf: external), contents)
+    }
+
+    func testManagedBrowserPackagePinsIdentityHashAndPathsBeforeStaging() throws {
+        let (home, _, _) = try fixture()
+        let installer = ManagedCompanionInstaller(homeDirectory: home)
+        let testKey = Data("public key for an isolated fixture".utf8)
+        let digits = Array("abcdefghijklmnop")
+        let id = String(SourcePackageRules.digest(testKey).prefix(32).map { digits[$0.hexDigitValue!] })
+        let manifest = try json(["manifest_version": 3, "key": testKey.base64EncodedString(), "permissions": ["nativeMessaging"]])
+        func archive(_ files: [String: Data]) throws -> Data {
+            try json(["schemaVersion": 1, "files": files.mapValues { $0.base64EncodedString() }])
+        }
+        let data = try archive(["manifest.json": manifest, "background.js": Data("/* fixture */".utf8)])
+        let path = "https://raw.githubusercontent.com/example/tools/" + String(repeating: "a", count: 40) + "/browser.json"
+        func companion(_ data: Data, identifier: String) -> SourceBrowserCompanion {
+            .init(browser: .chrome, identifier: identifier, packageURL: path, packageSHA256: SourcePackageRules.digest(data))
+        }
+        let toolID = "org.example.test"
+        let accepted = companion(data, identifier: id)
+        XCTAssertThrowsError(try installer.stageDevelopmentPackage(Data("tampered".utf8), for: accepted, toolID: toolID))
+        XCTAssertThrowsError(try installer.stageDevelopmentPackage(data, for: companion(data, identifier: customID), toolID: toolID))
+        let traversal = try archive(["manifest.json": manifest, "../outside.js": Data()])
+        XCTAssertThrowsError(try installer.stageDevelopmentPackage(traversal, for: companion(traversal, identifier: id), toolID: toolID))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(
+            "Library/Application Support/LocalAIBaseTools/BrowserCompanions").path))
+        let folder = try installer.stageDevelopmentPackage(data, for: accepted, toolID: toolID)
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("manifest.json")), manifest)
+        XCTAssertEqual(try permissions(folder), 0o700)
+        XCTAssertEqual(try permissions(folder.appendingPathComponent("background.js")), 0o600)
+    }
 }

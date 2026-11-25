@@ -108,11 +108,40 @@ A migration preserves the identifier and compatible setting keys, rewrites comma
 
 ### Local browser companions (MacHelper 6.8.0)
 
-Develop the browser extension and its Native Messaging program in your own project. Add a `companion` object to the source manifest with `"chromeExtensionID"` set to the stable 32-letter Chrome extension ID. Declare `companion.message` and use `"trigger": "companion"` on each command the bridge may invoke. Native and JavaScript tools use the usual source package and command handlers. MacHelper’s installed app contains the Swift SDK, and a MacHelper source checkout is unnecessary.
+MacHelper 6.8 accepts a legacy `companion` object with `"chromeExtensionID"` set to the exact Chrome extension ID. That companion supplies and registers its own bridge. MacHelper 6.9 also accepts the managed declarations below. Both formats use `companion.message` and `"trigger": "companion"` on the commands the browser may invoke. Native and JavaScript tools use the same source lifecycle and command handlers. The installed app contains the public Swift SDK.
 
 MacHelper prompts for access before an extension can accept a companion request. The approval covers the installed tool, the exact companion ID, its companion command IDs, and automatic shared AI access when `ai.transform` is declared. A scope change requires a new approval. Disable the tool or pause MacHelper in **General** to stop requests and active work.
 
 The worker receives the payload as `input.text`, runs its ordinary command implementation, and returns the reply in `text`. Only the extension knows the payload schema and supplies its packaged prompts and result validation. Companion commands access their own tool settings through the worker input. They receive no selected text and do not show a MacHelper result panel. With approved AI access, a companion command may make one transformation using the saved provider and model. See the [wire protocol](MacHelper-Protocol.md#local-companion-protocol-machelper-680).
+
+#### Managed browser setup (MacHelper 6.9.0)
+
+Tools that communicate with browsers declare one entry per supported browser in `extension.json`. Source tools without a browser companion omit `companion` and its permission. Publish companion source, build instructions, and versioned artifacts in the tool's own public repository. The MacHelper source tree is unnecessary.
+
+```json
+{
+  "companion": {
+    "browsers": [
+      {
+        "browser": "chrome",
+        "identifier": "abcdefghijklmnopabcdefghijklmnop",
+        "storeURL": "https://chromewebstore.google.com/detail/example/abcdefghijklmnopabcdefghijklmnop"
+      },
+      {
+        "browser": "firefox",
+        "identifier": "example@example.com",
+        "sourceURL": "https://github.com/example/tool/blob/0123456789012345678901234567890123456789/BrowserCompanions/README.md"
+      }
+    ]
+  }
+}
+```
+
+The browser values are `chrome`, `edge`, `firefox`, and `safari`. Use the actual store extension ID for Chrome or Edge, the Gecko add-on ID for Firefox, and the app extension bundle ID for Safari. Chrome and Edge use distinct identities at the protocol level even when the identifier text matches. A published companion can supply its official `storeURL`. A development companion can supply a pinned GitHub `sourceURL`. Chrome, Edge, and Firefox can supply `packageURL` and `packageSHA256` together. The URL must point directly to a JSON file pinned to a full commit on raw.githubusercontent.com. A development package contains `{"schemaVersion":1,"files":{"manifest.json":"<base64>"}}` with its browser manifest and source assets. MacHelper verifies the digest, paths, size limits, and exact manifest identity before preparing the folder.
+
+MacHelper detects supported browsers when the user opens Settings and when an app launches or becomes active. Once approved, an installed tool shows **Browser Companions** in its detail page. **Set Up…** registers MacHelper's narrow Native Messaging bridge for Chrome, Edge, or Firefox and opens the official listing or prepares the verified developer files. The browser handles installation and extension permissions. Safari uses its own signed containing app. MacHelper's menu offers setup when a supported browser is available in the current session. The tool keeps its settings, and **Connected** reflects a status exchange with the companion.
+
+A change to the browser identity, setup declaration, commands, or automatic AI permission requires fresh MacHelper approval. MacHelper accepts only the matching browser's approved identity and listed commands. Its browser setup and scoped companion protocol are separate from marketplace search and from the legacy general browser bridge.
 
 ### Extension-owned interface translations (MacHelper 6.2+)
 

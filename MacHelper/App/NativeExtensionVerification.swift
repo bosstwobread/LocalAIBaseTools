@@ -228,11 +228,12 @@ enum NativeExtensionVerification {
         let type: String
         let extensionID: String
         let companion: String
+        var browser: SourceCompanionBrowser? = nil
         var command: String? = nil
         var payload: String? = nil
 
         enum CodingKeys: String, CodingKey {
-            case type, companion, command, payload
+            case type, companion, browser, command, payload
             case extensionID = "extension"
         }
     }
@@ -255,15 +256,21 @@ enum NativeExtensionVerification {
         let scriptID = "com.example.script-companion"
         let nativeBrowser = String(repeating: "a", count: 32)
         let scriptBrowser = String(repeating: "b", count: 32)
+        let firefoxID = "companion@example.com"
+        let scriptBrowsers: [SourceBrowserCompanion] = [.init(browser: .chrome, identifier: scriptBrowser),
+            .init(browser: .firefox, identifier: firefoxID)]
         let endpoint = socketDirectory.appendingPathComponent("endpoint")
-        let nativeSource = try makeCompanionFixture(in: authorDirectory, id: nativeID, browser: nativeBrowser, native: true)
-        let scriptSource = try makeCompanionFixture(in: authorDirectory, id: scriptID, browser: scriptBrowser, native: false)
+        let nativeSource = try makeCompanionFixture(in: authorDirectory, id: nativeID, companion: .init(chromeExtensionID: nativeBrowser), native: true)
+        let scriptSource = try makeCompanionFixture(in: authorDirectory, id: scriptID, companion: .init(browsers: scriptBrowsers), native: false)
         let nativeWatch = CompanionRequest(type: "watchStatus", extensionID: nativeID, companion: nativeBrowser)
         let scriptWatch = CompanionRequest(type: "watchStatus", extensionID: scriptID, companion: scriptBrowser)
+        let firefoxWatch = CompanionRequest(type: "watchStatus", extensionID: scriptID, companion: firefoxID, browser: .firefox)
         let opaque = " Synthetic input with quotes: \"text\".\n"
 
-        func invoke(_ id: String, _ browser: String, _ command: String, _ payload: String) async throws -> CompanionReply? {
-            let message = CompanionRequest(type: "invoke", extensionID: id, companion: browser, command: command, payload: payload)
+        func invoke(_ id: String, _ companion: String, _ command: String, _ payload: String,
+                    via browser: SourceCompanionBrowser? = nil) async throws -> CompanionReply? {
+            let message = CompanionRequest(type: "invoke", extensionID: id, companion: companion, browser: browser,
+                                           command: command, payload: payload)
             let connection = try await openCompanionSocket(in: socketDirectory, request: message)
             defer { connection.cancel() }
             return try await readCompanionFrame(from: connection)
@@ -284,12 +291,14 @@ enum NativeExtensionVerification {
         manager.onApproveCompanion = { manifest, grant in
             switch manifest.identifier {
             case nativeID: return grant.chromeExtensionID == nativeBrowser && grant.commands == ["ai", "echo"] && grant.allowsAI
-            case scriptID: return grant.chromeExtensionID == scriptBrowser && grant.commands == ["echo", "no-ai"] && !grant.allowsAI
+            case scriptID: return grant.browserCompanions == scriptBrowsers && grant.commands == ["echo", "no-ai"] && !grant.allowsAI
             default: return false
             }
         }
         try await manager.setEnabled(true, for: nativeID)
         try await manager.setEnabled(true, for: scriptID)
+        try check(manager.approvedBrowserCompanions(for: scriptID) == scriptBrowsers,
+                  "The approved browser setup no longer reflects the installed tool.")
         guard let nativePID = manager.workerPID(for: nativeID), let scriptPID = manager.workerPID(for: scriptID),
               nativePID != scriptPID, nativePID != getpid(), scriptPID != getpid() else {
             throw Failure(message: "The companion fixtures did not run in independent workers.")
@@ -300,16 +309,24 @@ enum NativeExtensionVerification {
 
         let nativeWatcher = try await openCompanionSocket(in: socketDirectory, request: nativeWatch)
         let scriptWatcher = try await openCompanionSocket(in: socketDirectory, request: scriptWatch)
-        defer { nativeWatcher.cancel(); scriptWatcher.cancel() }
+        let firefoxWatcher = try await openCompanionSocket(in: socketDirectory, request: firefoxWatch)
+        defer { nativeWatcher.cancel(); scriptWatcher.cancel(); firefoxWatcher.cancel() }
         try await expectCompanionStatus(true, from: nativeWatcher)
         try await expectCompanionStatus(true, from: scriptWatcher)
+        try await expectCompanionStatus(true, from: firefoxWatcher)
+        try await eventually("The approved Firefox status handshake did not reach browser setup.") {
+            manager.hasConnectedBrowserCompanion(for: scriptID, browser: .firefox)
+        }
         let wrongBrowser = try await invoke(nativeID, scriptBrowser, "echo", opaque)
         let wrongCommand = try await invoke(scriptID, scriptBrowser, "ai", opaque)
-        try check(wrongBrowser?.error == "unavailable" && wrongCommand?.error == "unavailable",
+        let wrongBrowserFamily = try await invoke(scriptID, scriptBrowser, "echo", opaque, via: .edge)
+        try check(wrongBrowser?.error == "unavailable" && wrongCommand?.error == "unavailable" && wrongBrowserFamily?.error == "unavailable",
                   "An unapproved companion identity or command reached a worker.")
         let nativeEcho = try await invoke(nativeID, nativeBrowser, "echo", opaque)
         let scriptEcho = try await invoke(scriptID, scriptBrowser, "echo", opaque)
-        try check(nativeEcho?.ok == true && nativeEcho?.payload == opaque && scriptEcho?.ok == true && scriptEcho?.payload == opaque,
+        let firefoxEcho = try await invoke(scriptID, firefoxID, "echo", opaque, via: .firefox)
+        try check(nativeEcho?.ok == true && nativeEcho?.payload == opaque && scriptEcho?.ok == true && scriptEcho?.payload == opaque &&
+                  firefoxEcho?.ok == true && firefoxEcho?.payload == opaque,
                   "A companion payload changed while crossing the worker boundary.")
 
         let deniedAI = try await invoke(scriptID, scriptBrowser, "no-ai", opaque)
@@ -326,6 +343,7 @@ enum NativeExtensionVerification {
         manager.setSelectionActionsEnabled(false)
         try await expectCompanionStatus(false, from: nativeWatcher)
         try await expectCompanionStatus(false, from: scriptWatcher)
+        try await expectCompanionStatus(false, from: firefoxWatcher)
         try await eventually("Pausing MacHelper did not cancel in-flight companion AI.", timeout: 5) { probe.cancellations == 1 }
         let cancelled = try await inFlight.value
         try check(cancelled == nil, "A paused companion published a stale result.")
@@ -334,9 +352,12 @@ enum NativeExtensionVerification {
         manager.setSelectionActionsEnabled(true)
         try await expectCompanionStatus(true, from: nativeWatcher)
         try await expectCompanionStatus(true, from: scriptWatcher)
+        try await expectCompanionStatus(true, from: firefoxWatcher)
 
         try await manager.setEnabled(false, for: nativeID)
         try await expectCompanionStatus(false, from: nativeWatcher)
+        try check(manager.approvedBrowserCompanions(for: nativeID).isEmpty,
+                  "Disabled extension appeared in browser setup.")
         guard let installed = manager.sourceURL(for: nativeID) else {
             throw Failure(message: "The disabled companion fixture was unexpectedly removed.")
         }
@@ -348,7 +369,7 @@ enum NativeExtensionVerification {
         return [nativePID, scriptPID]
     }
 
-    private static func makeCompanionFixture(in directory: URL, id: String, browser: String, native: Bool) throws -> URL {
+    private static func makeCompanionFixture(in directory: URL, id: String, companion: SourceCompanion, native: Bool) throws -> URL {
         let source = directory.appendingPathComponent(id)
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         let entry = native ? "Main.swift" : "main.js"
@@ -358,8 +379,7 @@ enum NativeExtensionVerification {
         }
         let manifest = SourceExtensionManifest(runtime: native ? "native" : "javascript", identifier: id,
             displayName: "Companion fixture", version: "1.0.0", summary: "Isolated companion verification",
-            entryPoint: entry, permissions: permissions, commands: commands,
-            companion: SourceCompanion(chromeExtensionID: browser))
+            entryPoint: entry, permissions: permissions, commands: commands, companion: companion)
         try JSONEncoder().encode(manifest).write(to: source.appendingPathComponent("extension.json"))
         if native {
             let script = """

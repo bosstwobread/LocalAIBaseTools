@@ -79,6 +79,45 @@ final class CompanionServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("endpoint").path))
     }
 
+    @MainActor func testBrowserRoutesKeepSharedChromiumIDsSeparateAndPublishConnectedStatus() async throws {
+        let edge = CompanionService.Route(extensionID: first.extensionID, companionID: first.companionID, browser: .edge)
+        let firefox = CompanionService.Route(extensionID: first.extensionID, companionID: "tool@example.com", browser: .firefox)
+        let safari = CompanionService.Route(extensionID: first.extensionID, companionID: "com.example.tool.safari", browser: .safari)
+        let (service, directory) = makeService { route, _, _, _ in route.browser.rawValue }
+        var changes = 0
+        service.onConnectivityChange = { changes += 1 }
+        service.setRoutes([first: "active", firefox: "active", safari: "active"])
+        let socket = try await publishedSocket(in: directory)
+        let unapprovedEdge = try await exchange(invocation(edge, payload: "edge"), socket: socket)
+        expectError("unavailable", in: unapprovedEdge)
+        let legacy = try await exchange(invocation(first, payload: "chrome"), socket: socket)
+        XCTAssertEqual(legacy?["payload"] as? String, "chrome")
+
+        service.setRoutes([first: "active", edge: "active", firefox: "active", safari: "active"])
+        for route in [edge, firefox, safari] {
+            let result = try await exchange(invocation(route, payload: "text"), socket: socket)
+            XCTAssertEqual(result?["payload"] as? String, route.browser.rawValue)
+        }
+        let edgeWatcher = open(socket), safariWatcher = open(socket)
+        defer { edgeWatcher.cancel(); safariWatcher.cancel() }
+        try await send(watch(edge), to: edgeWatcher)
+        try await expectStatus(true, from: edgeWatcher)
+        try await send(watch(safari), to: safariWatcher)
+        try await expectStatus(true, from: safariWatcher)
+        try await waitUntil { changes == 2 }
+        XCTAssertTrue(service.isConnected(edge))
+        XCTAssertTrue(service.isConnected(safari))
+        XCTAssertFalse(service.isConnected(first))
+
+        edgeWatcher.cancel()
+        safariWatcher.cancel()
+        try await waitUntil { !service.isConnected(edge) }
+        XCTAssertTrue(service.isConnected(safari), "Safari's short status poll remains visible briefly after it completes.")
+        service.setRoutes([first: "active", edge: "active", firefox: "active"])
+        XCTAssertFalse(service.isConnected(safari), "Revoking a Safari route clears its remembered status immediately.")
+        XCTAssertEqual(changes, 4)
+    }
+
     @MainActor func testRejectsMalformedOrOversizedRequestsBeforeDispatch() async throws {
         var calls = 0
         let (service, directory) = makeService { _, _, _, value in calls += 1; return value }
@@ -91,6 +130,8 @@ final class CompanionServiceTests: XCTestCase {
             invocation(first, payload: "text").merging(["payload": ["not", "text"]], uniquingKeysWith: { _, next in next }),
             invocation(.init(extensionID: first.extensionID + "\n", companionID: first.companionID), payload: "text"),
             invocation(.init(extensionID: first.extensionID, companionID: "untrusted"), payload: "text"),
+            invocation(first, payload: "text").merging(["browser": "untrusted"], uniquingKeysWith: { _, next in next }),
+            invocation(first, payload: "text").merging(["browser": NSNull()], uniquingKeysWith: { _, next in next }),
             invocation(first, payload: "text").merging(["provider": "unrequested"], uniquingKeysWith: { _, next in next })
         ]
         invalid.append(["type": "invoke", "extension": first.extensionID, "companion": first.companionID, "payload": "missing command"])
@@ -206,11 +247,15 @@ final class CompanionServiceTests: XCTestCase {
     }
 
     private func watch(_ route: CompanionService.Route) -> [String: Any] {
-        ["type": "watchStatus", "extension": route.extensionID, "companion": route.companionID]
+        var request = ["type": "watchStatus", "extension": route.extensionID, "companion": route.companionID]
+        if route.browser != .chrome { request["browser"] = route.browser.rawValue }
+        return request
     }
 
     private func invocation(_ route: CompanionService.Route, command: String = "process", payload: String) -> [String: Any] {
-        ["type": "invoke", "extension": route.extensionID, "companion": route.companionID, "command": command, "payload": payload]
+        var request = ["type": "invoke", "extension": route.extensionID, "companion": route.companionID, "command": command, "payload": payload]
+        if route.browser != .chrome { request["browser"] = route.browser.rawValue }
+        return request
     }
 
     @MainActor private func publishedSocket(in directory: URL) async throws -> URL {

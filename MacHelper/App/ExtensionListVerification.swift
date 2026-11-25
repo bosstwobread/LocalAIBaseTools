@@ -61,13 +61,28 @@ enum ExtensionListVerification {
             var opened: [[URL]] = []
             var reviewedUpdates: [SourceExtensionUpdatePreview] = []
             var approveUpdate = false
+            let chrome = root.appendingPathComponent("Google Chrome.app")
+            let edge = root.appendingPathComponent("Microsoft Edge.app")
+            var installedBrowsers = [SourceCompanionBrowser.chrome.appBundleIdentifier: chrome]
+            let discovered = BrowserCompanionDiscovery { installedBrowsers[$0] }
+            var detectionChanges = 0
+            discovered.onChange = { detectionChanges += 1 }
+            try check(discovered.applications == [.chrome: chrome], "Starting browser inventory was incorrect.")
+            discovered.refresh(launched: .edge, at: edge)
+            try check(discovered.applications[.edge] == edge && detectionChanges == 1,
+                      "A browser launched later did not become available immediately.")
+            installedBrowsers[SourceCompanionBrowser.edge.appBundleIdentifier] = edge
+            discovered.refresh(launched: .edge, at: edge)
+            discovered.refresh()
+            try check(detectionChanges == 1, "Activating the same browser repeated setup.")
+            checks.append("browser setup detects a newly launched browser in the current session and avoids duplicate changes")
             let controller = ExtensionsViewController(manager: current, sourceFolderOpener: { urls, completion in
                 opened.append(urls)
                 completion(nil)
             }, sourceUpdateReviewer: { preview in
                 reviewedUpdates.append(preview)
                 return approveUpdate
-            })
+            }, browserDiscovery: discovered)
             controller.loadViewIfNeeded()
             controller.view.frame = NSRect(x: 0, y: 0, width: 820, height: 700)
             controller.view.layoutSubtreeIfNeeded()

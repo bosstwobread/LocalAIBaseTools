@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "MacHelper", targets: ["MacHelper"]),
         .executable(name: "mac-helper-host", targets: ["MacHelperHost"]),
+        .executable(name: "mac-helper-companion", targets: ["MacHelperCompanionBridge"]),
         .executable(name: "MacHelperApp", targets: ["MacHelperApp"]),
         .executable(name: "MacHelperScriptWorker", targets: ["MacHelperScriptWorker"])
     ],
@@ -14,6 +15,7 @@ let package = Package(
     targets: [
         .target(name: "MacHelper", dependencies: [.product(name: "MacHelperExtensionSDK", package: "ExtensionSDK")], path: "Runtime", resources: [.copy("Localization"), .copy("DiscoveryPrompts")]),
         .executableTarget(name: "MacHelperHost", dependencies: ["MacHelper"], path: "Host"),
+        .executableTarget(name: "MacHelperCompanionBridge", path: "CompanionBridge"),
         .target(name: "MacHelperCapabilities", dependencies: ["MacHelper"], path: "Capabilities"),
         .executableTarget(name: "MacHelperScriptWorker", path: "ScriptWorker"),
         .executableTarget(name: "MacHelperApp", dependencies: ["MacHelper", "MacHelperCapabilities"], path: "App"),

@@ -32,18 +32,142 @@ public enum SourceSelectionPermissionReview: Equatable {
     }
 }
 
-public struct SourceCompanion: Codable, Equatable, Sendable {
-    public let chromeExtensionID: String
+public enum SourceCompanionBrowser: String, CaseIterable, Codable, Hashable, Sendable {
+    case chrome, edge, firefox, safari
 
-    public init(chromeExtensionID: String) { self.chromeExtensionID = chromeExtensionID }
+    public func acceptsIdentifier(_ identifier: String) -> Bool {
+        guard identifier.utf8.count <= 128 else { return false }
+        let pattern: String
+        switch self {
+        case .chrome, .edge:
+            pattern = #"\A[a-p]{32}\z"#
+        case .firefox:
+            guard identifier.utf8.count <= 80 else { return false }
+            pattern = #"\A(?:[A-Za-z0-9._-]*@[A-Za-z0-9._-]+|\{[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\})\z"#
+        case .safari:
+            pattern = #"\A[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+\z"#
+        }
+        return identifier.range(of: pattern, options: .regularExpression) != nil
+    }
+}
+
+public struct SourceBrowserCompanion: Codable, Equatable, Sendable {
+    public let browser: SourceCompanionBrowser
+    public let identifier: String
+    public let storeURL: String?
+    public let packageURL: String?
+    public let packageSHA256: String?
+    public let sourceURL: String?
+
+    public init(browser: SourceCompanionBrowser, identifier: String, storeURL: String? = nil,
+                packageURL: String? = nil, packageSHA256: String? = nil, sourceURL: String? = nil) {
+        self.browser = browser
+        self.identifier = identifier
+        self.storeURL = storeURL
+        self.packageURL = packageURL
+        self.packageSHA256 = packageSHA256
+        self.sourceURL = sourceURL
+    }
+
+    public func validate() throws {
+        guard browser.acceptsIdentifier(identifier) else {
+            throw SourcePackageError.invalid("A browser companion declares an invalid extension identifier.")
+        }
+        if let storeURL, !acceptsStoreURL(storeURL) {
+            throw SourcePackageError.invalid("A browser companion must use its official store listing.")
+        }
+        if let sourceURL, !Self.isPinnedGitHubURL(sourceURL, raw: false) {
+            throw SourcePackageError.invalid("Browser companion source links must use a pinned GitHub file or folder.")
+        }
+        if packageURL != nil || packageSHA256 != nil {
+            guard browser != .safari, let packageURL, let packageSHA256,
+                  Self.isPinnedGitHubURL(packageURL, raw: true),
+                  packageSHA256.range(of: #"\A[0-9a-f]{64}\z"#, options: .regularExpression) != nil else {
+                throw SourcePackageError.invalid("A browser development package needs a pinned GitHub JSON manifest and its SHA-256 digest.")
+            }
+        }
+    }
+
+    private func acceptsStoreURL(_ value: String) -> Bool {
+        guard let url = Self.safeHTTPSComponents(value) else { return false }
+        let host: String
+        let pattern: String
+        switch browser {
+        case .chrome:
+            host = "chromewebstore.google.com"
+            pattern = #"\A/detail/(?:[A-Za-z0-9_-]+/)?"# + identifier + #"/?\z"#
+        case .edge:
+            host = "microsoftedge.microsoft.com"
+            pattern = #"\A/addons/detail/(?:[A-Za-z0-9_-]+/)?"# + identifier + #"/?\z"#
+        case .firefox:
+            host = "addons.mozilla.org"
+            pattern = #"\A/(?:[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*/)?firefox/addon/[A-Za-z0-9_-]+/?\z"#
+        case .safari:
+            host = "apps.apple.com"
+            pattern = #"\A/(?:[A-Za-z]{2}/)?app/(?:[A-Za-z0-9_-]+/)?id[0-9]+/?\z"#
+        }
+        return url.host == host && url.percentEncodedPath.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private static func safeHTTPSComponents(_ value: String) -> URLComponents? {
+        guard value.utf8.count <= 2048, let url = URLComponents(string: value),
+              url.scheme == "https", url.user == nil, url.password == nil, url.port == nil,
+              url.query == nil, url.fragment == nil, url.url?.absoluteString == value else { return nil }
+        return url
+    }
+
+    private static func isPinnedGitHubURL(_ value: String, raw: Bool) -> Bool {
+        guard let url = safeHTTPSComponents(value), url.host == (raw ? "raw.githubusercontent.com" : "github.com") else { return false }
+        let path = url.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false)
+        let revision = raw ? 3 : 4
+        guard path.count >= revision + 2, path[0].isEmpty,
+              path[1].range(of: #"\A[A-Za-z0-9-]{1,39}\z"#, options: .regularExpression) != nil,
+              path[2].count <= 100,
+              raw || ["tree", "blob"].contains(path[3]),
+              path[revision].range(of: #"\A[0-9a-f]{40}\z"#, options: .regularExpression) != nil,
+              !raw || path.last?.hasSuffix(".json") == true else { return false }
+        return ([path[2]] + path.dropFirst(revision + 1)).allSatisfy { segment in
+            segment != "." && segment != ".." &&
+                segment.range(of: #"\A[A-Za-z0-9_.-]+\z"#, options: .regularExpression) != nil
+        }
+    }
+}
+
+public struct SourceCompanion: Codable, Equatable, Sendable {
+    public let chromeExtensionID: String?
+    public let browsers: [SourceBrowserCompanion]?
+
+    public init(chromeExtensionID: String) {
+        self.chromeExtensionID = chromeExtensionID
+        browsers = nil
+    }
+
+    public init(browsers: [SourceBrowserCompanion]) {
+        chromeExtensionID = nil
+        self.browsers = browsers
+    }
+
+    fileprivate func validate() throws {
+        if let chromeExtensionID, browsers == nil, SourceCompanionBrowser.chrome.acceptsIdentifier(chromeExtensionID) { return }
+        guard chromeExtensionID == nil, let browsers, (1...SourceCompanionBrowser.allCases.count).contains(browsers.count),
+              Set(browsers.map(\.browser)).count == browsers.count else {
+            throw SourcePackageError.invalid("Declare one companion per browser or use the legacy Chrome extension identifier.")
+        }
+        for browser in browsers { try browser.validate() }
+    }
 }
 
 public struct SourceCompanionGrant: Codable, Equatable, Sendable {
     public static let permission = "companion.message"
 
-    public let chromeExtensionID: String
+    public let chromeExtensionID: String?
+    public let browsers: [SourceBrowserCompanion]?
     public let commands: [String]
     public let allowsAI: Bool
+
+    public var browserCompanions: [SourceBrowserCompanion] {
+        browsers ?? chromeExtensionID.map { [.init(browser: .chrome, identifier: $0)] } ?? []
+    }
 }
 
 public struct SourceExtensionManifest: Codable, Equatable, Sendable {
@@ -77,6 +201,7 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public var companionGrant: SourceCompanionGrant? {
         guard let companion, permissions.contains(SourceCompanionGrant.permission) else { return nil }
         return SourceCompanionGrant(chromeExtensionID: companion.chromeExtensionID,
+                                    browsers: companion.browsers?.sorted { $0.browser.rawValue < $1.browser.rawValue },
                                     commands: commands.filter { $0.trigger == "companion" }.map(\.identifier).sorted(),
                                     allowsAI: permissions.contains("ai.transform"))
     }
@@ -123,10 +248,10 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         if permissions.contains("selection.paste"), !Set(["selection.read", "selection.replace"]).isSubset(of: Set(permissions)) {
             throw SourcePackageError.invalid(L("Selected-text paste requires selection.read and selection.replace permissions."))
         }
-        if let grant = companionGrant {
-            guard grant.chromeExtensionID.range(of: #"\A[a-p]{32}\z"#, options: .regularExpression) != nil,
-                  !grant.commands.isEmpty else {
-                throw SourcePackageError.invalid("A companion needs an exact Chrome extension ID and a companion command.")
+        if let grant = companionGrant, let companion {
+            try companion.validate()
+            guard !grant.commands.isEmpty else {
+                throw SourcePackageError.invalid("A browser companion needs a companion command.")
             }
         } else if companion != nil || permissions.contains(SourceCompanionGrant.permission) ||
                     commands.contains(where: { $0.trigger == "companion" }) {

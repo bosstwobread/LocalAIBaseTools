@@ -134,7 +134,11 @@ def main():
             assert app_info["CFBundleShortVersionString"] == helper["version"]
             assert app_info["MacHelperMarketplaceURL"] == config["baseUrl"]
             assert any("machelper" in item["CFBundleURLSchemes"] for item in app_info["CFBundleURLTypes"])
-            for binary in ["MacHelperApp", "mac-helper-host", "MacHelperScriptWorker"]:
+            executables = ["MacHelperApp", "mac-helper-host", "MacHelperScriptWorker"]
+            version = tuple(map(int, helper["version"].partition("-")[0].split(".")))
+            if version >= (6, 9, 0):
+                executables.append("mac-helper-companion")
+            for binary in executables:
                 item = archive.getinfo("MacHelper.app/Contents/MacOS/" + binary)
                 assert (item.external_attr >> 16) & 0o111, "Executable permissions were lost in the app archive."
             assert "MacHelper.app/Contents/Resources/AppIcon.icns" in archive.namelist()

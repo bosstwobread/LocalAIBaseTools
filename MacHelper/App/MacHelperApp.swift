@@ -90,6 +90,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     private var browserSupportTask: Task<Void, Never>?
     private var browserSupportFailure: String?
     private var browserSupportMenuItems: [NSMenuItem] = []
+    private var companionSetupMenuItems: [NSMenuItem] = []
     private let websiteService = MarketplaceLocalService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -102,7 +103,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
             bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds"),
             marketplaceCatalogURL: marketplaceCatalog)
         extensions = ExtensionsViewController(manager: sourceManager)
-        extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
+        configureExtensionsCallbacks()
         sourceManager.setSelectionActionsEnabled(macHelperEnabled)
         shortcutAvailable = registerShortcut(preferredShortcut)
         configureGeneralSettings()
@@ -179,6 +180,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         if general != nil, currentController === general { general.refreshStatus() }
+        extensions?.refreshBrowserDetection()
     }
 
     func applicationDidResignActive(_ notification: Notification) {
@@ -187,6 +189,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
 
     private func createMenus() {
         browserSupportMenuItems.removeAll()
+        companionSetupMenuItems.removeAll()
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         let menu = NSMenu()
         let appItem = NSMenuItem()
@@ -196,6 +199,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let appBrowserSupport = appMenu.addItem(withTitle: L("Install Browser Support…"), action: #selector(installBrowserSupport), keyEquivalent: "")
         appBrowserSupport.target = self
         browserSupportMenuItems.append(appBrowserSupport)
+        addCompanionSetupMenuItem(to: appMenu)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("Quit MacHelper"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
@@ -221,10 +225,29 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let statusBrowserSupport = statusMenu.addItem(withTitle: L("Install Browser Support…"), action: #selector(installBrowserSupport), keyEquivalent: "")
         statusBrowserSupport.target = self
         browserSupportMenuItems.append(statusBrowserSupport)
+        addCompanionSetupMenuItem(to: statusMenu)
         statusMenu.addItem(.separator())
         statusMenu.addItem(withTitle: L("Quit MacHelper"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = statusMenu
         statusItem = item
+        updateCompanionSetupMenus(available: extensions?.nextBrowserSetupTool != nil)
+    }
+
+    private func configureExtensionsCallbacks() {
+        extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
+        extensions.onBrowserSetupAvailable = { [weak self] available in
+            self?.updateCompanionSetupMenus(available: available)
+        }
+    }
+
+    private func addCompanionSetupMenuItem(to menu: NSMenu) {
+        let item = menu.addItem(withTitle: L("Set Up Browser Companions…"), action: #selector(openCompanionSetup), keyEquivalent: "")
+        item.target = self
+        companionSetupMenuItems.append(item)
+    }
+
+    private func updateCompanionSetupMenus(available: Bool) {
+        for item in companionSetupMenuItems { item.isHidden = !available || !macHelperEnabled }
     }
 
     private func createWindow() {
@@ -413,7 +436,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         stateTip.dismiss()
         AppLocalization.shared.language = code
         extensions = ExtensionsViewController(manager: sourceManager)
-        extensions.onOpenMarketplace = { [weak self] in self?.openMarketplace() }
+        configureExtensionsCallbacks()
         ai = AISettingsViewController()
         bindWebsiteConnectionControls()
         configureGeneralSettings()
@@ -562,6 +585,7 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         macHelperEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: Self.enabledPreferenceKey)
         sourceManager.setSelectionActionsEnabled(enabled)
+        updateCompanionSetupMenus(available: extensions.nextBrowserSetupTool != nil)
         ai.websiteConnectionEnabled = enabled
         updateGeneralMacHelperState()
         if enabled { startWebsiteConnection() }
@@ -599,6 +623,11 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openExtensions() {
         extensions.showOverview()
         showSettings(tab: 1)
+    }
+    @objc private func openCompanionSetup() {
+        guard let id = extensions.nextBrowserSetupTool else { return }
+        showSettings(tab: 1)
+        extensions.selectTool(id)
     }
     @objc private func openAI() { showSettings(tab: 0) }
     @objc private func openGeneral() { showSettings(tab: 2) }

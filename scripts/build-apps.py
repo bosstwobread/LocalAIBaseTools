@@ -77,7 +77,7 @@ def main():
         "CFBundleName": "MacHelper", "CFBundleDisplayName": "MacHelper",
         "CFBundleIdentifier": "com.localaibasetools.mac-helper", "CFBundleExecutable": "MacHelperApp",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "6.8.0", "CFBundleVersion": "680", "CFBundleIconFile": "AppIcon",
+        "CFBundleShortVersionString": "6.9.0", "CFBundleVersion": "690", "CFBundleIconFile": "AppIcon",
         "CFBundleDevelopmentRegion": "en",
         "CFBundleLocalizations": sorted(path.stem for path in (ROOT / "MacHelper/Runtime/Localization").glob("*.json")),
         "MacHelperMarketplaceURL": args.marketplace_url,
@@ -91,6 +91,9 @@ def main():
     worker = contents / "MacOS/MacHelperScriptWorker"
     shutil.copy2(helper_bin / "MacHelperScriptWorker", worker)
     sign(worker, identity)
+    companion = contents / "MacOS/mac-helper-companion"
+    shutil.copy2(helper_bin / "mac-helper-companion", companion)
+    sign(companion, identity)
     resources = contents / "Resources"
     shutil.copytree(ROOT / "MacHelper/Runtime/Localization", resources / "Localization")
     shutil.copytree(ROOT / "MacHelper/Runtime/DiscoveryPrompts", resources / "DiscoveryPrompts")

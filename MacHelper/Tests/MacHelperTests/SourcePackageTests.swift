@@ -32,6 +32,74 @@ private final class SourceFixtureURLProtocol: URLProtocol, @unchecked Sendable {
 }
 
 final class SourcePackageTests: XCTestCase {
+    func testBrowserGrantsKeepLegacyChromeAndBindEveryManagedDescriptor() throws {
+        let chromeID = String(repeating: "a", count: 32)
+        let legacy = try JSONDecoder().decode(SourceCompanionGrant.self,
+            from: Data(#"{"chromeExtensionID":"\#(chromeID)","commands":["translate"],"allowsAI":false}"#.utf8))
+        let legacyManifest = makeBrowserManifest(.init(chromeExtensionID: chromeID))
+        XCTAssertNoThrow(try legacyManifest.validate())
+        XCTAssertEqual(legacyManifest.companionGrant, legacy)
+        XCTAssertEqual(legacy.browserCompanions, [.init(browser: .chrome, identifier: chromeID)])
+
+        let revision = String(repeating: "a", count: 40)
+        let digest = String(repeating: "b", count: 64)
+        let chrome = SourceBrowserCompanion(browser: .chrome, identifier: chromeID,
+            storeURL: "https://chromewebstore.google.com/detail/example/" + chromeID,
+            packageURL: "https://raw.githubusercontent.com/example/tool/\(revision)/browser/chrome.json", packageSHA256: digest,
+            sourceURL: "https://github.com/example/tool/tree/\(revision)/Chrome")
+        let edge = SourceBrowserCompanion(browser: .edge, identifier: chromeID,
+            storeURL: "https://microsoftedge.microsoft.com/addons/detail/example/" + chromeID)
+        let firefox = SourceBrowserCompanion(browser: .firefox, identifier: "tool@example.com",
+            storeURL: "https://addons.mozilla.org/en-US/firefox/addon/example/")
+        let safari = SourceBrowserCompanion(browser: .safari, identifier: "com.example.tool.safari",
+            storeURL: "https://apps.apple.com/us/app/example/id12345")
+        let manifest = makeBrowserManifest(.init(browsers: [safari, edge, firefox, chrome]))
+        XCTAssertNoThrow(try manifest.validate())
+        let grant = try XCTUnwrap(manifest.companionGrant)
+        XCTAssertEqual(grant.browserCompanions, [chrome, edge, firefox, safari])
+        XCTAssertEqual(try JSONDecoder().decode(SourceCompanionGrant.self, from: JSONEncoder().encode(grant)), grant)
+        XCTAssertEqual(makeBrowserManifest(.init(browsers: [chrome, edge, firefox, safari])).companionGrant, grant)
+        XCTAssertNotEqual(makeBrowserManifest(.init(browsers: [chrome, edge, firefox])).companionGrant, grant)
+        let differentPackage = SourceBrowserCompanion(browser: .chrome, identifier: chromeID, storeURL: chrome.storeURL,
+            packageURL: chrome.packageURL, packageSHA256: String(repeating: "c", count: 64), sourceURL: chrome.sourceURL)
+        XCTAssertNotEqual(makeBrowserManifest(.init(browsers: [differentPackage, edge, firefox, safari])).companionGrant, grant)
+    }
+
+    func testBrowserDeclarationsRejectUnsafeSetupMetadata() throws {
+        let identity = String(repeating: "a", count: 32)
+        let revision = String(repeating: "f", count: 40)
+        let digest = String(repeating: "d", count: 64)
+        let url = "https://raw.githubusercontent.com/example/tool/\(revision)/browser/chrome.json"
+        for companion: SourceBrowserCompanion in [
+            .init(browser: .edge, identifier: "not-the-edge-id"),
+            .init(browser: .firefox, identifier: "bad\n@example.com"),
+            .init(browser: .safari, identifier: "com..example.tool"),
+            .init(browser: .chrome, identifier: identity, storeURL: "https://chromewebstore.google.com.example.net/detail/" + identity),
+            .init(browser: .chrome, identifier: identity, storeURL: "https://chromewebstore.google.com/detail/" + String(repeating: "b", count: 32)),
+            .init(browser: .chrome, identifier: identity, storeURL: "https://chromewebstore.google.com/detail/" + identity + "?redirect=whatever"),
+            .init(browser: .chrome, identifier: identity, packageURL: url),
+            .init(browser: .chrome, identifier: identity, packageURL: url, packageSHA256: digest.uppercased()),
+            .init(browser: .chrome, identifier: identity, packageURL: "https://raw.githubusercontent.com/example/tool/main/chrome.json", packageSHA256: digest),
+            .init(browser: .chrome, identifier: identity, packageURL: "https://raw.githubusercontent.com/example/tool/\(revision)/browser/../chrome.json", packageSHA256: digest),
+            .init(browser: .safari, identifier: "com.example.tool.safari", packageURL: url, packageSHA256: digest),
+            .init(browser: .chrome, identifier: identity, sourceURL: "https://github.com/example/tool/tree/main/Chrome"),
+            .init(browser: .chrome, identifier: identity, sourceURL: "https://github.com/example/tool/tree/\(revision)/%2e%2e/Chrome")
+        ] {
+            XCTAssertThrowsError(try makeBrowserManifest(.init(browsers: [companion])).validate(), String(describing: companion))
+        }
+        let duplicate = SourceBrowserCompanion(browser: .chrome, identifier: identity)
+        XCTAssertThrowsError(try makeBrowserManifest(.init(browsers: [duplicate, duplicate])).validate())
+        XCTAssertThrowsError(try makeBrowserManifest(.init(browsers: [])).validate())
+        let mixed = try JSONDecoder().decode(SourceCompanion.self, from: Data(#"{"chromeExtensionID":"\#(identity)","browsers":[{"browser":"chrome","identifier":"\#(identity)"}]}"#.utf8))
+        XCTAssertThrowsError(try makeBrowserManifest(mixed).validate())
+    }
+
+    private func makeBrowserManifest(_ companion: SourceCompanion) -> SourceExtensionManifest {
+        SourceExtensionManifest(identifier: "com.example.browser-tool", displayName: "Browser tool", version: "1.0.0",
+            summary: "Browser fixture", permissions: [SourceCompanionGrant.permission],
+            commands: [.init(identifier: "translate", title: "Translate", trigger: "companion")], companion: companion)
+    }
+
     func testCommandIconsRemainOptionalAndRoundTripThroughSourceMetadata() throws {
         let old = try JSONDecoder().decode(SourceExtensionCommand.self,
             from: Data(#"{"identifier":"translate","title":"Translate","trigger":"selection"}"#.utf8))

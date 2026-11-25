@@ -10,7 +10,7 @@ The current products are:
 
 | Component | Current version | What it does |
 | --- | --- | --- |
-| MacHelper | 6.8.0 (build 680) | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, a shared icon toolbar with guarded Apply, the website’s AI discovery service, and local AI transports. |
+| MacHelper | 6.9.0 (build 690) | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, a shared icon toolbar with guarded Apply, the website’s AI discovery service, and local AI transports. |
 | Translation | 4.5.8 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
 | Polish-input | 1.0.6 | Editable JavaScript tool that streams a polished preview and offers explicit plain selected-text replacement in supported Mac apps. |
 | Extension Market | Static website | Keyword/description search, tool details, illustrated previews, source downloads, and reviewed installation links into MacHelper. |
@@ -65,7 +65,7 @@ flowchart TD
 
 MacHelper is a persistent application with a Dock icon and menu-bar shortcut. Clicking its Dock icon opens Settings; closing Settings keeps the app and enabled tools running. Login startup does not open a settings window. `mac-helper-host` is an executable launched when needed, rather than a permanent HTTP daemon. Source extensions' AI capability calls launch the embedded host as a child process. Compatibility browser clients can launch their registered host copy. Both use shared configuration. Translation and Polish-input require only the MacHelper app, not browser-profile installation. Separately, the running MacHelper app starts its loopback-only website service; website AI search needs that app running, while its settings window may stay closed.
 
-MacHelper’s local companion service exposes bounded command invocation and enabled-state observation over a per-user Unix socket. Permissions bind an installed source identifier, its declared Chrome extension ID, the exact command IDs, and the ability to invoke shared AI automatically. The host handles approval, lifecycle, cancellation, and the saved AI provider. Each extension owns its browser bridge, opaque payload and reply schema, prompts, and UI. The companion service is independent of the website’s discovery endpoint and the retired browser compatibility host.
+MacHelper’s local companion service exposes bounded command invocation and enabled-state observation over a per-user Unix socket. Permissions bind an installed tool to exact browser and companion identities, their setup declarations, the command IDs, and access to shared AI. MacHelper detects browsers, handles setup, and supplies a scoped bridge for Chromium and Firefox. The host also handles approval, cancellation, and the saved AI provider. Each extension owns its browser code, payload and reply schema, prompts, and UI. The companion service is independent of the website’s discovery endpoint and the retired browser compatibility host.
 
 ## 3. Repository structure and ownership
 
@@ -162,7 +162,7 @@ There is one source extension system with two execution adapters, plus the brows
 | --- | --- | --- |
 | JavaScript source | Schema-2 manifest with `runtime: "javascript"`, `.js` entry, schema/resources in a `.macsource` folder. | Validate and replace only that JavaScriptCore worker. |
 | Native Swift source | The same schema-2 package with `runtime: "native"`, one `.swift` entry, and approved `native.execute`. | Fixed compiler builds a validated/signed candidate; successful startup replaces only that native worker. |
-| Browser companion | Manifest V3 browser bundle and its own Chrome Native Messaging bridge. The bridge uses MacHelper's local Unix socket and an approved source extension command. | Manual browser extension reload and page refresh. |
+| Browser companion | Browser-specific package in the tool repository. MacHelper prepares setup and uses its local Unix socket for approved companion commands. | Browser approval, then reload the companion or the page when needed. |
 
 Both source runtimes use the same installed list, source import, enablement, permission review, settings renderer, Edit Source, and Reload controls. The manifest explicitly selects the adapter. Native source has one Swift entry compiled with the app's standalone SDK into a private cache outside the editable source folder. The cache key includes entry source, SDK, toolchain, and architecture. Resource/settings changes replace the worker with a fresh frozen snapshot and can reuse the compiled executable. MacHelper does not execute an arbitrary manifest build command, install dependencies, or load a native extension library into its own process. Invalid compilation or worker startup keeps the previous working generation alive.
 
