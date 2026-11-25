@@ -42,6 +42,7 @@ func sourcePermissionReviewText(_ permissions: [String]) -> String {
                  "clipboard.read": "Legacy clipboard declaration (no shared clipboard reader)",
                  "selection.paste": "Paste completed results into the original window",
                  "ai.transform": "Send tool requests through your configured AI connection", "ui.panel": "Show tool result panels",
+                 SourceCompanionGrant.permission: "Receive requests from a local browser companion",
                  "native.execute": "Run compiled native code with your Mac user account’s access (not sandboxed)"]
     return permissions.isEmpty ? L("None") : permissions.map { "• " + L(names[$0] ?? $0) }.joined(separator: "\n")
 }
@@ -54,6 +55,7 @@ final class SourceExtensionManager {
     var onApproveNativeExecution: ((SourceExtensionManifest) -> Bool)?
     var onApproveSelectionReplacement: ((SourceExtensionManifest) -> Bool)?
     var onApproveSelectionPaste: ((SourceExtensionManifest) -> Bool)?
+    var onApproveCompanion: ((SourceExtensionManifest, SourceCompanionGrant) -> Bool)?
     var accessibilityGranted: Bool { AXIsProcessTrusted() }
     private let store: SourcePackageStore
     private let stateDirectory: URL
@@ -64,6 +66,7 @@ final class SourceExtensionManager {
     private let helperURL: URL
     private let nativeSDKURL: URL
     private let headless: Bool
+    private let companionSocketDirectory: URL?
     private let testTransform: (([String: Any]) async throws -> [String: Any])?
     private let testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])?
     private var definitions: [String: Definition] = [:]
@@ -89,6 +92,13 @@ final class SourceExtensionManager {
     private var started = false
     private var selectionActionsEnabled = true
     private lazy var selectionCapability = SelectionActionCapability(title: "MacHelper")
+    private lazy var companionService = CompanionService(directory: companionSocketDirectory,
+        authorize: { [weak self] route, generation, command in
+            self?.companionRuntime(route, generation: generation, command: command) != nil
+        }, invoke: { [weak self] route, generation, command, payload in
+            guard let self else { throw CompanionService.Failure.unavailable }
+            return try await self.performCompanionCommand(route, generation: generation, command: command, payload: payload)
+        })
     private var languageObserver: NSObjectProtocol?
 
     private struct State: Codable {
@@ -97,6 +107,7 @@ final class SourceExtensionManager {
         var permissions: [String: [String]] = [:]
         var catalogs: [String] = []
         var sourceCatalogs: [String: String]?
+        var companionGrants: [String: SourceCompanionGrant]?
     }
     private struct Definition { let entry: SourceCatalogEntry; let base: URL }
     private struct PreparedSettings {
@@ -104,7 +115,17 @@ final class SourceExtensionManager {
         let schema: ScriptSettingsSchema?
         var values: [String: Any]
     }
-    private final class Gate { var invoking = false; var calls = 0; var model: String? }
+    private struct CompanionInvocation {
+        let route: CompanionService.Route
+        let generation: String
+        let command: String
+    }
+    private final class Gate {
+        var invoking = false
+        var companion: CompanionInvocation?
+        var calls = 0
+        var model: String?
+    }
     private final class Running {
         /// Stable for this validated source/settings activation. A crashed IPC
         /// process can recover inside it; source/settings reload creates a new
@@ -127,7 +148,8 @@ final class SourceExtensionManager {
          bundledSeedDirectory: URL? = nil, marketplaceCatalogURL: URL? = nil, stateDirectory: URL? = nil, nativeSDKURL: URL? = nil,
          sourceDirectory: URL = SourcePackageStore.defaultUserDirectory, headless: Bool = false,
          testTransform: (([String: Any]) async throws -> [String: Any])? = nil,
-         testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])? = nil) {
+         testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])? = nil,
+         companionSocketDirectory: URL? = nil) {
         workerURL = workerExecutableURL; helperURL = helperExecutableURL
         self.bundledCatalogURL = bundledCatalogURL; self.bundledSeedDirectory = bundledSeedDirectory
         self.marketplaceCatalogURL = marketplaceCatalogURL
@@ -135,6 +157,7 @@ final class SourceExtensionManager {
         self.nativeSDKURL = nativeSDKURL ?? Bundle.main.resourceURL?.appendingPathComponent("NativeExtensionSDK/MacHelperNativeSDK.swift")
             ?? URL(fileURLWithPath: "/unavailable/MacHelperNativeSDK.swift")
         self.headless = headless; self.testTransform = testTransform; self.testStreamingTransform = testStreamingTransform
+        self.companionSocketDirectory = companionSocketDirectory
         store = SourcePackageStore(directory: sourceDirectory)
         languageObserver = NotificationCenter.default.addObserver(forName: .macHelperLanguageDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.synchronizeSelectionActions(invalidateCurrent: true) }
@@ -184,10 +207,11 @@ final class SourceExtensionManager {
                 guard state.schemaVersion == 1 else { throw SourcePackageError.invalid(L("Unsupported extension preferences.")) }
                 guard state.enabled.count <= 128, state.permissions.count <= 128,
                       state.catalogs.count <= Self.maximumCatalogCount,
-                      (state.sourceCatalogs?.count ?? 0) <= 128 else {
+                      (state.sourceCatalogs?.count ?? 0) <= 128, (state.companionGrants?.count ?? 0) <= 128 else {
                     throw SourcePackageError.invalid(L("Extension preferences exceed their size limits."))
                 }
-                for id in Set(state.enabled.keys).union(state.permissions.keys).union((state.sourceCatalogs ?? [:]).keys) {
+                for id in Set(state.enabled.keys).union(state.permissions.keys).union((state.sourceCatalogs ?? [:]).keys)
+                    .union((state.companionGrants ?? [:]).keys) {
                     try SourcePackageRules.validateIdentifier(id)
                 }
             } catch { state = State(); errors[Self.translationID] = L("Source extension preferences could not be read. Enable the tool explicitly.") }
@@ -223,6 +247,7 @@ final class SourceExtensionManager {
         } else {
             selectionCapability.stop()
         }
+        synchronizeCompanions()
     }
 
     func setEnabled(_ enabled: Bool, for id: String) async throws {
@@ -231,6 +256,7 @@ final class SourceExtensionManager {
             try await activate(id, approving: true)
         } else {
             state.enabled[id] = false
+            if state.companionGrants?[id] != nil { synchronizeCompanions() }
             try saveState()
             await stop(id)
             if state.enabled[id] == false { statuses[id] = "Disabled. Your editable source and settings are retained." }
@@ -457,7 +483,10 @@ final class SourceExtensionManager {
             var origins = updatedState.sourceCatalogs ?? [:]
             if origins[id] != nil || origins.count < 128 { origins[id] = preview.catalogURL.absoluteString }
             updatedState.sourceCatalogs = origins
-            if enabled { updatedState.permissions[id] = staged.manifest.permissions }
+            if enabled { Self.recordApproval(staged.manifest, in: &updatedState) }
+            else if updatedState.companionGrants?[id] != staged.manifest.companionGrant {
+                updatedState.companionGrants?.removeValue(forKey: id)
+            }
             watchers.removeValue(forKey: id)?.stop()
             defer { if enabled, !shuttingDown { watch(id) } }
             let committed = try store.commitUpdate(staged, replacing: preview.installed) {
@@ -528,6 +557,7 @@ final class SourceExtensionManager {
 
     func stopAll() async {
         shuttingDown = true
+        synchronizeCompanions()
         epochs.removeAll()
         reloadTasks.values.forEach { $0.cancel() }; reloadTasks.removeAll()
         watchers.values.forEach { $0.stop() }; watchers.removeAll()
@@ -545,6 +575,10 @@ final class SourceExtensionManager {
             throw SourcePackageError.invalid(L("This extension is disabled."))
         }
         guard !runtime.actionInProgress else { throw SourcePackageError.invalid(L("This extension is already processing an action.")) }
+        let commands = runtime.snapshot.manifest.commands.filter { $0.trigger != "companion" }
+        let command = commandIdentifier.flatMap { id in commands.first { $0.identifier == id } }
+            ?? (commandIdentifier == nil ? commands.first : nil)
+        guard let command else { throw SourcePackageError.invalid(L("This extension has no command.")) }
         var input: [String: Any] = ["text": text, "settings": runtime.settings]
         if let sentence {
             let selected = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -560,9 +594,6 @@ final class SourceExtensionManager {
         if runtime.worker.generation == nil { try await replaceWorker(runtime) }
         try Task.checkCancellation()
         guard active[id] === runtime, state.enabled[id] == true, !shuttingDown else { throw CancellationError() }
-        let command = commandIdentifier.flatMap { id in runtime.snapshot.manifest.commands.first { $0.identifier == id } }
-            ?? (commandIdentifier == nil ? runtime.snapshot.manifest.commands.first : nil)
-        guard let command else { throw SourcePackageError.invalid(L("This extension has no command.")) }
         let worker = runtime.worker, gate = runtime.gate
         gate.invoking = true; gate.calls = 0; gate.model = nil
         defer { gate.invoking = false }
@@ -691,11 +722,13 @@ final class SourceExtensionManager {
             configurationErrors.removeValue(forKey: id)
             if pending[id] === worker { pending.removeValue(forKey: id) }
             state.enabled[id] = true
-            if approving { state.permissions[id] = snapshot.manifest.permissions }
+            if approving { Self.recordApproval(snapshot.manifest, in: &state) }
+            else if snapshot.manifest.companionGrant == nil { state.companionGrants?.removeValue(forKey: id) }
             if wasMissing, let base = definitions[id]?.base,
                let origin = base == bundledCatalogURL ? marketplaceCatalogURL : base {
                 recordCatalogOrigin(origin, for: id)
             }
+            if state.companionGrants?[id] != nil || old?.snapshot.manifest.companionGrant != nil { synchronizeCompanions() }
             synchronizeSelectionActions()
             if let old { await old.worker.stop() }
             guard epochs[id] == epoch, active[id] === runtime, !shuttingDown else { throw CancellationError() }
@@ -718,13 +751,24 @@ final class SourceExtensionManager {
         }
     }
 
+    private static func recordApproval(_ manifest: SourceExtensionManifest, in state: inout State) {
+        state.permissions[manifest.identifier] = manifest.permissions
+        if let grant = manifest.companionGrant {
+            if state.companionGrants == nil { state.companionGrants = [:] }
+            state.companionGrants?[manifest.identifier] = grant
+        } else { state.companionGrants?.removeValue(forKey: manifest.identifier) }
+    }
+
     private func reviewPermissions(for manifest: SourceExtensionManifest, approved: [String]?, approving: Bool,
                                    epoch: UUID) throws {
         let id = manifest.identifier
         guard approving || approved.map({ Set(manifest.permissions).isSubset(of: Set($0)) }) == true else {
             throw SourcePackageError.invalid(L("This edit requests new permissions. Disable and re-enable the extension to approve them."))
         }
-        guard !headless else { return }
+        guard !headless else {
+            if manifest.companionGrant != nil { throw CancellationError() }
+            return
+        }
         if manifest.runtime == "native", !(approved ?? []).contains("native.execute") {
             guard approving, onApproveNativeExecution?(manifest) == true else {
                 statuses[id] = active[id] == nil
@@ -734,6 +778,10 @@ final class SourceExtensionManager {
                 throw CancellationError()
             }
             guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
+        }
+        if let grant = manifest.companionGrant, state.companionGrants?[id] != grant {
+            guard approving, onApproveCompanion?(manifest, grant) == true,
+                  epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
         }
         if let review = SourceSelectionPermissionReview.required(requested: manifest.permissions, approved: approved ?? []) {
             guard approving else { throw CancellationError() }
@@ -786,8 +834,19 @@ final class SourceExtensionManager {
         guard gate.invoking, !shuttingDown, snapshot.manifest.permissions.contains("ai.transform") else {
             throw SourcePackageError.invalid(L("AI requests require an explicit current tool action."))
         }
+        try Task.checkCancellation()
+        if let invocation = gate.companion {
+            guard companionRuntime(invocation.route, generation: invocation.generation,
+                                   command: invocation.command)?.gate === gate else {
+                throw CompanionService.Failure.unavailable
+            }
+        }
         gate.calls += 1
-        guard gate.calls <= 8 else { throw SourcePackageError.invalid(L("This tool exceeded the AI calls allowed for one action.")) }
+        guard gate.calls <= (gate.companion == nil ? 8 : 1) else {
+            throw SourcePackageError.invalid(L("This tool exceeded the AI calls allowed for one action."))
+        }
+        var payload = payload
+        if gate.companion != nil { payload.removeValue(forKey: "model") }
         if let test = testStreamingTransform, let onProgress {
             let result = try await test(payload) { update in
                 guard gate.invoking, !Task.isCancelled else { return }
@@ -864,7 +923,9 @@ final class SourceExtensionManager {
         guard watchers[id] == nil, let url = sourceURL(for: id) else { return }
         let watcher = SourceFileWatcher(rootURL: url) { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self, self.state.enabled[id] == true, !self.shuttingDown else { return }
+                guard let self, !self.shuttingDown else { return }
+                if self.state.companionGrants?[id] != nil { self.synchronizeCompanions() }
+                guard self.state.enabled[id] == true else { return }
                 self.reloadTasks[id]?.cancel()
                 self.reloadTasks[id] = Task { [weak self] in try? await self?.reload(id) }
             }
@@ -928,7 +989,8 @@ final class SourceExtensionManager {
         guard FileManager.default.fileExists(atPath: cacheURL(id).path) else { return }
         let snapshot = try SourcePackageInspector.snapshot(at: cacheURL(id))
         guard snapshot.manifest.identifier == id,
-              Set(snapshot.manifest.permissions).isSubset(of: Set(state.permissions[id] ?? [])) else { return }
+              Set(snapshot.manifest.permissions).isSubset(of: Set(state.permissions[id] ?? [])),
+              snapshot.manifest.companionGrant == state.companionGrants?[id] else { return }
         let schema = try parseSchema(snapshot), values = try loadSettings(id, schema: schema)
         let (worker, gate) = try await makeWorker(snapshot: snapshot, settings: values, epoch: epoch)
         guard !shuttingDown, state.enabled[id] == true, epochs[id] == epoch else {
@@ -970,5 +1032,76 @@ final class SourceExtensionManager {
         !headless && snapshot.manifest.permissions.contains("selection.read") && snapshot.manifest.permissions.contains("ui.panel") &&
             snapshot.manifest.commands.contains { $0.trigger == "selection" }
     }
-    private func notify() { onChange?() }
+    private func retainsCompanionGrant(for route: CompanionService.Route) -> Bool {
+        let id = route.extensionID
+        guard !shuttingDown, state.permissions[id]?.contains(SourceCompanionGrant.permission) == true,
+              let grant = state.companionGrants?[id], grant.chromeExtensionID == route.companionID,
+              let source = sourceURL(for: id),
+              let directory = try? source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+              directory.isDirectory == true, directory.isSymbolicLink != true else { return false }
+        let url = source.appendingPathComponent("extension.json")
+        let limit = 64 * 1024
+        guard let file = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+              file.isRegularFile == true, file.isSymbolicLink != true, (file.fileSize ?? limit + 1) <= limit,
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= limit,
+              let manifest = try? JSONDecoder().decode(SourceExtensionManifest.self, from: data),
+              manifest.identifier == id, (try? manifest.validate()) != nil else { return false }
+        return manifest.companionGrant == grant
+    }
+
+    private func companionRuntime(_ route: CompanionService.Route, generation: String, command: String?) -> Running? {
+        let id = route.extensionID
+        guard selectionActionsEnabled, state.enabled[id] == true, let runtime = active[id],
+              runtime.activationGeneration == generation,
+              let grant = runtime.snapshot.manifest.companionGrant, grant == state.companionGrants?[id],
+              command.map(grant.commands.contains) ?? true, retainsCompanionGrant(for: route) else { return nil }
+        return runtime
+    }
+
+    private func performCompanionCommand(_ route: CompanionService.Route, generation: String,
+                                         command: String, payload: String) async throws -> String {
+        guard let runtime = companionRuntime(route, generation: generation, command: command) else {
+            throw CompanionService.Failure.unavailable
+        }
+        guard !runtime.actionInProgress else { throw CompanionService.Failure.busy }
+        runtime.actionInProgress = true
+        defer { runtime.actionInProgress = false }
+
+        if runtime.worker.generation == nil { try await replaceWorker(runtime) }
+        try Task.checkCancellation()
+        guard companionRuntime(route, generation: generation, command: command) === runtime else {
+            throw CompanionService.Failure.unavailable
+        }
+        let worker = runtime.worker
+        let gate = runtime.gate
+        gate.companion = CompanionInvocation(route: route, generation: generation, command: command)
+        gate.invoking = true; gate.calls = 0; gate.model = nil
+        defer { gate.invoking = false; gate.companion = nil }
+        let result = try await worker.invoke(command: command, input: ["text": payload, "settings": runtime.settings])
+        try Task.checkCancellation()
+        guard companionRuntime(route, generation: generation, command: command) === runtime, runtime.worker === worker else {
+            throw CompanionService.Failure.unavailable
+        }
+        guard let text = result["text"] as? String else { throw CompanionService.Failure.failed }
+        return text
+    }
+
+    private func synchronizeCompanions() {
+        guard !headless else { return }
+        var routes: [CompanionService.Route: String?] = [:]
+        for (id, grant) in state.companionGrants ?? [:] {
+            let route = CompanionService.Route(extensionID: id, companionID: grant.chromeExtensionID)
+            guard retainsCompanionGrant(for: route) else { continue }
+            let runtime = active[id]
+            let enabled = selectionActionsEnabled && state.enabled[id] == true && runtime?.snapshot.manifest.companionGrant == grant
+            routes.updateValue(enabled ? runtime?.activationGeneration : nil, forKey: route)
+            watch(id)
+        }
+        companionService.setRoutes(routes)
+    }
+
+    private func notify() {
+        synchronizeCompanions()
+        onChange?()
+    }
 }

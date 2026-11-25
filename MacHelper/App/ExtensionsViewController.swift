@@ -117,6 +117,22 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn
         }
+        manager.onApproveCompanion = { [weak self] manifest, grant in
+            guard self != nil else { return false }
+            let alert = NSAlert()
+            alert.messageText = L("Allow a browser companion for “%@”?", manifest.displayName)
+            // Keep these exact identifiers legible in right-to-left interface languages.
+            let chromeID = "\u{2066}\(grant.chromeExtensionID)\u{2069}"
+            let commands = grant.commands.sorted().map { "• \u{2066}\($0)\u{2069}" }.joined(separator: "\n")
+            var disclosure = L("Chrome extension %@ can request only these commands.\n\n%@\n\nDisable the extension in MacHelper or pause MacHelper to stop companion requests.", chromeID, commands)
+            if grant.allowsAI {
+                disclosure += "\n\n" + L("These commands can send data automatically through your saved AI Connection. If you choose ChatGPT, it processes that data online.")
+            }
+            alert.informativeText = disclosure
+            alert.addButton(withTitle: L("Allow Browser Companion"))
+            alert.addButton(withTitle: L("Cancel"))
+            return alert.runModal() == .alertFirstButtonReturn
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

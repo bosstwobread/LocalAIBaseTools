@@ -106,6 +106,14 @@ The `runtime` field is explicit and validated; MacHelper does not infer runtime 
 
 A migration preserves the identifier and compatible setting keys, rewrites commands for the target API, and changes `runtime`/`entryPoint`. Moving JavaScript to native adds `native.execute`. If it has not already been granted, automatic reload retains the previous generation and requires disable/re-enable approval before compilation/execution. Any other newly requested capability also requires re-enabling. Failed or unapproved reloads retain the previous generation. Returning to JavaScript removes `native.execute`, validates the JavaScript entry, and replaces the native worker. Renaming source files alone does not convert a tool.
 
+### Local browser companions (MacHelper 6.8.0)
+
+Develop the browser extension and its Native Messaging program in your own project. Add a `companion` object to the source manifest with `"chromeExtensionID"` set to the stable 32-letter Chrome extension ID. Declare `companion.message` and use `"trigger": "companion"` on each command the bridge may invoke. Native and JavaScript tools use the usual source package and command handlers. MacHelper’s installed app contains the Swift SDK, and a MacHelper source checkout is unnecessary.
+
+MacHelper prompts for access before an extension can accept a companion request. The approval covers the installed tool, the exact companion ID, its companion command IDs, and automatic shared AI access when `ai.transform` is declared. A scope change requires a new approval. Disable the tool or pause MacHelper in **General** to stop requests and active work.
+
+The worker receives the payload as `input.text`, runs its ordinary command implementation, and returns the reply in `text`. Only the extension knows the payload schema and supplies its packaged prompts and result validation. Companion commands access their own tool settings through the worker input. They receive no selected text and do not show a MacHelper result panel. With approved AI access, a companion command may make one transformation using the saved provider and model. See the [wire protocol](MacHelper-Protocol.md#local-companion-protocol-machelper-680).
+
 ### Extension-owned interface translations (MacHelper 6.2+)
 
 MacHelper's General settings choose the interface language independently of a tool's translation target. A manifest may declare `"localizations": "localizations.json"`, using a safe relative `.json` resource path. Include that file in the source inventory:

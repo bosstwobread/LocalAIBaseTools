@@ -116,6 +116,8 @@ return ["text": result["text"] as? String ?? "", "title": "My Tool"]
 
 Shared AI is limited to eight calls per explicit action. The extension owns the prompt. `systemPrompt` reaches the selected provider unchanged; `text` remains separate data. Use an empty model to follow shared **AI Connection** settings. Use `JSONSerialization` if the prompt documents structured input such as target language/context. Treat input text as data, keep provider tools disabled through the shared broker, and never request inference merely because an extension loaded or text became selected.
 
+An approved [companion command](Source-Extensions.md#local-browser-companions-machelper-680) receives the message as `input.text`. Decode and validate it in your own Swift handler. Return the reply as `["text": reply]`. Use the existing invocation-scoped `input.transform(request:)` if the tool declares `ai.transform`. MacHelper uses the saved provider and model and permits one AI call for that companion invocation.
+
 ## Compilation, caching, and reload
 
 MacHelper invokes a fixed Swift compiler path through `xcrun`, combining its SDK with the validated frozen Swift entry. The manifest cannot specify a shell script, custom executable, compiler flags, SwiftPM dependencies, or arbitrary build hooks. The initial native format supports one Swift entry file; additional `.swift` helper files are rejected. Every file in a native source inventory must be UTF-8 text without NUL, and the inventory must contain exactly one Swift file matching the entry point. Prefer self-contained tools and standard frameworks.

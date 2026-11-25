@@ -38,7 +38,8 @@ def main():
     if platform.system() != "Darwin":
         parser.error("Native extension checks require macOS and Swift command-line tools.")
     host, worker, helper = executables(args)
-    with tempfile.TemporaryDirectory(prefix="mac-helper-native-extensions-") as temporary:
+    # Darwin Unix socket paths have a short fixed byte limit.
+    with tempfile.TemporaryDirectory(prefix="mh-native-", dir="/tmp") as temporary:
         workspace = Path(temporary).resolve()
         if workspace.is_relative_to(ROOT.resolve()):
             raise RuntimeError("The native check must use an isolated temporary directory.")

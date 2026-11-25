@@ -30,7 +30,7 @@ When `systemPrompt` is supplied, `text` is opaque extension-prepared data and ma
 Missing/empty `model` uses the model saved in MacHelper. A nonempty model overrides it without changing preferences. Optional `provider` (`chatgpt`, `ollama`, `lmstudio`) and `baseURL` fields let the settings UI test unsaved choices. A changed provider resets inherited model/address; the client must supply any desired override. These are per-request settings, never persisted by the host. HTTP addresses must be loopback; remote endpoints and redirects are rejected.
 
 ```json
-{"id":"unique-id","ok":true,"version":"6.7.6","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.8.0","model":"actual-model-id","text":"你好"}
 ```
 
 Opt in to incremental output with `"stream": true` on a text request. The helper sends ordered progress frames as the provider produces text:
@@ -38,7 +38,7 @@ Opt in to incremental output with `"stream": true` on a text request. The helper
 ```json
 {"id":"unique-id","event":"delta","delta":"你","model":"actual-model-id"}
 {"id":"unique-id","event":"delta","delta":"好","model":"actual-model-id"}
-{"id":"unique-id","ok":true,"version":"6.7.6","model":"actual-model-id","text":"你好"}
+{"id":"unique-id","ok":true,"version":"6.8.0","model":"actual-model-id","text":"你好"}
 ```
 
 Progress is provisional. Append `delta` for display, keep reading until the ordinary terminal `ok` response, and replace the displayed text with that validated final answer. A terminal error after partial output remains a failed/incomplete answer. Closing stdin cancels the request and stops further progress. Missing/false `stream` retains one terminal response, including for existing browser clients. `ping` and `listModels` do not stream.
@@ -50,6 +50,22 @@ Browser clients need explicit extension-ID registration. Native clients omit the
 The source-worker bridge uses its own framed process connection and generation identifiers. Source changes create a replacement worker after candidate validation; the host cancels stopped generations and ignores their stale responses. Extension JavaScript only receives declared capabilities and frozen package resources, not the helper executable path or this native-client authority. Browsing a catalog, enabling a source tool, and selecting text do not authorize AI inference; an explicit tool action is required.
 
 Do not auto-send, paste without an approved, explicit Apply action, collect entire documents, or log private content. Both clipboard-assisted Apply methods belong to the source host’s separately approved `selection.paste` capability, not this framed AI transport; it provides no general clipboard or keyboard endpoint. Treat all selected/source text as untrusted input; display it as text, not executable HTML. Keep provider settings UI in MacHelper so more tools can share one configuration.
+
+### Local companion protocol (MacHelper 6.8.0)
+
+The companion project owns its Chrome Native Messaging registration and bridge. Register only its exact Chrome origin and verify the origin Chrome supplies before forwarding a message. The bridge is a same-user local client. MacHelper rechecks the declared extension ID and approved command scope. Its socket is separate from website discovery and the legacy framed host.
+
+Resolve the macOS per-user temporary directory using `confstr(_CS_DARWIN_USER_TEMP_DIR)` and open `mh-companion/endpoint` in that directory. The app creates the directory with mode `0700`. The regular endpoint file contains a generated socket basename of 32 lowercase hexadecimal characters followed by `.sock`. Verify same-user ownership and file types, and refuse symlinks. Connect to the Unix socket in the same directory.
+
+Frames use a four-byte little-endian length followed by UTF-8 JSON. The complete JSON frame limit is 128 KiB. Opaque request and response strings are limited to 32 KiB each. An invocation accepts one request per connection.
+
+```json
+{"type":"invoke","extension":"com.example.tool","companion":"abcdefghijklmnopabcdefghijklmnop","command":"receive","payload":"{\"text\":\"example\"}"}
+```
+
+The result is `{"ok":true,"payload":"..."}` with the worker’s `text` string. Errors use `{"ok":false,"error":"..."}` with `invalid`, `unavailable`, `busy`, or `failed`. Parallel work is bounded and each source extension has at most one in-flight companion command. Closing the connection, disabling the tool, pausing MacHelper, or replacing the worker generation cancels pending work.
+
+A separate connection can send `{"type":"watchStatus","extension":"com.example.tool","companion":"abcdefghijklmnopabcdefghijklmnop"}`. It receives `{"type":"status","enabled":true}` or `{"type":"status","enabled":false}` immediately and when effective state changes. It can remain open while the approved source is installed. Changing or removing its scope closes the connection. The bridge should reconnect and request fresh status after disconnect.
 
 ## Extension discovery (MacHelper 6.3)
 
@@ -65,7 +81,7 @@ This native action remains available for compatible local clients, including his
 {
   "id": "discovery-example",
   "ok": true,
-  "version": "6.7.6",
+  "version": "6.8.0",
   "search": {
     "revision": "<64 lowercase hexadecimal characters>",
     "updatedAt": "2026-11-17T00:00:00Z",
@@ -92,9 +108,9 @@ The website’s AI search action is **Find with AI**. First validate the need lo
 
 | Request | Authentication and body | Success response |
 | --- | --- | --- |
-| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.7.6",protocolVersion:1}` |
+| `GET /v1/status` | Client/Origin/Host headers; no token | `{ok:true,version:"6.7.7",protocolVersion:1}` |
 | `POST /v1/session` | Client/Origin/Host headers; `{}` | `{ok:true,token:"<opaque random token>",expiresIn:1800}` |
-| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.7.6",search:<discovery result>}` |
+| `POST /v1/search` | `Authorization: Bearer <token>`; `{requestId,query,language}` | `{ok:true,version:"6.7.7",search:<discovery result>}` |
 | `POST /v1/cancel` | `Authorization: Bearer <token>`; `{requestId}` | `{ok:true,cancelled:<boolean>}` |
 
 `requestId` is 1–80 ASCII letters, digits, `_`, or `-`. Search `query` has the native discovery bounds above: nonblank, no NUL, at most 2,000 UTF-16 units and 8,000 UTF-8 bytes. `language` uses the supported interface codes above. Additional fields are rejected. The `search` object follows the revision/model/matches contract above; results are terminal, rather than streamed. Only an explicit **Find with AI** action may start ranking.

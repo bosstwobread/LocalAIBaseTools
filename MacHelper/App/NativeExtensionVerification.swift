@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import MacHelper
+import Network
 
 /// Real compiler/worker checks with synthetic inputs and isolated preferences.
 /// This path never starts Accessibility monitors or opens a native window.
@@ -198,6 +199,20 @@ enum NativeExtensionVerification {
             let calls = probe.calls
             try await recovered.prepareSettings(for: id)
             try check(recovered.workerPID(for: id) == nil && probe.calls == calls, "Disabled native settings restarted execution.")
+            let companionDirectory = root.appendingPathComponent("companion", isDirectory: true)
+            let companionProbe = AIProbe()
+            let companionManager = SourceExtensionManager(
+                workerExecutableURL: workerURL, helperExecutableURL: helperURL, bundledCatalogURL: catalog,
+                stateDirectory: root.appendingPathComponent("companion-state"), nativeSDKURL: sdkURL,
+                sourceDirectory: root.appendingPathComponent("companion-sources"), headless: false,
+                testTransform: { try await companionProbe.transform($0, progress: { _ in }) },
+                companionSocketDirectory: companionDirectory
+            )
+            managers.append(companionManager)
+            workers.append(contentsOf: try await verifyCompanions(
+                authorDirectory: root, socketDirectory: companionDirectory, manager: companionManager, probe: companionProbe
+            ))
+            checks.append("approved native and JavaScript companion commands use exact routes, bounded AI, and live status and cancellation")
             for current in managers { await current.stopAll() }
             try await eventually("Native verification left a worker process running.") { workers.allSatisfy { !processExists($0) } }
             emit(["success": true, "hostPID": Int(hostPID), "workerPIDs": workers.map(Int.init), "checks": checks])
@@ -206,6 +221,231 @@ enum NativeExtensionVerification {
             for manager in managers { await manager.stopAll() }
             emit(["success": false, "hostPID": Int(hostPID), "workerPIDs": workers.map(Int.init), "checks": checks, "error": error.localizedDescription])
             return 1
+        }
+    }
+
+    private struct CompanionRequest: Encodable {
+        let type: String
+        let extensionID: String
+        let companion: String
+        var command: String? = nil
+        var payload: String? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case type, companion, command, payload
+            case extensionID = "extension"
+        }
+    }
+
+    private struct CompanionReply: Decodable {
+        let ok: Bool?
+        let payload: String?
+        let error: String?
+        let type: String?
+        let enabled: Bool?
+    }
+
+    private static func verifyCompanions(authorDirectory: URL, socketDirectory: URL,
+                                         manager: SourceExtensionManager, probe: AIProbe) async throws -> [Int32] {
+        func check(_ value: Bool, _ message: String) throws {
+            if !value { throw Failure(message: message) }
+        }
+
+        let nativeID = "com.example.native-companion"
+        let scriptID = "com.example.script-companion"
+        let nativeBrowser = String(repeating: "a", count: 32)
+        let scriptBrowser = String(repeating: "b", count: 32)
+        let endpoint = socketDirectory.appendingPathComponent("endpoint")
+        let nativeSource = try makeCompanionFixture(in: authorDirectory, id: nativeID, browser: nativeBrowser, native: true)
+        let scriptSource = try makeCompanionFixture(in: authorDirectory, id: scriptID, browser: scriptBrowser, native: false)
+        let nativeWatch = CompanionRequest(type: "watchStatus", extensionID: nativeID, companion: nativeBrowser)
+        let scriptWatch = CompanionRequest(type: "watchStatus", extensionID: scriptID, companion: scriptBrowser)
+        let opaque = " Synthetic input with quotes: \"text\".\n"
+
+        func invoke(_ id: String, _ browser: String, _ command: String, _ payload: String) async throws -> CompanionReply? {
+            let message = CompanionRequest(type: "invoke", extensionID: id, companion: browser, command: command, payload: payload)
+            let connection = try await openCompanionSocket(in: socketDirectory, request: message)
+            defer { connection.cancel() }
+            return try await readCompanionFrame(from: connection)
+        }
+
+        await manager.start()
+        try await manager.importSource(from: nativeSource)
+        try await manager.importSource(from: scriptSource)
+        manager.onApproveNativeExecution = { $0.identifier == nativeID }
+        manager.onApproveCompanion = { _, _ in false }
+        do {
+            try await manager.setEnabled(true, for: nativeID)
+            throw Failure(message: "A denied companion grant started a worker.")
+        } catch is CancellationError { }
+        try check(manager.workerPID(for: nativeID) == nil && !FileManager.default.fileExists(atPath: endpoint.path),
+                  "A denied companion grant exposed a worker or endpoint.")
+
+        manager.onApproveCompanion = { manifest, grant in
+            switch manifest.identifier {
+            case nativeID: return grant.chromeExtensionID == nativeBrowser && grant.commands == ["ai", "echo"] && grant.allowsAI
+            case scriptID: return grant.chromeExtensionID == scriptBrowser && grant.commands == ["echo", "no-ai"] && !grant.allowsAI
+            default: return false
+            }
+        }
+        try await manager.setEnabled(true, for: nativeID)
+        try await manager.setEnabled(true, for: scriptID)
+        guard let nativePID = manager.workerPID(for: nativeID), let scriptPID = manager.workerPID(for: scriptID),
+              nativePID != scriptPID, nativePID != getpid(), scriptPID != getpid() else {
+            throw Failure(message: "The companion fixtures did not run in independent workers.")
+        }
+        try await eventually("No approved companion endpoint was published.", timeout: 5) {
+            FileManager.default.fileExists(atPath: endpoint.path)
+        }
+
+        let nativeWatcher = try await openCompanionSocket(in: socketDirectory, request: nativeWatch)
+        let scriptWatcher = try await openCompanionSocket(in: socketDirectory, request: scriptWatch)
+        defer { nativeWatcher.cancel(); scriptWatcher.cancel() }
+        try await expectCompanionStatus(true, from: nativeWatcher)
+        try await expectCompanionStatus(true, from: scriptWatcher)
+        let wrongBrowser = try await invoke(nativeID, scriptBrowser, "echo", opaque)
+        let wrongCommand = try await invoke(scriptID, scriptBrowser, "ai", opaque)
+        try check(wrongBrowser?.error == "unavailable" && wrongCommand?.error == "unavailable",
+                  "An unapproved companion identity or command reached a worker.")
+        let nativeEcho = try await invoke(nativeID, nativeBrowser, "echo", opaque)
+        let scriptEcho = try await invoke(scriptID, scriptBrowser, "echo", opaque)
+        try check(nativeEcho?.ok == true && nativeEcho?.payload == opaque && scriptEcho?.ok == true && scriptEcho?.payload == opaque,
+                  "A companion payload changed while crossing the worker boundary.")
+
+        let deniedAI = try await invoke(scriptID, scriptBrowser, "no-ai", opaque)
+        try check(deniedAI?.payload == "denied" && probe.calls == 0, "An ungranted companion invoked shared AI.")
+        let translated = try await invoke(nativeID, nativeBrowser, "ai", opaque)
+        try check(translated?.payload == "AI:" + opaque && probe.calls == 1 && probe.latest["model"] == nil &&
+                  probe.latest["systemPrompt"] as? String == "Fixture instructions.\n",
+                  "Companion AI ignored its one-call budget, used a model override, or changed the packaged prompt.")
+
+        probe.blockNext = true
+        let inFlight = Task { try await invoke(nativeID, nativeBrowser, "ai", opaque) }
+        defer { inFlight.cancel() }
+        try await eventually("The companion invocation did not reach the synthetic provider.", timeout: 5) { probe.blocked }
+        manager.setSelectionActionsEnabled(false)
+        try await expectCompanionStatus(false, from: nativeWatcher)
+        try await expectCompanionStatus(false, from: scriptWatcher)
+        try await eventually("Pausing MacHelper did not cancel in-flight companion AI.", timeout: 5) { probe.cancellations == 1 }
+        let cancelled = try await inFlight.value
+        try check(cancelled == nil, "A paused companion published a stale result.")
+        let paused = try await invoke(scriptID, scriptBrowser, "echo", opaque)
+        try check(paused?.error == "unavailable", "Paused MacHelper accepted a companion command.")
+        manager.setSelectionActionsEnabled(true)
+        try await expectCompanionStatus(true, from: nativeWatcher)
+        try await expectCompanionStatus(true, from: scriptWatcher)
+
+        try await manager.setEnabled(false, for: nativeID)
+        try await expectCompanionStatus(false, from: nativeWatcher)
+        guard let installed = manager.sourceURL(for: nativeID) else {
+            throw Failure(message: "The disabled companion fixture was unexpectedly removed.")
+        }
+        try FileManager.default.removeItem(at: installed)
+        let removed = try await readCompanionFrame(from: nativeWatcher)
+        try check(removed == nil, "Removing one companion left its watcher open.")
+        let retained = try await invoke(scriptID, scriptBrowser, "echo", opaque)
+        try check(retained?.payload == opaque && probe.calls == 2, "Removing one companion disturbed the remaining route.")
+        return [nativePID, scriptPID]
+    }
+
+    private static func makeCompanionFixture(in directory: URL, id: String, browser: String, native: Bool) throws -> URL {
+        let source = directory.appendingPathComponent(id)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let entry = native ? "Main.swift" : "main.js"
+        let permissions = [SourceCompanionGrant.permission] + (native ? ["native.execute", "ai.transform"] : [])
+        let commands = ["echo", native ? "ai" : "no-ai"].map {
+            SourceExtensionCommand(identifier: $0, title: $0, trigger: "companion")
+        }
+        let manifest = SourceExtensionManifest(runtime: native ? "native" : "javascript", identifier: id,
+            displayName: "Companion fixture", version: "1.0.0", summary: "Isolated companion verification",
+            entryPoint: entry, permissions: permissions, commands: commands,
+            companion: SourceCompanion(chromeExtensionID: browser))
+        try JSONEncoder().encode(manifest).write(to: source.appendingPathComponent("extension.json"))
+        if native {
+            let script = """
+            import Foundation
+            @main struct NativeCompanionFixture {
+                static func main() {
+                    MacHelperNative.run(commands: [
+                        "echo": { ["text": $0.text] },
+                        "ai": { input in
+                            let request: [String: Any] = ["action": "translate", "text": input.text,
+                                "model": "fixture-override", "systemPrompt": try input.readText("reply.txt")]
+                            let answer = try await input.transform(request: request)
+                            do {
+                                _ = try await input.transform(request: request)
+                                return ["text": "Exceeded the approved budget."]
+                            } catch { return ["text": answer["text"] as? String ?? ""] }
+                        }
+                    ])
+                }
+            }
+            """
+            try Data(script.utf8).write(to: source.appendingPathComponent(entry))
+            try Data("Fixture instructions.\n".utf8).write(to: source.appendingPathComponent("reply.txt"))
+        } else {
+            let script = """
+            MacHelper.define({commands:{
+                echo(input) { return {text:input.text}; },
+                async "no-ai"(input) {
+                    try {
+                        await MacHelper.ai.transform({action:"translate",text:input.text});
+                        return {text:"Denied capability executed."};
+                    } catch { return {text:"denied"}; }
+                }
+            }});
+            """
+            try Data(script.utf8).write(to: source.appendingPathComponent(entry))
+        }
+        return source
+    }
+
+    private static func openCompanionSocket(in directory: URL, request: CompanionRequest) async throws -> NWConnection {
+        let socket = try String(contentsOf: directory.appendingPathComponent("endpoint"), encoding: .utf8)
+        let connection = NWConnection(to: .unix(path: directory.appendingPathComponent(socket).path), using: .tcp)
+        let frame = try NativeFrameEncoder.encode(request)
+        connection.start(queue: .global())
+        do {
+            try await withCheckedThrowingContinuation { (result: CheckedContinuation<Void, Error>) in
+                connection.send(content: frame, completion: .contentProcessed { error in
+                    if let error { result.resume(throwing: error) }
+                    else { result.resume() }
+                })
+            }
+        } catch {
+            connection.cancel()
+            throw error
+        }
+        return connection
+    }
+
+    private static func readCompanionFrame(from connection: NWConnection) async throws -> CompanionReply? {
+        let deadline = Task {
+            do { try await Task.sleep(for: .seconds(4)); connection.cancel() }
+            catch { }
+        }
+        defer { deadline.cancel() }
+        func read(_ count: Int) async throws -> Data? {
+            try await withCheckedThrowingContinuation { result in
+                connection.receive(minimumIncompleteLength: count, maximumLength: count) { data, _, _, error in
+                    if let error { result.resume(throwing: error) }
+                    else { result.resume(returning: data) }
+                }
+            }
+        }
+        guard let header = try await read(4) else { return nil }
+        guard header.count == 4 else { throw Failure(message: "An incomplete companion frame arrived.") }
+        let length = Int(header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.littleEndian)
+        guard (1...CompanionService.maximumFrameBytes).contains(length), let body = try await read(length), body.count == length else {
+            throw Failure(message: "A companion frame was invalid or unbounded.")
+        }
+        return try JSONDecoder().decode(CompanionReply.self, from: body)
+    }
+
+    private static func expectCompanionStatus(_ enabled: Bool, from connection: NWConnection) async throws {
+        let update = try await readCompanionFrame(from: connection)
+        guard update?.type == "status", update?.enabled == enabled else {
+            throw Failure(message: "The companion watcher did not receive the expected effective status.")
         }
     }
 

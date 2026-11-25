@@ -32,6 +32,20 @@ public enum SourceSelectionPermissionReview: Equatable {
     }
 }
 
+public struct SourceCompanion: Codable, Equatable, Sendable {
+    public let chromeExtensionID: String
+
+    public init(chromeExtensionID: String) { self.chromeExtensionID = chromeExtensionID }
+}
+
+public struct SourceCompanionGrant: Codable, Equatable, Sendable {
+    public static let permission = "companion.message"
+
+    public let chromeExtensionID: String
+    public let commands: [String]
+    public let allowsAI: Bool
+}
+
 public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let runtime: String
@@ -45,17 +59,26 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let settingsSchema: String?
     public let localizations: String?
     public let icon: String?
+    public let companion: SourceCompanion?
 
     public init(schemaVersion: Int = 2, runtime: String = "javascript", identifier: String,
                 displayName: String, version: String, summary: String, entryPoint: String = "main.js",
                 permissions: [String], commands: [SourceExtensionCommand], settingsSchema: String? = nil,
-                localizations: String? = nil, icon: String? = nil) {
+                localizations: String? = nil, icon: String? = nil, companion: SourceCompanion? = nil) {
         self.schemaVersion = schemaVersion; self.runtime = runtime; self.identifier = identifier
         self.displayName = displayName; self.version = version; self.summary = summary
         self.entryPoint = entryPoint; self.permissions = permissions; self.commands = commands
         self.settingsSchema = settingsSchema
         self.localizations = localizations
         self.icon = icon
+        self.companion = companion
+    }
+
+    public var companionGrant: SourceCompanionGrant? {
+        guard let companion, permissions.contains(SourceCompanionGrant.permission) else { return nil }
+        return SourceCompanionGrant(chromeExtensionID: companion.chromeExtensionID,
+                                    commands: commands.filter { $0.trigger == "companion" }.map(\.identifier).sorted(),
+                                    allowsAI: permissions.contains("ai.transform"))
     }
 
     public func validate() throws {
@@ -83,7 +106,8 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         }
         // Accept old immutable packages' clipboard declaration for compatibility;
         // the current source-worker API does not provide a clipboard reader.
-        var allowed: Set<String> = ["selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel"]
+        var allowed: Set<String> = ["selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel",
+                                    SourceCompanionGrant.permission]
         if runtime == "native" { allowed.insert("native.execute") }
         guard permissions.count <= allowed.count, Set(permissions).count == permissions.count,
               permissions.allSatisfy(allowed.contains), !commands.isEmpty, commands.count <= 16,
@@ -99,9 +123,18 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         if permissions.contains("selection.paste"), !Set(["selection.read", "selection.replace"]).isSubset(of: Set(permissions)) {
             throw SourcePackageError.invalid(L("Selected-text paste requires selection.read and selection.replace permissions."))
         }
+        if let grant = companionGrant {
+            guard grant.chromeExtensionID.range(of: #"\A[a-p]{32}\z"#, options: .regularExpression) != nil,
+                  !grant.commands.isEmpty else {
+                throw SourcePackageError.invalid("A companion needs an exact Chrome extension ID and a companion command.")
+            }
+        } else if companion != nil || permissions.contains(SourceCompanionGrant.permission) ||
+                    commands.contains(where: { $0.trigger == "companion" }) {
+            throw SourcePackageError.invalid("Companion commands require a companion declaration and companion.message permission.")
+        }
         for command in commands {
             guard command.identifier.range(of: #"^[a-z][a-z0-9-]{0,47}$"#, options: .regularExpression) != nil,
-                  SourcePackageRules.validText(command.title, limit: 160), ["selection", "manual"].contains(command.trigger) else {
+                  SourcePackageRules.validText(command.title, limit: 160), ["selection", "manual", "companion"].contains(command.trigger) else {
                 throw SourcePackageError.invalid("The source extension declares an invalid command.")
             }
             if let symbol = command.systemSymbolName,
