@@ -3,6 +3,6 @@
   "extensions": [
     "https://github.com/bosstwobread/LocalAIBaseTools/tree/ec371a870e017045a14524d5be32a974d4b11b1f/Extensions/Translation",
     "https://github.com/bosstwobread/LocalAIBaseTools/tree/ec371a870e017045a14524d5be32a974d4b11b1f/Extensions/Polish-input",
-    "https://github.com/bosstwobread/OnlineSubtitle-MacHelper/tree/8aab89caea6dfd7d2a34008bddf7bf5af17b545c/MacHelperExtension"
+    "https://github.com/bosstwobread/OnlineSubtitle-MacHelper/tree/6e7a340bd5cd3cd1855d3bb7d76079db319856c9/MacHelperExtension"
   ]
 }
