@@ -108,7 +108,7 @@ A migration preserves the identifier and compatible setting keys, rewrites comma
 
 ### Local browser companions (MacHelper 6.8.0)
 
-MacHelper 6.8 accepts a legacy `companion` object with `"chromeExtensionID"` set to the exact Chrome extension ID. That companion supplies and registers its own bridge. MacHelper 6.9 also accepts the managed declarations below. Both formats use `companion.message` and `"trigger": "companion"` on the commands the browser may invoke. Native and JavaScript tools use the same source lifecycle and command handlers. The installed app contains the public Swift SDK.
+MacHelper 6.8 accepts a legacy `companion` object with `"chromeExtensionID"` set to the exact Chrome extension ID. That companion supplies and registers its own bridge. MacHelper 6.9 also accepts a managed declaration for one or more browsers in local source packages. Both formats use `companion.message` and `"trigger": "companion"` on the commands the browser may invoke. Native and JavaScript tools use the same source lifecycle and command handlers. The installed app contains the public Swift SDK.
 
 MacHelper prompts for access before an extension can accept a companion request. The approval covers the installed tool, the exact companion ID, its companion command IDs, and automatic shared AI access when `ai.transform` is declared. A scope change requires a new approval. Disable the tool or pause MacHelper in **General** to stop requests and active work.
 
@@ -116,7 +116,9 @@ The worker receives the payload as `input.text`, runs its ordinary command imple
 
 #### Managed browser setup (MacHelper 6.9.0)
 
-Tools that communicate with browsers declare one entry per supported browser in `extension.json`. Source tools without a browser companion omit `companion` and its permission. Publish companion source, build instructions, and versioned artifacts in the tool's own public repository. The MacHelper source tree is unnecessary.
+For Marketplace publication, a tool with a browser companion must declare one entry each for Chrome, Microsoft Edge, and Safari in `extension.json`. Firefox is optional. Use the managed `companion.browsers` list for publication. Tools without a browser companion omit `companion`, `companion.message`, and companion-triggered commands.
+
+Publish the companion source, build instructions, and versioned artifacts in the tool's own public repository. Replace the example IDs and setup links with those for your companion builds.
 
 ```json
 {
@@ -128,9 +130,14 @@ Tools that communicate with browsers declare one entry per supported browser in 
         "storeURL": "https://chromewebstore.google.com/detail/example/abcdefghijklmnopabcdefghijklmnop"
       },
       {
-        "browser": "firefox",
-        "identifier": "example@example.com",
-        "sourceURL": "https://github.com/example/tool/blob/0123456789012345678901234567890123456789/BrowserCompanions/README.md"
+        "browser": "edge",
+        "identifier": "ponmlkjihgfedcbaponmlkjihgfedcba",
+        "storeURL": "https://microsoftedge.microsoft.com/addons/detail/example/ponmlkjihgfedcbaponmlkjihgfedcba"
+      },
+      {
+        "browser": "safari",
+        "identifier": "com.example.tool.SafariExtension",
+        "storeURL": "https://apps.apple.com/app/example/id1234567890"
       }
     ]
   }

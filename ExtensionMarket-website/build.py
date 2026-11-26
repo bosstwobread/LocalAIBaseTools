@@ -190,11 +190,10 @@ def validate_registered_files(manifest, files):
 
 
 def validate_browser_companions(companion):
-    chrome_id, browsers = companion.get("chromeExtensionID"), companion.get("browsers")
-    if browsers is None and isinstance(chrome_id, str) and re.fullmatch(r"[a-p]{32}", chrome_id):
-        return
-    if chrome_id is not None or not isinstance(browsers, list) or not 1 <= len(browsers) <= 4:
-        raise ValueError("Declare one companion per browser or use the legacy Chrome extension identifier.")
+    browsers = companion.get("browsers")
+    requirement = "Marketplace browser companions must include Chrome, Edge, and Safari."
+    if companion.get("chromeExtensionID") is not None or not isinstance(browsers, list) or len(browsers) > 4:
+        raise ValueError(requirement + " Declare one companion per browser in companion.browsers.")
     identifiers = {
         "chrome": r"[a-p]{32}",
         "edge": r"[a-p]{32}",
@@ -212,6 +211,11 @@ def validate_browser_companions(companion):
             raise ValueError("Invalid or duplicate browser companion identity.")
         declared.add(browser)
         validate_browser_companion_links(browser, identifier, item)
+
+    required = {"chrome": "Chrome", "edge": "Edge", "safari": "Safari"}
+    missing = [name for browser, name in required.items() if browser not in declared]
+    if missing:
+        raise ValueError(requirement + " Missing " + ", ".join(missing) + ".")
 
 
 def validate_browser_companion_links(browser, identifier, item):

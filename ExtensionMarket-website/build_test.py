@@ -18,6 +18,21 @@ market = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(market)
 
 
+def required_browser_companions():
+    identity = "abcdefghijklmnop" * 2
+    commit = "a" * 40
+    raw = f"https://raw.githubusercontent.com/example/source/{commit}/browser.json"
+    guide = f"https://github.com/example/source/blob/{commit}/README.md"
+    return [
+        {"browser": "chrome", "identifier": identity,
+         "storeURL": "https://chromewebstore.google.com/detail/example/" + identity,
+         "packageURL": raw, "packageSHA256": "b" * 64, "sourceURL": guide},
+        {"browser": "edge", "identifier": identity,
+         "packageURL": raw, "packageSHA256": "b" * 64},
+        {"browser": "safari", "identifier": "org.example.safari", "sourceURL": guide},
+    ]
+
+
 class NativeSourcePackagingTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="market-native-test-")
@@ -127,7 +142,7 @@ class NativeSourcePackagingTests(unittest.TestCase):
     def test_standalone_github_extension_is_indexed_without_hosting_its_source(self):
         self.manifest["permissions"].append("companion.message")
         self.manifest["commands"].append({"identifier": "listen", "title": "Listen", "trigger": "companion"})
-        self.manifest["companion"] = {"chromeExtensionID": "abcdefghijklmnop" * 2}
+        self.manifest["companion"] = {"browsers": required_browser_companions()}
         self.write_manifest()
         commit = "1234567890abcdef1234567890abcdef12345678"
         source_url = f"https://github.com/independent/example/tree/{commit}"
@@ -181,6 +196,14 @@ class NativeSourcePackagingTests(unittest.TestCase):
             self.assertFalse((output / "packages").exists())
 
             original = (output / "catalog.json").read_bytes()
+            manifest_bytes = files["extension.json"]
+            legacy_companion = {"chromeExtensionID": self.manifest["companion"]["browsers"][0]["identifier"]}
+            files["extension.json"] = json.dumps({**self.manifest, "companion": legacy_companion}).encode()
+            with self.assertRaisesRegex(ValueError, r"Chrome, Edge, and Safari\."):
+                self.build()
+            self.assertEqual((output / "catalog.json").read_bytes(), original)
+            files["extension.json"] = manifest_bytes
+
             files["marketplace/preview.json"] = b'{"schemaVersion":1,"layout":"html","html":"<script>invalid</script>"}'
             with self.assertRaises(ValueError):
                 self.build()
@@ -194,13 +217,14 @@ class NativeSourcePackagingTests(unittest.TestCase):
             "permissions": [],
         }
         files = {"main.js": b"// Synthetic JS source"}
-        chrome_id = "abcdefghijklmnop" * 2
+        browsers = required_browser_companions()
+        chrome_id = browsers[0]["identifier"]
         command = {"identifier": "listen", "title": "Listen", "trigger": "companion"}
         companion = {
             **plain,
             "permissions": ["companion.message"],
             "commands": plain["commands"] + [command],
-            "companion": {"chromeExtensionID": chrome_id},
+            "companion": {"browsers": browsers},
         }
         market.validate_registered_files(plain, files)
         market.validate_registered_files(companion, files)
@@ -220,28 +244,30 @@ class NativeSourcePackagingTests(unittest.TestCase):
             with self.subTest(manifest=manifest), self.assertRaisesRegex(ValueError, "[Cc]ompanion"):
                 market.validate_registered_files(manifest, files)
 
+    def test_marketplace_requires_chrome_edge_and_safari_for_browser_companions(self):
+        browsers = required_browser_companions()
+        firefox = {"browser": "firefox", "identifier": "@example",
+                   "storeURL": "https://addons.mozilla.org/firefox/addon/example/"}
+        market.validate_browser_companions({"browsers": browsers})
+        market.validate_browser_companions({"browsers": [*browsers, firefox]})
+
+        for missing in ("Chrome", "Edge", "Safari"):
+            remaining = [item for item in browsers if item["browser"] != missing.lower()]
+            with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, rf"Missing {missing}\."):
+                market.validate_browser_companions({"browsers": [*remaining, firefox]})
+
     def test_browser_companion_declarations_pin_exact_install_and_development_sources(self):
-        identity = "abcdefghijklmnop" * 2
-        commit = "a" * 40
-        raw = f"https://raw.githubusercontent.com/example/source/{commit}/browser.json"
-        guide = f"https://github.com/example/source/blob/{commit}/README.md"
-        chrome = {
-            "browser": "chrome", "identifier": identity,
-            "storeURL": "https://chromewebstore.google.com/detail/example/" + identity,
-            "packageURL": raw, "packageSHA256": "b" * 64, "sourceURL": guide,
-        }
-        safari = {"browser": "safari", "identifier": "org.example.safari", "sourceURL": guide}
-        market.validate_browser_companions({"browsers": [
-            chrome, {"browser": "edge", "identifier": identity}, safari,
-            {"browser": "firefox", "identifier": "@example"},
-        ]})
+        chrome, edge, safari = required_browser_companions()
+        identity = chrome["identifier"]
+        raw = chrome["packageURL"]
+        guide = safari["sourceURL"]
         for items in (
-            [chrome, chrome],
-            [{**chrome, "storeURL": chrome["storeURL"].replace(identity, "a" * 32)}],
-            [{**chrome, "packageURL": raw.replace(commit, "main")}],
-            [{**chrome, "sourceURL": guide.replace("/README.md", "/../README.md")}],
-            [{**chrome, "packageSHA256": None}],
-            [{**safari, "packageURL": raw, "packageSHA256": "b" * 64}],
+            [chrome, chrome, edge, safari],
+            [{**chrome, "storeURL": chrome["storeURL"].replace(identity, "a" * 32)}, edge, safari],
+            [{**chrome, "packageURL": raw.replace("a" * 40, "main")}, edge, safari],
+            [chrome, edge, {**safari, "sourceURL": guide.replace("/README.md", "/../README.md")}],
+            [{**chrome, "packageSHA256": None}, edge, safari],
+            [chrome, edge, {**safari, "packageURL": raw, "packageSHA256": "b" * 64}],
         ):
             with self.subTest(items=items), self.assertRaises(ValueError):
                 market.validate_browser_companions({"browsers": items})

@@ -246,12 +246,17 @@ served from `/data/extensions.json` and changes only after a successful rollout.
    GitHub HTTPS URLs, verifies sizes and hashes, and installs it atomically.
    Existing local copies keep their edits and preferences.
 
-If the tool has a browser companion, publish its browser-specific source and
-packages in the same public repository. Its source manifest declares each
-supported browser and its exact companion identity. MacHelper 6.9 handles
-browser detection and offers setup after the user approves the companion
-scope. The browser handles extension approval. See the
+If the tool has a browser companion, Marketplace publication requires Chrome,
+Microsoft Edge, and Safari support. Firefox is optional. List each browser and
+its exact companion identity in `companion.browsers`. Publish the companion
+source, setup instructions, and packages in the same public repository.
+MacHelper 6.9 detects browsers and offers setup after the user approves the
+companion scope. The browser handles extension approval. See the
 [managed companion format](../docs/Source-Extensions.md#managed-browser-setup-machelper-690).
+
+Tools without a browser companion omit `companion`, `companion.message`, and
+companion-triggered commands. The legacy `chromeExtensionID` declaration and
+smaller managed lists remain available for local source packages.
 
 For a tool update, submit the new commit URL. Increment the manifest version
 when installable files change so MacHelper can identify it as a newer release.

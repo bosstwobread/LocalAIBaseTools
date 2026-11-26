@@ -16,7 +16,7 @@ For a new tool, choose a unique lowercase reverse-domain identifier such as `com
 | --- | --- | --- |
 | `javascript`, source manifest schema 2 | Selected-text tools, AI transformations, shared floating results, and schema settings | Validate the saved source and replace only that extension's JavaScript worker. |
 | `native`, source manifest schema 2 | A Swift tool needs native frameworks or APIs unavailable to JavaScript | Compile the Swift entry with the host SDK, validate/sign the candidate, then replace only that extension's native worker. MacHelper stays open. |
-| Chrome/Edge browser extension | Page-specific DOM controls, such as buttons next to messages | Reload the unpacked browser extension and affected tabs. Browser packages are outside MacHelper's source-worker runtime. |
+| Browser companion | Page-specific DOM controls, such as buttons next to messages | Reload the companion in its browser and refresh affected tabs. Browser packages run in the browser. |
 
 Both source runtimes use the same **Extensions** list, **Install Source**, **Edit Source**, settings, permissions review, and **Reload** controls. MacHelper validates the manifest's explicit `runtime`; it does not guess from a folder name or silently turn JavaScript into Swift. Native settings use the same host-rendered schema. Do not add tool-specific Swift settings screens to MacHelper.
 
@@ -28,7 +28,11 @@ Localize visible interface text inside any artwork your tool or its listing supp
 
 JavaScript has no arbitrary file, network, shell, audio-recording, or native framework API. Native code runs as a trusted executable under the current user and requires the additional `native.execute` approval. A separate process is not an operating-system sandbox. Use native code only for a concrete need and keep automatic inference, client-message submission, and unrelated data access out of extension behavior. Legacy schema-1 `.machextension` bundles need migration to the new source SDK; their `NSViewController` interface cannot be copied across the process boundary.
 
-Build an extension with its own source folder and the installed MacHelper app. Swift uses the public SDK bundled in the app or downloaded from the extension guide. A tool with a browser companion declares its supported browsers and [reviewed companion commands](docs/Source-Extensions.md#local-browser-companions-machelper-680). Publish the companion source alongside the tool and supply verified setup links. MacHelper handles browser detection and setup. The tool owns its browser code, request format, and prompts. The website’s discovery connection serves marketplace search.
+Build an extension with its own source folder and the installed MacHelper app. Swift uses the public SDK bundled in the app or downloaded from the extension guide. The tool owns its browser code, request format, and prompts.
+
+Marketplace tools that use a browser companion must support Chrome, Microsoft Edge, and Safari. Firefox support is optional. List each browser and its exact companion ID in `companion.browsers`, declare `companion.message`, and mark the browser-callable commands with `trigger: "companion"`. Publish the browser source and setup instructions alongside the tool. MacHelper detects browsers and offers setup after approval. See the [managed companion manifest example](docs/Source-Extensions.md#managed-browser-setup-machelper-690).
+
+Tools without a browser companion omit `companion`, `companion.message`, and companion-triggered commands. Local source packages may still use a smaller managed browser list or the legacy Chrome declaration. See the [local companion contract](docs/Source-Extensions.md#local-browser-companions-machelper-680).
 
 ## 2. Small complete source example
 
