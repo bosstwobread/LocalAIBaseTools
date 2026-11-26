@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 import zipfile
 
+import github_publication
 from github_publication import PREVIEW_FIELDS, presentation
 
 SOURCE = Path(__file__).resolve().parent
@@ -147,6 +148,10 @@ class NativeSourcePackagingTests(unittest.TestCase):
         commit = "1234567890abcdef1234567890abcdef12345678"
         source_url = f"https://github.com/independent/example/tree/{commit}"
         raw_prefix = f"https://raw.githubusercontent.com/independent/example/{commit}/"
+        self.manifest["prebuiltWorker"] = self.prebuilt_worker()
+        artifact = b"Publisher fixture for a separately hosted worker"
+        self.manifest["prebuiltWorker"].update(size=len(artifact), sha256=hashlib.sha256(artifact).hexdigest())
+        self.write_manifest()
         registry = self.site / "registry.json"
         registry.write_text(json.dumps({"schemaVersion": 1, "extensions": [source_url]}))
         files = {path.name: path.read_bytes() for path in self.package.iterdir()}
@@ -175,9 +180,12 @@ class NativeSourcePackagingTests(unittest.TestCase):
             return raw
 
         load_registry = market.read_registry
-        with patch.object(market, "read_registry", side_effect=lambda path, **kwargs:
-                          load_registry(path, fetch=pinned_file, tree_reader=pinned_tree, **kwargs)):
+        with (patch.object(market, "read_registry", side_effect=lambda path, **kwargs:
+                           load_registry(path, fetch=pinned_file, tree_reader=pinned_tree, **kwargs)),
+              patch.object(github_publication, "fetch_raw", return_value=artifact) as fetch_worker):
             tools, _ = self.build()
+            worker = self.manifest["prebuiltWorker"]
+            fetch_worker.assert_called_once_with(worker["url"], len(artifact))
             output = self.site / "dist"
             catalog = json.loads((output / "catalog.json").read_text())
             discovery = json.loads((output / "discovery-index.json").read_text())
@@ -187,7 +195,9 @@ class NativeSourcePackagingTests(unittest.TestCase):
             self.assertEqual(tool["preview"]["image"], raw_prefix + "marketplace/preview.png")
             self.assertEqual(tool["packageUrl"], "https://github.com/independent/example/releases/download/v1.0.0/native-example.macsource.zip")
             self.assertIn("companion.message", tool["permissions"])
+            self.assertIs(tool["hasPrebuiltWorker"], True)
             self.assertEqual(discovery["extensions"][0]["description"], "A synthetic native tool.")
+            self.assertNotIn("hasPrebuiltWorker", discovery["extensions"][0])
             expected = {path: data for path, data in files.items() if not path.startswith("marketplace/")}
             self.assertEqual({record["path"] for record in entry["files"]}, set(expected))
             for record in entry["files"]:
@@ -196,7 +206,22 @@ class NativeSourcePackagingTests(unittest.TestCase):
             self.assertFalse((output / "packages").exists())
 
             original = (output / "catalog.json").read_bytes()
+            for invalid_artifact in (artifact[:-1], b"X" + artifact[1:]):
+                with self.subTest(invalid_artifact=invalid_artifact):
+                    fetch_worker.return_value = invalid_artifact
+                    with self.assertRaisesRegex(ValueError, "does not match its declared byte size and SHA-256"):
+                        self.build()
+                    self.assertEqual((output / "catalog.json").read_bytes(), original)
+            fetch_worker.return_value = artifact
+
             manifest_bytes = files["extension.json"]
+            files["extension.json"] = json.dumps({**self.manifest, "prebuiltWorker": {
+                **self.manifest["prebuiltWorker"], "url": raw_prefix + "Main.swift",
+            }}).encode()
+            with self.assertRaisesRegex(ValueError, "outside the editable source inventory"):
+                self.build()
+            self.assertEqual((output / "catalog.json").read_bytes(), original)
+
             legacy_companion = {"chromeExtensionID": self.manifest["companion"]["browsers"][0]["identifier"]}
             files["extension.json"] = json.dumps({**self.manifest, "companion": legacy_companion}).encode()
             with self.assertRaisesRegex(ValueError, r"Chrome, Edge, and Safari\."):
@@ -208,6 +233,56 @@ class NativeSourcePackagingTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.build()
             self.assertEqual((output / "catalog.json").read_bytes(), original)
+
+    def prebuilt_worker(self):
+        return {
+            "url": "https://raw.githubusercontent.com/independent/native-workers/" + "a" * 40 + "/NativeTool-arm64",
+            "sha256": "b" * 64,
+            "size": 16384,
+            "sourceSHA256": hashlib.sha256((self.package / "Main.swift").read_bytes()).hexdigest(),
+            "teamIdentifier": "TEAM123456",
+            "architecture": "arm64",
+            "minimumOSVersion": "14.0",
+            "protocolVersion": 1,
+        }
+
+    def test_registered_native_worker_pins_artifact_and_swift_entry(self):
+        files = {"Main.swift": (self.package / "Main.swift").read_bytes()}
+        with self.assertRaisesRegex(ValueError, "require a prebuiltWorker"):
+            market.validate_registered_files(self.manifest, files)
+        prebuilt = self.prebuilt_worker()
+        manifest = {**self.manifest, "prebuiltWorker": prebuilt}
+        market.validate_registered_files(manifest, files)
+        market.validate_registered_files({**manifest, "prebuiltWorker": {
+            **prebuilt, "architecture": "x86_64", "minimumOSVersion": "15.2.1", "size": 64 * 1024 * 1024,
+        }}, files)
+        with self.assertRaisesRegex(ValueError, "exact Swift entry file bytes"):
+            market.validate_registered_files(manifest, {"Main.swift": files["Main.swift"] + b"\n"})
+        cases = [
+            ("url", prebuilt["url"].replace("a" * 40, "main")),
+            ("url", prebuilt["url"].replace("/native-workers/", "/native-workers.git/")),
+            ("url", prebuilt["url"].replace("/NativeTool", "/../NativeTool")),
+            ("url", prebuilt["url"].replace("/NativeTool", "/%2e%2e/NativeTool")),
+            ("url", prebuilt["url"].replace("https://", "https://user@")),
+            ("url", prebuilt["url"].replace(".com/", ".com:443/")),
+            ("url", prebuilt["url"] + "?download=1"),
+            ("url", prebuilt["url"] + "#worker"),
+            ("url", prebuilt["url"].replace("raw.githubusercontent.com", "github.com")),
+            ("sha256", "B" * 64), ("size", 0), ("size", True), ("size", 64 * 1024 * 1024 + 1),
+            ("sourceSHA256", "c" * 64), ("teamIdentifier", "team123456"), ("teamIdentifier", "TEAM12345"),
+            ("architecture", "universal"), ("minimumOSVersion", "0.1"),
+            ("minimumOSVersion", "14"), ("minimumOSVersion", "14.0.0.1"),
+            ("protocolVersion", True), ("protocolVersion", 2),
+        ]
+        for field, invalid in cases:
+            with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(ValueError, "prebuiltWorker"):
+                market.validate_registered_files({**manifest, "prebuiltWorker": {**prebuilt, field: invalid}}, files)
+        for invalid in (None, [], {}, {**prebuilt, "unknown": 1}):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "prebuiltWorker"):
+                market.validate_registered_files({**manifest, "prebuiltWorker": invalid}, files)
+        javascript = {**manifest, "runtime": "javascript", "entryPoint": "main.js", "permissions": []}
+        with self.assertRaisesRegex(ValueError, "Only native source"):
+            market.validate_registered_files(javascript, {"main.js": b"// Synthetic JavaScript source"})
 
     def test_registered_companion_manifest_requires_permission_exact_id_and_command(self):
         plain = {

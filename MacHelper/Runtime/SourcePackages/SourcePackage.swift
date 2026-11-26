@@ -170,6 +170,50 @@ public struct SourceCompanionGrant: Codable, Equatable, Sendable {
     }
 }
 
+public struct SourcePrebuiltWorker: Codable, Equatable, Sendable {
+    public static let maximumSize = 64 * 1024 * 1024
+
+    public let url: String
+    public let sha256: String
+    public let size: Int
+    public let sourceSHA256: String
+    public let teamIdentifier: String
+    public let architecture: String
+    public let minimumOSVersion: String
+    public let protocolVersion: Int
+
+    public init(url: String, sha256: String, size: Int, sourceSHA256: String, teamIdentifier: String,
+                architecture: String, minimumOSVersion: String, protocolVersion: Int = 1) {
+        self.url = url; self.sha256 = sha256; self.size = size; self.sourceSHA256 = sourceSHA256
+        self.teamIdentifier = teamIdentifier; self.architecture = architecture; self.minimumOSVersion = minimumOSVersion
+        self.protocolVersion = protocolVersion
+    }
+
+    func validate() throws {
+        guard url.utf8.count <= 2048,
+              url.range(of: #"\Ahttps://raw\.githubusercontent\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}/[a-f0-9]{40}(?:/[A-Za-z0-9_.-]+)+\z"#,
+                        options: .regularExpression) != nil else {
+            throw SourcePackageError.invalid(L("The prebuilt native worker URL must be pinned to a GitHub commit."))
+        }
+        let path = url.split(separator: "/").dropFirst(2)
+        guard path.dropFirst().first?.hasSuffix(".git") == false, !path.contains("."), !path.contains(".."),
+              (1...Self.maximumSize).contains(size),
+              [sha256, sourceSHA256].allSatisfy({ $0.range(of: #"\A[a-f0-9]{64}\z"#, options: .regularExpression) != nil }),
+              teamIdentifier.range(of: #"\A[A-Z0-9]{10}\z"#, options: .regularExpression) != nil,
+              ["arm64", "x86_64"].contains(architecture), packedMinimumOSVersion != nil, protocolVersion == 1 else {
+            throw SourcePackageError.invalid(L("The prebuilt native worker metadata is invalid."))
+        }
+    }
+
+    var packedMinimumOSVersion: UInt32? {
+        guard minimumOSVersion.range(of: #"\A[0-9]{1,2}\.[0-9]{1,2}(?:\.[0-9]{1,2})?\z"#,
+                                     options: .regularExpression) != nil else { return nil }
+        let parts = minimumOSVersion.split(separator: ".").compactMap { UInt32($0) }
+        guard parts[0] > 0 else { return nil }
+        return (parts[0] << 16) | (parts[1] << 8) | (parts.count == 3 ? parts[2] : 0)
+    }
+}
+
 public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let runtime: String
@@ -184,11 +228,13 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
     public let localizations: String?
     public let icon: String?
     public let companion: SourceCompanion?
+    public let prebuiltWorker: SourcePrebuiltWorker?
 
     public init(schemaVersion: Int = 2, runtime: String = "javascript", identifier: String,
                 displayName: String, version: String, summary: String, entryPoint: String = "main.js",
                 permissions: [String], commands: [SourceExtensionCommand], settingsSchema: String? = nil,
-                localizations: String? = nil, icon: String? = nil, companion: SourceCompanion? = nil) {
+                localizations: String? = nil, icon: String? = nil, companion: SourceCompanion? = nil,
+                prebuiltWorker: SourcePrebuiltWorker? = nil) {
         self.schemaVersion = schemaVersion; self.runtime = runtime; self.identifier = identifier
         self.displayName = displayName; self.version = version; self.summary = summary
         self.entryPoint = entryPoint; self.permissions = permissions; self.commands = commands
@@ -196,6 +242,7 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         self.localizations = localizations
         self.icon = icon
         self.companion = companion
+        self.prebuiltWorker = prebuiltWorker
     }
 
     public var companionGrant: SourceCompanionGrant? {
@@ -242,6 +289,12 @@ public struct SourceExtensionManifest: Codable, Equatable, Sendable {
         if runtime == "native", !permissions.contains("native.execute") {
             throw SourcePackageError.invalid("Native extensions must declare native.execute permission for trusted native code execution.")
         }
+        if let prebuiltWorker {
+            guard runtime == "native" else {
+                throw SourcePackageError.invalid(L("Only native extensions can declare a prebuilt worker."))
+            }
+            try prebuiltWorker.validate()
+        }
         if permissions.contains("selection.replace"), !permissions.contains("selection.read") {
             throw SourcePackageError.invalid(L("Selected-text replacement requires selection.read permission."))
         }
@@ -284,6 +337,11 @@ public struct SourcePackageSnapshot: Sendable {
     public let fileHashes: [String: String]
     public let localizations: SourceTextLocalizations?
     public let iconData: Data?
+
+    public var matchingPrebuiltWorker: SourcePrebuiltWorker? {
+        guard let worker = manifest.prebuiltWorker, fileHashes[manifest.entryPoint] == worker.sourceSHA256 else { return nil }
+        return worker
+    }
 }
 
 public enum SourcePackageRules {
@@ -437,6 +495,14 @@ public enum SourcePackageInspector {
         let receiptURL = root.appendingPathComponent(SourcePackageRules.receiptName)
         let receipt = (try? SourcePackageRules.boundedData(receiptURL, maximum: 128 * 1024))
             .flatMap { try? JSONDecoder().decode(SourcePackageReceipt.self, from: $0) }
+        if let prebuilt = manifest.prebuiltWorker, hashes[manifest.entryPoint] != prebuilt.sourceSHA256 {
+            // Accept a local edit only when this installed release's original
+            // entry hash matches its signed worker descriptor.
+            guard receipt?.identifier == manifest.identifier, receipt?.version == manifest.version,
+                  receipt?.hashes[manifest.entryPoint] == prebuilt.sourceSHA256 else {
+                throw SourcePackageError.invalid(L("The prebuilt native worker does not match the packaged Swift source."))
+            }
+        }
         let modified = receipt.map { $0.identifier != manifest.identifier || $0.hashes != hashes } ?? false
         return SourcePackageSnapshot(manifest: manifest, rootURL: root, entrySource: entry, resources: resources,
                                      fingerprint: SourcePackageRules.digest(digestInput), isLocallyModified: modified,

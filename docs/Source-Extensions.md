@@ -2,7 +2,7 @@
 
 MacHelper's unified editable source format powers its marketplace: listing an available tool reads catalog metadata; enabling it materializes its complete source package in a writable folder on the user's Mac. The source files are not hidden inside the signed MacHelper app. Each extension runs in an independent JavaScript or native Swift worker selected by its manifest, while MacHelper supplies selection detection, floating panels, shared AI, and settings.
 
-This document describes the schema-2 source package and catalog contracts. MacHelper 6 supports `runtime: "javascript"` and `runtime: "native"` through the same Extensions interface. Native Swift source uses the [native worker SDK](Native-Extensions.md), requires `native.execute`, and recompiles/restarts its worker on valid code edits without restarting MacHelper. Legacy schema-1 native bundles require migration.
+This document describes the schema-2 source package and catalog contracts. MacHelper 6 supports `runtime: "javascript"` and `runtime: "native"` through the same Extensions interface. Native workers use the [standalone SDK](Native-Extensions.md) and require `native.execute`. MacHelper 6.9.1 supports a verified prebuilt worker for an unmodified Swift entry. Local Swift edits use the compiler and restart only their worker. Legacy schema-1 native bundles require migration.
 
 For an AI assistant creating a new independent tool or modifying an existing one, start with [AI_EXTENSION_GUIDE.md](../AI_EXTENSION_GUIDE.md). It includes a complete minimal package and an edit/import/test workflow. Use [Extension Development](Extension-Development.md) for the human walkthrough.
 
@@ -293,7 +293,7 @@ The website offers keyword filtering and explicit description-based AI search. A
 
 ## Download contract for a marketplace
 
-A website or repository serves a catalog as JSON. Each entry declares metadata and the complete source-file inventory, including the manifest, runtime scripts, prompts, settings schema, `discovery.json`, documentation, and license. Do not distribute only a compiled extension or omit source needed to understand its behavior.
+A website or repository serves a catalog as JSON. Each entry declares metadata and the complete source-file inventory, including the manifest, runtime scripts, prompts, settings schema, `discovery.json`, documentation, and license. The official Marketplace requires a separate [prebuilt worker](Native-Extensions.md#publish-a-prebuilt-worker) for native listings. Its immutable URL, size, and binary and Swift source hashes belong in `extension.json`. Settings and prompt edits can reuse the prebuilt worker while the Swift entry bytes still match.
 
 ```json
 {

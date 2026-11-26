@@ -5,6 +5,7 @@ import re
 from urllib.parse import quote
 
 from discovery import LOCALE, MAX_PREVIEW as PREVIEW_LIMIT, registered_discovery_entry, text
+from github_registry import fetch_raw
 
 PREVIEW_FIELDS = {
     "lookup": set(("description editorTitle documentHeading sentenceBefore word sentenceAfter meaningLabel "
@@ -111,6 +112,15 @@ def presentation(source, raw):
     return preview, listing
 
 
+def verify_prebuilt_worker_artifact(worker, inventory):
+    url, size = worker["url"], worker["size"]
+    if any(item["url"] == url for item in inventory):
+        raise ValueError("The prebuiltWorker artifact must stay outside the editable source inventory.")
+    data = fetch_raw(url, size)
+    if len(data) != size or hashlib.sha256(data).hexdigest() != worker["sha256"]:
+        raise ValueError("The downloaded prebuiltWorker does not match its declared byte size and SHA-256.")
+
+
 def collect_publications(sources, validate_files):
     """Return listings, installer inventories, and discovery entries from one revision per tool."""
     tools, installer, discovery = [], [], []
@@ -131,6 +141,9 @@ def collect_publications(sources, validate_files):
             {"path": path, "url": source.raw_url(path), "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
             for path, raw in sorted(files.items())
         ]
+        worker = manifest.get("prebuiltWorker")
+        if worker is not None:
+            verify_prebuilt_worker_artifact(worker, inventory)
         installer.append({
             "identifier": identifier, "displayName": entry["name"], "version": entry["version"],
             "summary": entry["summary"], "files": inventory,
@@ -142,6 +155,8 @@ def collect_publications(sources, validate_files):
             "screenshots": [], "features": entry["capabilities"], "permissions": manifest["permissions"],
             "installSteps": descriptor.get("installSteps", []), "sourceUrl": source.url, "catalogUrl": "catalog.json",
         })
+        if worker is not None:
+            tool["hasPrebuiltWorker"] = True
         if preview:
             tool["preview"] = preview
         if "releaseZip" in listing:

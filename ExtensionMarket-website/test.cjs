@@ -290,6 +290,24 @@ test('native source tools share installation and customization with runtime-spec
   } finally { view.close(); }
 });
 
+test('registered native tools explain the signed worker and compiler requirements', async () => {
+  const data = clone(catalog);
+  const tool = data.extensions.find(item => item.kind === 'mac-source');
+  tool.runtime = 'native';
+  tool.hasPrebuiltWorker = true;
+  tool.permissions = ['native.execute'];
+  const view = await page({ data });
+  try {
+    view.window.location.hash = `#extension/${tool.slug}`;
+    await until(() => view.document.querySelector('#tool-dialog').open);
+    view.document.querySelector('#install-tab').click();
+    const help = view.document.querySelector('#install-panel').textContent;
+    assert.match(help, /MacHelper 6\.9\.1 or later can run the signed native worker/);
+    assert.match(help, /after you approve native\.execute/);
+    assert.match(help, /Editing Swift source requires Xcode Command Line Tools/);
+  } finally { view.close(); }
+});
+
 
 test('unknown declared source runtimes fail catalog validation', async () => {
   const data = clone(catalog);
@@ -373,7 +391,7 @@ test('Arabic mirrors reading direction and localizes accessibility, tool permiss
     assert.equal(view.document.getElementById(polish.getAttribute('aria-describedby')).textContent, revisionCopy.ar.description);
     view.window.location.hash = '#extension/translation';
     await until(() => view.document.querySelector('#tool-dialog').open);
-    assert.match(view.document.querySelector('#overview-panel').textContent, /ليست بيئة عزل/);
+    assert.match(view.document.querySelector('#overview-panel').textContent, /صلاحيات الوصول نفسها التي لدى حسابك/);
     const sourceLink = view.document.querySelector('#overview-panel a[download="AI_EXTENSION_GUIDE.md"]');
     assert.match(sourceLink.textContent, /دليل/);
     const copy = view.document.querySelector('.detail-facts button');

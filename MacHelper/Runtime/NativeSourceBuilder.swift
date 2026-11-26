@@ -42,9 +42,7 @@ private final class NativeBuildOperation: @unchecked Sendable {
     private let sdkURL: URL
     private let cacheDirectory: URL
     private let timeout: TimeInterval
-    private let lock = NSLock()
-    private var cancelled = false
-    private var processID: pid_t?
+    private let runner = NativeWorkerCommand()
 
     private struct Receipt: Codable {
         let schemaVersion: Int
@@ -56,18 +54,10 @@ private final class NativeBuildOperation: @unchecked Sendable {
         self.sdkURL = sdkURL; self.cacheDirectory = cacheDirectory; self.timeout = timeout
     }
 
-    func cancel() {
-        lock.lock(); cancelled = true; let current = processID; lock.unlock()
-        if let current, current > 1 { _ = kill(-current, SIGTERM) }
-    }
-
-    private func checkCancellation() throws {
-        lock.lock(); let value = cancelled; lock.unlock()
-        if value { throw CancellationError() }
-    }
+    func cancel() { runner.cancel() }
 
     func build(_ snapshot: SourcePackageSnapshot) throws -> URL {
-        try checkCancellation()
+        try runner.checkCancellation()
         guard snapshot.manifest.runtime == "native", snapshot.manifest.permissions.contains("native.execute"),
               snapshot.manifest.entryPoint.hasSuffix(".swift"),
               snapshot.resources[snapshot.manifest.entryPoint]?.utf8.elementsEqual(snapshot.entrySource.utf8) == true else {
@@ -80,7 +70,12 @@ private final class NativeBuildOperation: @unchecked Sendable {
         guard String(data: sdkData, encoding: .utf8) != nil else { throw NativeSourceBuildError.invalid("The bundled native SDK is not valid UTF-8.") }
         let toolchain: Data
         do {
-            let check = try command("/usr/bin/xcrun", ["swiftc", "--version"], timeout: min(15, timeout))
+            let selected = try runner.run("/usr/bin/xcode-select", ["--print-path"], timeout: min(5, timeout))
+            let path = String(decoding: selected.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard selected.status == 0, path.hasPrefix("/"), Self.hasSwiftCompiler(in: path) else {
+                throw NativeSourceBuildError.compilerUnavailable
+            }
+            let check = try runner.run("/usr/bin/xcrun", ["swiftc", "--version"], timeout: min(15, timeout))
             guard check.status == 0, !check.output.isEmpty else { throw NativeSourceBuildError.compilerUnavailable }
             toolchain = check.output
         } catch is CancellationError { throw CancellationError() }
@@ -115,19 +110,19 @@ private final class NativeBuildOperation: @unchecked Sendable {
         try sdkData.write(to: sdk, options: [.atomic])
         try Data(snapshot.entrySource.utf8).write(to: source, options: [.atomic])
         for url in [sdk, source] { try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
-        let build = try command("/usr/bin/xcrun", ["swiftc", "-parse-as-library", "-swift-version", "5",
+        let build = try runner.run("/usr/bin/xcrun", ["swiftc", "-parse-as-library", "-swift-version", "5",
             "-module-cache-path", stage.appendingPathComponent("ModuleCache").path,
             sdk.path, source.path, "-o", binary.path], timeout: timeout)
         guard build.status == 0 else {
             let diagnostic = compilerDiagnostic(build.output)
             throw NativeSourceBuildError.failed("The native extension could not compile. " + diagnostic)
         }
-        try checkCancellation()
+        try runner.checkCancellation()
         _ = try regularData(binary, maximum: 64 * 1024 * 1024)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
-        let signed = try command("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", binary.path], timeout: min(15, timeout))
+        let signed = try runner.run("/usr/bin/codesign", ["--force", "--sign", "-", "--timestamp=none", binary.path], timeout: min(15, timeout))
         guard signed.status == 0 else { throw NativeSourceBuildError.failed("The native worker could not be signed. The last working version was preserved.") }
-        let verified = try command("/usr/bin/codesign", ["--verify", "--strict", binary.path], timeout: min(15, timeout))
+        let verified = try runner.run("/usr/bin/codesign", ["--verify", "--strict", binary.path], timeout: min(15, timeout))
         guard verified.status == 0 else { throw NativeSourceBuildError.failed("The native worker signature could not be verified.") }
         let receipt = Receipt(schemaVersion: 1, key: key, binarySHA256: SourcePackageRules.digest(try regularData(binary, maximum: 64 * 1024 * 1024)))
         let ready = stage.appendingPathComponent("ready", isDirectory: true)
@@ -136,7 +131,7 @@ private final class NativeBuildOperation: @unchecked Sendable {
         let receiptURL = ready.appendingPathComponent("receipt.json")
         try JSONEncoder().encode(receipt).write(to: receiptURL, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: receiptURL.path)
-        try checkCancellation()
+        try runner.checkCancellation()
         do { try FileManager.default.moveItem(at: ready, to: destination) }
         catch {
             // Two immutable generations may compile identical code concurrently.
@@ -155,7 +150,14 @@ private final class NativeBuildOperation: @unchecked Sendable {
         guard receipt.schemaVersion == 1, receipt.key == key,
               FileManager.default.isExecutableFile(atPath: binary.path),
               SourcePackageRules.digest(try regularData(binary, maximum: 64 * 1024 * 1024)) == receipt.binarySHA256 else { return false }
-        return try command("/usr/bin/codesign", ["--verify", "--strict", binary.path], timeout: min(15, timeout)).status == 0
+        return try runner.run("/usr/bin/codesign", ["--verify", "--strict", binary.path], timeout: min(15, timeout)).status == 0
+    }
+
+    private static func hasSwiftCompiler(in developerDirectory: String) -> Bool {
+        let developer = URL(fileURLWithPath: developerDirectory, isDirectory: true)
+        return ["usr/bin/swiftc", "Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"].contains { relative in
+            FileManager.default.isExecutableFile(atPath: developer.appendingPathComponent(relative).path)
+        }
     }
 
     private func regularData(_ url: URL, maximum: Int) throws -> Data {
@@ -203,7 +205,25 @@ private final class NativeBuildOperation: @unchecked Sendable {
         return reasons.prefix(3).joined(separator: " ")
     }
 
-    private func command(_ executable: String, _ arguments: [String], timeout: TimeInterval) throws -> (status: Int32, output: Data) {
+}
+
+/// Executes a fixed system utility with bounded output, deadline, and cancellation.
+final class NativeWorkerCommand: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private var processID: pid_t?
+
+    func cancel() {
+        lock.lock(); cancelled = true; let current = processID; lock.unlock()
+        if let current, current > 1 { _ = kill(-current, SIGTERM) }
+    }
+
+    func checkCancellation() throws {
+        lock.lock(); let value = cancelled; lock.unlock()
+        if value { throw CancellationError() }
+    }
+
+    func run(_ executable: String, _ arguments: [String], timeout: TimeInterval) throws -> (status: Int32, output: Data) {
         try checkCancellation()
         let output = Pipe(), collector = NativeBuildOutput()
         var actions: posix_spawn_file_actions_t?
@@ -250,10 +270,11 @@ private final class NativeBuildOperation: @unchecked Sendable {
         }
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var expired = false
+        var exited = false
         var status: Int32 = 0
         while true {
             let waited = waitpid(pid, &status, WNOHANG)
-            if waited == pid { break }
+            if waited == pid { exited = true; break }
             if waited < 0 && errno != EINTR { break }
             lock.lock(); let isCancelled = cancelled; lock.unlock()
             if isCancelled || ProcessInfo.processInfo.systemUptime >= deadline {
@@ -286,6 +307,7 @@ private final class NativeBuildOperation: @unchecked Sendable {
         try? output.fileHandleForReading.close()
         if wasCancelled { throw CancellationError() }
         if expired { throw NativeSourceBuildError.timedOut }
+        guard exited else { throw NativeSourceBuildError.failed("The native build tool did not return an exit status.") }
         let code = (status & 0x7f) == 0 ? ((status >> 8) & 0xff) : 128 + (status & 0x7f)
         return (code, collector.data)
     }

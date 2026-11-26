@@ -1,6 +1,6 @@
 # LocalAIBaseTools
 
-**MacHelper** is the macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. Install [Translation](https://github.com/bosstwobread/Translation-MacHelper) and [Polish-input](https://github.com/bosstwobread/Polish-input-MacHelper) from the **Extension Market**. Select text in a supported Mac app and choose Translate or Polish from the shared toolbar. Polish-input streams a preview and offers **Apply** in supported editors or **Copy**. Both are independent JavaScript source extensions that use MacHelper's AI Connection and Accessibility access. The marketplace offers keyword search and optional AI matching. The current MacHelper source build is **6.9.0** (build **690**). MessageHelper — Upwork is retired from current distribution; its compatibility source and published downloads are preserved.
+**MacHelper** is the macOS app for your AI connection, extensions, and extension settings. Click its Dock icon to open Settings, or use its menu-bar shortcut. Install [Translation](https://github.com/bosstwobread/Translation-MacHelper) and [Polish-input](https://github.com/bosstwobread/Polish-input-MacHelper) from the **Extension Market**. Select text in a supported Mac app and choose Translate or Polish from the shared toolbar. Polish-input streams a preview and offers **Apply** in supported editors or **Copy**. Both are independent JavaScript source extensions that use MacHelper's AI Connection and Accessibility access. The marketplace offers keyword search and optional AI matching. The current MacHelper source build is **6.9.1** (build **691**). MessageHelper — Upwork is retired from current distribution; its compatibility source and published downloads are preserved.
 
 Before making changes, read the short [development checklist](DEVELOPMENT.md). Check it again before finishing so related functionality, documentation, and website content stay consistent.
 
@@ -36,7 +36,7 @@ Give your AI coding assistant [AI_EXTENSION_GUIDE.md](AI_EXTENSION_GUIDE.md), th
 
 ## Requirements
 
-- macOS 14 or later. Building MacHelper requires Swift 6 or later command-line tools and Python 3; the prebuilt developer release targets Apple Silicon. Native source extensions also require Apple's Swift command-line tools on the user's Mac, even with a prebuilt MacHelper.
+- macOS 14 or later. The MacHelper download targets Apple Silicon. MacHelper runs JavaScript tools and verified prebuilt native workers using the installed app. Local Swift builds require Apple’s command-line tools. Building MacHelper itself requires Swift 6 or later and Python 3.
 - A signed-in Codex/ChatGPT installation with its bundled Codex app-server, Ollama with a model downloaded, or LM Studio with a model loaded and its local server running.
 - A Mac app that exposes selected text through Accessibility or supports MacHelper’s automatic Copy fallback. Browser fields can use Translation and Polish-input without a Chrome/Edge extension. Website AI search needs a running MacHelper 6.5 or later and browser approval for the website’s local connection when requested. Node.js/npm is needed for JavaScript development tests.
 - Accessibility approval for **MacHelper** to read selected text in other apps and apply approved replacements in supported editable fields.
@@ -132,7 +132,7 @@ Create a source folder containing `extension.json`, its JavaScript or Swift entr
 
 Browse the [Extension Market](https://local-ai-extension.nelson007.com/) or use **Marketplace…** in MacHelper. To list an independent tool, publish it in a public GitHub repository and submit the link to its release commit and source folder for review. The publisher reads the manifests and optional preview, then generates the listing, search index, and installation inventory. MacHelper downloads source files from that GitHub commit after the user approves installation. [Publishing guide](ExtensionMarket-website/README.md#publish-a-tool) · [Source package contract](docs/Source-Extensions.md#download-contract-for-a-marketplace)
 
-Native Swift tools use `runtime: "native"`, a `.swift` entry, and `native.execute` permission. Install Xcode Command Line Tools before enabling or editing native source. MacHelper compiles trusted native code into a separate worker; source changes replace that worker while the app remains open. The same settings schema renders native tool configuration. See [Native source extensions](docs/Native-Extensions.md) for the complete SDK and [Native Greeting](examples/NativeGreeting/README.md) for an independent example.
+Native Swift tools use `runtime: "native"`, a `.swift` entry, and `native.execute` permission. MacHelper 6.9.1 runs a verified prebuilt worker for Marketplace native tools and reads prompts and settings separately. Local Swift changes use the fixed build pipeline and require Xcode Command Line Tools. Compile or startup errors preserve the last working generation. See [Native source extensions](docs/Native-Extensions.md) for the SDK and packaging workflow, and [Native Greeting](examples/NativeGreeting/README.md) for an independent example.
 
 To migrate the same tool between runtimes, keep its identifier/settings keys, rewrite its command for the target SDK, and update `runtime` plus `entryPoint`. JavaScript-to-native changes need explicit approval for `native.execute` before compilation/execution; native-to-JavaScript changes remove it. Old schema-1 `.machextension` bundles and their in-process settings controllers require migration to this new source interface.
 
@@ -188,14 +188,15 @@ python3 scripts/test-extension-plugin.py --host dist/MacHelper.app/Contents/MacO
 
 The source-extension integration check uses temporary preferences/source folders, a loopback catalog, and real worker processes. It verifies metadata-only discovery, complete source download on enable, script/prompt/schema reload, invalid-edit recovery, persisted settings/local edits, cancellation, ordered partial streaming before completion, and worker cleanup. `--live` additionally sends one synthetic public sentence through the real configured AI provider and consumes its usage. It does not access Upwork, clipboard contents, user extension folders, or permissions.
 
-To check fresh installs of both independent packages with the packaged app, build the Marketplace catalog and run the installer acceptance check. It downloads and verifies the exact GitHub inventories and runs both JavaScript workers in an isolated profile.
+To check fresh installs of all three independent packages with the packaged app, build the Marketplace catalog and run the installer acceptance check. It verifies the exact GitHub inventories and runs the bundled JavaScript workers in isolated profiles with developer tools excluded from the test environment.
 
 ```sh
 python3 ExtensionMarket-website/build.py
 python3 scripts/test-source-extensions.py --app dist/MacHelper.app \
   --marketplace-catalog ExtensionMarket-website/dist/catalog.json \
   --extension-id com.localaibasetools.translation \
-  --extension-id com.localaibasetools.polish-input
+  --extension-id com.localaibasetools.polish-input \
+  --extension-id com.nelson007.online-subtitle
 ```
 
 The extension-list check drives the actual offscreen list controls with temporary tools. It verifies multi-selection, batch actions, selection persistence, partial failures, and cancelled native approval without opening a source editor or calling AI.

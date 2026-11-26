@@ -443,7 +443,7 @@
   function permissionLabel(value, hasCompanion) {
     if (value === 'ai.transform' && hasCompanion) return t('Send text to your shared AI connection, including automatically through approved browser companion commands.');
     if (value === 'companion.message') return t('Receive approved commands from the registered browser companion.');
-    return ({ 'selection.read': t("Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe."), 'selection.replace': t("Replace unchanged selected text in a supported editable field only when you click Apply."), 'selection.paste': t("When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Compile and run trusted native Swift code as your Mac user; a worker process is not an OS sandbox."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
+    return ({ 'selection.read': t("Read selected text through macOS Accessibility, with automatic temporary copying and clipboard restoration when safe."), 'selection.replace': t("Replace unchanged selected text in a supported editable field only when you click Apply."), 'selection.paste': t("When you click Apply, MacHelper can paste into the current selection in the original window, even if the editor does not report its position. Pasting leaves the result on the clipboard."), 'clipboard.read': t("Legacy clipboard declaration (no shared clipboard reader)"), 'ai.transform': t("Send text to your shared AI connection for an explicit action."), 'ui.panel': t("Display a nearby floating result panel."), 'native.execute': t("Run trusted native Swift code as your Mac user. The worker has the same access as your Mac account."), nativeMessaging: t("Connect the browser extension to MacHelper on your Mac."), storage: t("Save extension preferences in browser storage.") })[value] || value;
   }
   function installContent(tool) {
     const sourceTool = tool.kind === 'mac-source';
@@ -467,7 +467,12 @@
       catalogCopy.addEventListener('click', () => copy(catalog, catalogCopy));
       fallbacks.append(catalogCopy);
       container.append(callout, fallbacks);
-      if (tool.runtime === 'native') container.append(h('p', { class: 'install-help' }, t("Native Swift source requires MacHelper 6 and Xcode Command Line Tools. Review native.execute before enabling. Saved code is compiled locally and its worker is replaced without restarting MacHelper.")));
+      if (tool.runtime === 'native') {
+        const help = tool.hasPrebuiltWorker === true
+          ? t("MacHelper 6.9.1 or later can run the signed native worker on a compatible Mac after you approve native.execute. Editing Swift source requires Xcode Command Line Tools.")
+          : t("Native Swift source requires MacHelper 6 and Xcode Command Line Tools. Review native.execute before enabling. Saved code is compiled locally and its worker is replaced without restarting MacHelper.");
+        container.append(h('p', { class: 'install-help' }, help));
+      }
     } else {
       callout.append(h('h3', {}, t("Add the browser companion")), h('p', {}, t("For Chrome or Edge on your Mac. Install and open MacHelper first so the extension can use your shared AI connection.")));
       if (packageURL) callout.append(h('a', { class: 'button button-blue', href: packageURL, download: '' }, t("Download extension ZIP"), h('span', { 'aria-hidden': 'true' }, '↓')));

@@ -17,6 +17,7 @@ struct SourceToolInfo {
     let version: String
     let availableVersion: String?
     let runtime: String
+    let usesPrebuiltWorker: Bool
     let isEnabled: Bool
     let isRunning: Bool
     let sourceURL: URL?
@@ -182,6 +183,7 @@ final class SourceExtensionManager {
                                   version: snapshot?.manifest.version ?? definition?.version ?? "",
                                   availableVersion: exists ? snapshot.flatMap { newerDefinition(for: $0)?.entry.version } : nil,
                                   runtime: snapshot?.manifest.runtime ?? "",
+                                  usesPrebuiltWorker: snapshot?.matchingPrebuiltWorker != nil,
                                   isEnabled: state.enabled[id] == true, isRunning: active[id]?.worker.generation != nil,
                                   sourceURL: exists ? try? store.installedURL(for: id) : nil,
                                   isLocallyModified: snapshot?.isLocallyModified ?? false, reloadCount: counts[id] ?? 0,
@@ -699,6 +701,7 @@ final class SourceExtensionManager {
             guard epochs[id] == epoch, !shuttingDown, !Task.isCancelled else { await worker.stop(); throw CancellationError() }
             let old = active[id]
             let runtime = Running(snapshot: snapshot, worker: worker, gate: gate, schema: schema, settings: values)
+            try? saveLastGood(snapshot, id: id)
             active[id] = runtime
             preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
             configurationErrors.removeValue(forKey: id)
@@ -716,7 +719,6 @@ final class SourceExtensionManager {
             errors.removeValue(forKey: id)
             try saveState()
             try saveSettings(values, id: id)
-            try? saveLastGood(snapshot, id: id)
             watch(id)
             notify()
         } catch {
@@ -775,7 +777,10 @@ final class SourceExtensionManager {
     private func makeWorker(snapshot: SourcePackageSnapshot, settings: [String: Any], epoch: UUID?) async throws -> (ScriptWorkerClient, Gate) {
         let id = snapshot.manifest.identifier
         let executable: URL
-        if snapshot.manifest.runtime == "native" {
+        if snapshot.matchingPrebuiltWorker != nil {
+            let loader = NativePrebuiltWorkerLoader(cacheDirectory: stateDirectory.appendingPathComponent("NativePrebuiltCache", isDirectory: true))
+            executable = try await loader.load(snapshot: snapshot)
+        } else if snapshot.manifest.runtime == "native" {
             statuses[id] = "Building native extension…"; notify()
             let builder = NativeSourceBuilder(sdkURL: nativeSDKURL,
                 cacheDirectory: stateDirectory.appendingPathComponent("NativeBuildCache", isDirectory: true))

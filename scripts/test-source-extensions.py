@@ -10,6 +10,7 @@ fixture-only --live flag sends one public synthetic message through local AI.
 import argparse
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -100,7 +101,7 @@ def main():
     parser.add_argument("--extension-id", action="append", default=[], help="GitHub-backed tool to verify; may be repeated.")
     args = parser.parse_args()
     if platform.system() != "Darwin":
-        parser.error("MacHelper source-extension verification requires macOS and Xcode command-line tools.")
+        parser.error("MacHelper source-extension verification requires macOS.")
     if args.app and any((args.host, args.worker, args.helper)):
         parser.error("Use --app or individual executable arguments.")
     if bool(args.marketplace_catalog) != bool(args.extension_id) or len(set(args.extension_id)) != len(args.extension_id):
@@ -119,7 +120,7 @@ def main():
         else:
             served = {"/catalog.json": Path(args.marketplace_catalog).read_bytes()}
 
-    with tempfile.TemporaryDirectory(prefix="mac-helper-source-extensions-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="mh-source-", dir="/tmp") as temporary:
         temporary = Path(temporary).resolve()
         if temporary.is_relative_to(ROOT.resolve()):
             raise RuntimeError("Verification must run outside the repository.")
@@ -177,7 +178,12 @@ def main():
             command.append("--live")
         process = None
         try:
-            process = subprocess.Popen(command, cwd=temporary, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            environment = os.environ.copy()
+            if args.marketplace_catalog:
+                environment["DEVELOPER_DIR"] = str(temporary / "no-developer-tools")
+                environment["PATH"] = str(temporary / "no-external-tools")
+            process = subprocess.Popen(command, cwd=temporary, env=environment, text=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate(timeout=240 if args.live or args.marketplace_catalog else 90)
             lines = [line for line in stdout.splitlines() if line.strip()]
             if not lines:

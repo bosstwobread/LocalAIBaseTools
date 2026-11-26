@@ -200,8 +200,9 @@ signing; it does not perform notarization. The site
 labels the release and links the source; notarization is separate release work.
 After moving the app to Applications and opening it, MacHelper sets up its
 browser native host without requiring Python, Xcode, or administrator access.
-Enabling or editing a native Swift source tool separately requires Xcode
-Command Line Tools. JavaScript source tools do not need that compiler.
+MacHelper 6.9.1 or later can run a compatible, verified Marketplace native
+worker after the user approves native execution. Building or editing Swift
+source requires Xcode Command Line Tools.
 
 For frontend-only development, `build.py --without-app` omits the app ZIP.
 Use the default pinned GitHub sources to test installation against the
@@ -245,6 +246,17 @@ served from `/data/extensions.json` and changes only after a successful rollout.
    permission review. After approval it downloads the package from direct
    GitHub HTTPS URLs, verifies sizes and hashes, and installs it atomically.
    Existing local copies keep their edits and preferences.
+
+Registered native tools must also declare `prebuiltWorker` in `extension.json`.
+Publish the Developer ID–signed and notarized worker at a direct
+`raw.githubusercontent.com` URL pinned to a full commit, outside the editable
+source inventory. The manifest declares the artifact's byte count and SHA-256, the exact
+Swift entry file's SHA-256, the signing Team ID, the target architecture, the
+minimum macOS version, and the worker protocol version. The publisher verifies
+the Swift entry file hash and downloads the worker from its pinned URL to check
+its size and SHA-256. MacHelper 6.9.1 or later also verifies the signature and
+notarization before launch. See the
+[native worker format](../docs/Native-Extensions.md) for the fields and release workflow.
 
 If the tool has a browser companion, Marketplace publication requires Chrome,
 Microsoft Edge, and Safari support. Firefox is optional. List each browser and
@@ -336,11 +348,12 @@ inventory.
 
 ## Unified source runtimes
 
-MacHelper 6 reads `runtime: "javascript"` or `"native"` from the schema-2
+MacHelper reads `runtime: "javascript"` or `"native"` from the schema-2
 manifest. Both runtimes use the same Open MacHelper link and complete
 source-file catalog. Native source requires a `.swift` entry and
-`native.execute`. Its detail and install pages explain the compiler requirement
-and trusted native execution. Translation and Polish-input use JavaScript.
+`native.execute`. Marketplace listings explain the signed worker and the
+compiler used when building Swift source locally. Translation and Polish-input
+use JavaScript.
 
 The authoring section and AI guide describe both adapters and migration with a stable identifier/settings. The public-document allowlist includes `docs/Native-Extensions.md`; a separate explicit mapping publishes `MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift` at `NativeExtensionSDK/MacHelperNativeSDK.swift`. The MacHelper download must bundle these exact public bytes. `AI_DEPLOYMENT.md` remains excluded from the website, source ZIPs, and app ZIP.
 

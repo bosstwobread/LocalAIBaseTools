@@ -73,7 +73,7 @@ def source_runtime(manifest):
     return runtime
 
 
-def validate_source_files(manifest, files):
+def validate_source_files(manifest, files, *, require_prebuilt_worker=False):
     icon = manifest.get("icon")
     if icon is not None:
         if (not isinstance(icon, str) or not icon.endswith(".png") or len(icon.encode("utf-8")) > 512
@@ -110,6 +110,7 @@ def validate_source_files(manifest, files):
                     data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ValueError("Native source packages and source entry points require UTF-8 text, not prebuilt binaries.") from error
+    validate_prebuilt_worker(manifest, files[entry], required=require_prebuilt_worker)
 
 
     resource_suffixes = {".js", ".json", ".txt", ".md", ".prompt"}
@@ -143,9 +144,38 @@ def validate_source_files(manifest, files):
                     raise ValueError("The UI translation catalog has invalid labels.")
 
 
+def validate_prebuilt_worker(manifest, source, *, required):
+    if "prebuiltWorker" not in manifest:
+        if required and manifest["runtime"] == "native":
+            raise ValueError("Marketplace native tools require a prebuiltWorker declaration.")
+        return
+    if manifest["runtime"] != "native":
+        raise ValueError("Only native source can declare a prebuiltWorker.")
+    worker = manifest["prebuiltWorker"]
+    fields = {"url", "sha256", "size", "sourceSHA256", "teamIdentifier", "architecture", "minimumOSVersion", "protocolVersion"}
+    if not isinstance(worker, dict) or worker.keys() != fields:
+        raise ValueError("Invalid prebuiltWorker fields.")
+    url = worker["url"]
+    if not pinned_github_source(url, raw=True) or urlsplit(url).path.split("/")[2].endswith(".git"):
+        raise ValueError("The prebuiltWorker URL must be a direct GitHub raw path pinned to a full commit.")
+    if not isinstance(worker["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", worker["sha256"]):
+        raise ValueError("The prebuiltWorker needs a lowercase SHA-256 digest.")
+    if worker["sourceSHA256"] != hashlib.sha256(source).hexdigest():
+        raise ValueError("The prebuiltWorker sourceSHA256 must match the exact Swift entry file bytes.")
+    if type(worker["size"]) is not int or not 0 < worker["size"] <= 64 * 1024 * 1024:
+        raise ValueError("The prebuiltWorker needs a positive byte size of at most 64 MiB.")
+    if not isinstance(worker["teamIdentifier"], str) or not re.fullmatch(r"[A-Z0-9]{10}", worker["teamIdentifier"]):
+        raise ValueError("The prebuiltWorker needs a 10-character Developer ID Team ID.")
+    version = worker["minimumOSVersion"]
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9]{1,2}\.[0-9]{1,2}(?:\.[0-9]{1,2})?", version) or int(version.split(".")[0]) == 0:
+        raise ValueError("The prebuiltWorker has an invalid minimum macOS version.")
+    if worker["architecture"] not in ("arm64", "x86_64") or type(worker["protocolVersion"]) is not int or worker["protocolVersion"] != 1:
+        raise ValueError("The prebuiltWorker needs a supported architecture and worker protocol version 1.")
+
+
 def validate_registered_files(manifest, files):
     runtime = source_runtime(manifest)
-    validate_source_files(manifest, files)
+    validate_source_files(manifest, files, require_prebuilt_worker=True)
     allowed = {"selection.read", "selection.replace", "selection.paste", "clipboard.read", "ai.transform", "ui.panel",
                "companion.message"}
     if runtime == "native":
@@ -239,12 +269,15 @@ def validate_browser_companion_links(browser, identifier, item):
 
 
 def pinned_browser_source(address, *, raw):
+    return pinned_github_source(address, raw=raw) and (not raw or address.endswith(".json"))
+
+
+def pinned_github_source(address, *, raw):
     host = r"raw\.githubusercontent\.com" if raw else r"github\.com"
     ref = r"[0-9a-f]{40}" if raw else r"(?:tree|blob)/[0-9a-f]{40}"
     pattern = rf"https://{host}/[A-Za-z0-9-]{{1,39}}/[A-Za-z0-9_.-]{{1,100}}/{ref}(?:/[A-Za-z0-9_.-]+)+"
     return (isinstance(address, str) and len(address) <= 2048 and re.fullmatch(pattern, address)
-            and all(part not in {".", ".."} for part in urlsplit(address).path.split("/"))
-            and (not raw or address.endswith(".json")))
+            and all(part not in {".", ".."} for part in urlsplit(address).path.split("/")))
 
 
 def digest(data):

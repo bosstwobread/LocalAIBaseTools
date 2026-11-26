@@ -238,12 +238,21 @@ enum NativeExtensionVerification {
         }
     }
 
-    private struct CompanionReply: Decodable {
+    struct CompanionReply: Decodable {
         let ok: Bool?
         let payload: String?
         let error: String?
         let type: String?
         let enabled: Bool?
+    }
+
+    static func invokeCompanion(in directory: URL, extensionID: String, identifier: String,
+                                browser: SourceCompanionBrowser?, command: String, payload: String) async throws -> CompanionReply? {
+        let request = CompanionRequest(type: "invoke", extensionID: extensionID, companion: identifier,
+                                       browser: browser, command: command, payload: payload)
+        let connection = try await openCompanionSocket(in: directory, request: request)
+        defer { connection.cancel() }
+        return try await readCompanionFrame(from: connection)
     }
 
     private static func verifyCompanions(authorDirectory: URL, socketDirectory: URL,
@@ -269,11 +278,8 @@ enum NativeExtensionVerification {
 
         func invoke(_ id: String, _ companion: String, _ command: String, _ payload: String,
                     via browser: SourceCompanionBrowser? = nil) async throws -> CompanionReply? {
-            let message = CompanionRequest(type: "invoke", extensionID: id, companion: companion, browser: browser,
-                                           command: command, payload: payload)
-            let connection = try await openCompanionSocket(in: socketDirectory, request: message)
-            defer { connection.cancel() }
-            return try await readCompanionFrame(from: connection)
+            try await invokeCompanion(in: socketDirectory, extensionID: id, identifier: companion,
+                                      browser: browser, command: command, payload: payload)
         }
 
         await manager.start()

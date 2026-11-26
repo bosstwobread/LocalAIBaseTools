@@ -2,15 +2,53 @@
 
 MacHelper 6 runs native Swift and JavaScript tools in one extension system. Both use schema-2 source packages, the same **Extensions** list and **Install Source / Edit Source / Reload** workflow, schema-rendered settings, shared AI, selection input, and floating results. The manifest's explicit `runtime` selects the worker adapter. No extension-specific settings controller is loaded into MacHelper.
 
-Native source is compiled into an independent executable named `MacHelperNativeWorker` in Activity Monitor. Saving a valid Swift edit builds a replacement worker while MacHelper and the previous generation stay running. After startup and command validation succeeds, the host switches generations and stops the old process. Invalid code or startup errors retain the last working generation. This is process replacement, rather than unloading a native library from MacHelper.
+Native commands run in an independent executable named `MacHelperNativeWorker` in Activity Monitor. MacHelper 6.9.1 can use a published, prebuilt worker for unchanged Swift code. A local Swift edit builds a replacement worker. The host switches generations after validating startup and commands, and retains the last working generation if the replacement fails.
 
 ## Requirements and trust
 
-- macOS 14 or later, MacHelper 6 or later, and Xcode Command Line Tools with a working `xcrun swiftc`.
+- macOS 14 or later and MacHelper 6.9.1 or later for prebuilt workers. Xcode Command Line Tools are required to compile a source-only package or to build edited Swift code.
 - A manifest with `runtime: "native"`, a single `.swift` `entryPoint`, and `native.execute` permission.
 - Explicit approval before native compilation/execution. Reading settings for a disabled tool does not compile or launch it.
 
 Native Swift is trusted code running as the current user. It can import macOS frameworks and use APIs beyond the restricted JavaScript capability bridge. A separate worker limits crashes and supports replacement; it does not create an OS security sandbox. MacHelper's shared selection/AI/UI APIs retain their own capability checks, but the host cannot claim to restrict arbitrary native code to those capabilities. Each tool must describe what it accesses and obtain any macOS permissions its own process requires. Use host-provided selected text and AI instead of adding another credential setup.
+
+## Publish a prebuilt worker
+
+For Marketplace publication, keep the editable package and publish its executable separately. Build the worker from the declared Swift entry file and the public SDK bundled with MacHelper. Sign it with your **Developer ID Application** certificate and submit it for notarization before publishing. The example targets Apple Silicon and macOS 14. Choose the architecture and deployment target your artifact declares.
+
+```sh
+xcrun swiftc -parse-as-library -swift-version 5 -target arm64-apple-macosx14.0 \
+  "$MACHELPER_NATIVE_SDK" MacHelperExtension/Main.swift -o MacHelperNativeWorker
+codesign --force --sign "$DEVELOPER_ID_APPLICATION" --options runtime --timestamp MacHelperNativeWorker
+ditto -c -k MacHelperNativeWorker native-worker-notarization.zip
+xcrun notarytool submit native-worker-notarization.zip \
+  --keychain-profile "$NOTARY_PROFILE" --wait --output-format json > notarization.json
+test "$(plutil -extract status raw -o - notarization.json)" = Accepted
+codesign --verify --strict -R='notarized' MacHelperNativeWorker
+shasum -a 256 MacHelperNativeWorker MacHelperExtension/Main.swift
+stat -f %z MacHelperNativeWorker
+```
+
+Publish the signed executable outside the editable package and pin its raw GitHub URL to a full commit. Add this object to `extension.json` with the exact executable and source hashes, byte size, and signing Team ID. [Apple’s notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
+
+```json
+{
+  "prebuiltWorker": {
+    "url": "https://raw.githubusercontent.com/example/tool/0123456789012345678901234567890123456789/releases/1.0.0/MacHelperNativeWorker",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size": 123456,
+    "sourceSHA256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "teamIdentifier": "ABCDE12345",
+    "architecture": "arm64",
+    "minimumOSVersion": "14.0",
+    "protocolVersion": 1
+  }
+}
+```
+
+MacHelper checks the source hash, worker protocol, architecture, macOS target, binary hash and size, Developer ID Team ID, and notarization before loading the worker. It stores the executable in a private cache outside the editable source. Verify the published download on a Mac without developer tools. A standalone executable uses Apple’s online notarization ticket, so the initial verification needs network access. [Apple’s standalone notarization guidance](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
+
+Settings and prompt edits can reuse the same prebuilt worker while the Swift entry file matches. Swift edits use the local compiler. An invalid or unavailable prebuilt download reports an error and preserves the existing worker if one is running. Use MacHelper 6.9.1 or later for prebuilt workers. Older versions compile the packaged Swift source.
 
 ## Minimal independent package
 

@@ -16,6 +16,7 @@ enum SourceExtensionVerification {
     private final class AIProbe {
         var calls = 0
         var latest: [String: Any] = [:]
+        var nextResult: String?
         var blockNext = false
         var blocked = false
         var releaseBlocked = false
@@ -62,7 +63,9 @@ enum SourceExtensionVerification {
                 catch { cancellations += 1; throw error }
             }
             guard let text = payload["text"] as? String else { throw Failure(message: "AI received no text.") }
-            return ["text": "AI:" + text, "model": "fixture-model"]
+            let result = nextResult ?? "AI:" + text
+            nextResult = nil
+            return ["text": result, "model": "fixture-model"]
         }
     }
 
@@ -128,12 +131,25 @@ enum SourceExtensionVerification {
             if marketplace {
                 try check(!marketplaceIDs.isEmpty && Set(marketplaceIDs).count == marketplaceIDs.count && !args.contains("--live"),
                           "Marketplace verification needs distinct extension identifiers and a deterministic AI provider.")
-                let manager = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                let socket = workspace.appendingPathComponent("ipc", isDirectory: true)
+                let selectionManager = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
                     stateDirectory: state, sourceDirectory: sources, headless: true,
                     testTransform: { payload in try await probe.transform(payload) })
-                managers.append(manager)
+                let subtitleManager = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                    stateDirectory: workspace.appendingPathComponent("subtitle-state"),
+                    sourceDirectory: workspace.appendingPathComponent("subtitle-source"), headless: false,
+                    testTransform: { payload in try await probe.transform(payload) }, companionSocketDirectory: socket)
+                subtitleManager.onApproveCompanion = { manifest, grant in
+                    manifest.identifier == onlineSubtitleID &&
+                    grant.commands == ["caption-settings", "explain-word", "translate-captions"] && grant.allowsAI
+                }
+                managers += [selectionManager, subtitleManager]
+                for manager in managers {
+                    await manager.start()
+                    try check(manager.tools.isEmpty, "A clean MacHelper unexpectedly started with installed or bundled tools.")
+                }
                 let verified = try await verifyMarketplace(marketplaceIDs, catalogURL: catalogURL, allowLoopback: loopback,
-                                                            manager: manager, probe: probe)
+                    selectionManager: selectionManager, subtitleManager: subtitleManager, probe: probe, socket: socket)
                 for pid in verified.workerPIDs { _ = try remember(pid) }
                 checks += verified.checks
                 report["extensions"] = verified.packages
@@ -833,16 +849,17 @@ enum SourceExtensionVerification {
         }
     }
 
+    private static let onlineSubtitleID = "com.nelson007.online-subtitle"
+
     private static func verifyMarketplace(_ ids: [String], catalogURL: URL, allowLoopback: Bool,
-                                          manager: SourceExtensionManager, probe: AIProbe) async throws
+                                          selectionManager: SourceExtensionManager, subtitleManager: SourceExtensionManager,
+                                          probe: AIProbe, socket: URL) async throws
         -> (packages: [[String: Any]], checks: [String], workerPIDs: [Int32]) {
         var packages: [[String: Any]] = []
         var checks: [String] = []
         var workerPIDs: [Int32] = []
-        await manager.start()
-        guard manager.tools.isEmpty else { throw Failure(message: "A clean MacHelper unexpectedly started with installed or bundled tools.") }
-
         for id in ids {
+            let manager = id == onlineSubtitleID ? subtitleManager : selectionManager
             var link = URLComponents()
             link.scheme = "machelper"
             link.host = "install"
@@ -852,10 +869,9 @@ enum SourceExtensionVerification {
             let callsBeforeInstall = probe.calls
             let preview = try await manager.previewMarketplaceInstall(request)
             let manifest = preview.manifest
-            guard manifest.runtime == "javascript", manifest.companion == nil,
-                  let selectionCommand = manifest.commands.first(where: { $0.trigger == "selection" }),
+            guard manifest.runtime == "javascript", !manifest.permissions.contains("native.execute"),
                   manifest.permissions.contains("ai.transform") else {
-                throw Failure(message: "\(id) does not declare a standalone JavaScript selection tool with AI access.")
+                throw Failure(message: "\(id) does not declare a standalone JavaScript worker with AI access.")
             }
             let unpinnedFile = Failure(message: "\(id) has a source file without an immutable GitHub path or a declared size.")
             let packagePins = try Set(preview.entry.files.map { file in
@@ -882,12 +898,21 @@ enum SourceExtensionVerification {
             guard try SourcePackageInspector.snapshot(at: source).fileHashes == expectedHashes else {
                 throw Failure(message: "The installed files for \(id) differ from the Marketplace catalog.")
             }
-            let result = try await manager.performCommand(for: id, text: "The library opens at nine.", commandIdentifier: selectionCommand.identifier)
-            guard probe.calls == callsBeforeInstall + 1, let requestText = probe.latest["text"] as? String,
-                  result.model == "fixture-model", result.text == "AI:" + requestText else {
-                throw Failure(message: "\(id) did not return its result through MacHelper's shared AI capability.")
+            if id == onlineSubtitleID {
+                try await verifyOnlineSubtitle(manifest, manager: manager, probe: probe, socket: socket)
+                checks.append("\(manifest.displayName) \(manifest.version) installs \(expectedHashes.count) GitHub-pinned files and serves caption settings, bilingual captions, and word explanations on its approved Chrome route")
+            } else {
+                guard manifest.companion == nil,
+                      let selectionCommand = manifest.commands.first(where: { $0.trigger == "selection" }) else {
+                    throw Failure(message: "\(id) does not declare a standalone selection tool.")
+                }
+                let result = try await manager.performCommand(for: id, text: "The library opens at nine.", commandIdentifier: selectionCommand.identifier)
+                guard probe.calls == callsBeforeInstall + 1, let requestText = probe.latest["text"] as? String,
+                      result.model == "fixture-model", result.text == "AI:" + requestText else {
+                    throw Failure(message: "\(id) did not return its result through MacHelper's shared AI capability.")
+                }
+                checks.append("\(manifest.displayName) \(manifest.version) reviews and installs \(expectedHashes.count) GitHub-pinned files, then runs the selection command")
             }
-            checks.append("\(manifest.displayName) \(manifest.version) reviews and installs \(expectedHashes.count) GitHub-pinned files, then runs the selection command")
             packages.append(["id": id, "version": manifest.version, "fileCount": expectedHashes.count])
 
             try await manager.setEnabled(false, for: id)
@@ -911,6 +936,48 @@ enum SourceExtensionVerification {
             checks.append("\(manifest.displayName) preserves its edited prompt, settings, and disabled state on a repeated Marketplace install")
         }
         return (packages, checks, workerPIDs)
+    }
+
+    private static func verifyOnlineSubtitle(_ manifest: SourceExtensionManifest, manager: SourceExtensionManager,
+                                             probe: AIProbe, socket: URL) async throws {
+        let browsers = manager.approvedBrowserCompanions(for: manifest.identifier)
+        guard Set([SourceCompanionBrowser.chrome, .edge, .safari]).isSubset(of: Set(browsers.map(\.browser))),
+              let chrome = browsers.first(where: { $0.browser == .chrome }) else {
+            throw Failure(message: "OnlineSubtitle did not approve its required browser routes.")
+        }
+        try await eventually("The installed OnlineSubtitle worker did not expose a companion endpoint.") {
+            FileManager.default.fileExists(atPath: socket.appendingPathComponent("endpoint").path)
+        }
+        func invoke(_ command: String, _ payload: String) async throws -> [String: Any] {
+            let reply = try await NativeExtensionVerification.invokeCompanion(in: socket, extensionID: manifest.identifier,
+                identifier: chrome.identifier, browser: .chrome, command: command, payload: payload)
+            guard reply?.ok == true, let text = reply?.payload,
+                  let data = text.data(using: .utf8),
+                  let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  result["ok"] as? Bool == true else {
+                throw Failure(message: "OnlineSubtitle failed its installed \(command) command.")
+            }
+            return result
+        }
+        let calls = probe.calls
+        let settings = try await invoke("caption-settings", #"{"type":"getSettings"}"#)
+        guard settings["targetLanguage"] as? String == "zh-CN",
+              let revision = settings["revision"] as? String, revision.count == 64, probe.calls == calls else {
+            throw Failure(message: "OnlineSubtitle did not load its bundled defaults without AI.")
+        }
+        probe.nextResult = #"{"translations":[{"id":1,"source":"The library opens at nine.","text":"图书馆九点开门。"}]}"#
+        let captions = try await invoke("translate-captions", #"{"type":"translateSentences","cues":[{"id":1,"text":"the library opens at nine"}]}"#)
+        let row = (captions["translations"] as? [[String: Any]])?.first
+        guard row?["source"] as? String == "The library opens at nine.", row?["text"] as? String == "图书馆九点开门。",
+              captions["revision"] as? String == revision else {
+            throw Failure(message: "OnlineSubtitle did not return the corrected source and translation together.")
+        }
+        probe.nextResult = #"{"meaning":"供人借阅书籍的场所。"}"#
+        let word = try await invoke("explain-word", #"{"type":"explainWord","word":"library","sentence":"The library opens at nine."}"#)
+        guard word["meaning"] as? String == "供人借阅书籍的场所。", word["revision"] as? String == revision,
+              probe.calls == calls + 2 else {
+            throw Failure(message: "OnlineSubtitle did not run the caption and word commands through shared AI.")
+        }
     }
 
     private static func eventually(_ message: String, timeout: TimeInterval = 8,

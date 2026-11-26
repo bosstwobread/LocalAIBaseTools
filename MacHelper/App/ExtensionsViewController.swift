@@ -98,7 +98,11 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             guard self != nil else { return false }
             let alert = NSAlert()
             alert.messageText = L("Enable native extension “%@”?", manifest.displayName)
-            alert.informativeText = L("This extension runs compiled Swift code in a separate process with your Mac user account’s access. Enable only source you trust. Changes rebuild and restart this extension while MacHelper stays open.")
+            if let team = manifest.prebuiltWorker?.teamIdentifier {
+                alert.informativeText = L("This extension can run a verified prebuilt worker signed by Developer ID team %@. It runs with your Mac user account’s access. Enable only source you trust.", team)
+            } else {
+                alert.informativeText = L("This extension runs compiled Swift code in a separate process with your Mac user account’s access. Enable only source you trust. Changes rebuild and restart this extension while MacHelper stays open.")
+            }
             alert.addButton(withTitle: L("Enable Native Extension"))
             alert.addButton(withTitle: L("Cancel"))
             return alert.runModal() == .alertFirstButtonReturn
@@ -430,7 +434,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         showBackupButton.isHidden = completed == nil
         summary.stringValue = item?.summary ?? ""
         sourceHelp.isHidden = item?.sourceURL == nil
-        sourceHelp.stringValue = item?.runtime == "native"
+        sourceHelp.stringValue = item?.runtime == "native" && item?.usesPrebuiltWorker != true
             ? L("Edit Source opens the installed folder. Saving native Swift source rebuilds and replaces only this tool’s worker. MacHelper stays open; a failed build keeps the last working version. Xcode Command Line Tools are required.")
             : L("Edit Source opens this tool’s installed folder. Saving code, prompts, or settings reloads its worker automatically while enabled. If disabled, your changes take effect when you enable it.")
         toggle.title = item?.sourceURL == nil ? L("Install & Enable") : L("Enabled")
