@@ -2,7 +2,7 @@
 
 MacHelper is the installed app and settings host, accessible from the Dock or menu bar. Its unified extension format is an editable source package declaring either a JavaScript or native Swift runtime. An extension can be developed in a separate repository, downloaded or imported into the installed MacHelper, and changed locally without rebuilding the host or installing another app.
 
-The source package uses manifest schema version two. MacHelper chooses a JavaScriptCore worker for `runtime: "javascript"`, or compiles and starts an independent Swift worker for `runtime: "native"`. Both share the same Extensions list, settings, installation, and reload controls. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. Translation and Polish-input are the current first-party source tools; their files include `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, root `discovery.json`, `README.md`, and `LICENSE`. New tools keep searchable descriptions in their own `discovery.json`; publishing requires it, while older installed packages remain runnable without it.
+The source package uses manifest schema version two. MacHelper chooses a JavaScriptCore worker for `runtime: "javascript"`, or compiles and starts an independent Swift worker for `runtime: "native"`. Both share the same Extensions list, settings, installation, and reload controls. MacHelper owns shared AI settings, selection detection, floating panels, login startup, and extension settings. The independent Translation and Polish-input packages each contain `extension.json`, `main.js`, `settings.schema.json`, editable prompts under `prompts/`, root `discovery.json`, `README.md`, and `LICENSE`. The Marketplace uses `discovery.json` for searchable descriptions. Older installed packages can still run without it.
 
 Translation and Polish-input need no browser extension. Retired browser packages remain separate and can continue using the compatibility [framed MacHelper service](MacHelper-Protocol.md). The old version-one native bundle SDK is a legacy migration source, not the new hot-reload runtime.
 
@@ -93,13 +93,7 @@ The marketplace serves a JSON catalog over HTTPS. Each entry contains display me
 
 **Add Catalog…** registers extension update metadata without downloading or running packages. To install a published extension, open it in **Marketplace…** and use **Install & Enable** in MacHelper’s review. MacHelper stages the complete declared inventory, validates every file and the manifest identity and version, then installs the complete source folder in one operation. Failed downloads leave no partial installed tool. Re-enabling uses the installed source. Once an update source offers a newer version, the card’s update icon and the detail page’s **Update…** button both open the update review. MacHelper retains the previous source as a backup. [Update behavior](Source-Extensions.md#updating-an-installed-extension)
 
-The first-party catalog is `catalog/extensions.json`. Regenerate it after changing published first-party source:
-
-```sh
-python3 scripts/build-source-catalog.py --ref PUBLISHED_GIT_COMMIT
-```
-
-The first-party generator includes all `Extensions` folders with source `extension.json` manifests, currently Translation and Polish-input. Repeat `--package NAME` to select a subset. A custom `--base-url` requires exactly one selected package, for example `--package Translation --base-url https://example.com/packages/translation/1.0.0/`. For a separate marketplace or CDN, generate catalog entries using the same complete inventory contract and immutable source URLs so hashes continue matching their files. The app bundles first-party source seeds at `Contents/Resources/SourceSeeds/<identifier>.macsource/` for offline installation; external marketplace entries do not receive that implicit fallback.
+The Marketplace publishes `catalog.json` from approved GitHub commits. Each author owns the package, tests, and version in their extension repository. See the standalone build instructions for [Translation](https://github.com/bosstwobread/Translation-MacHelper) and [Polish-input](https://github.com/bosstwobread/Polish-input-MacHelper). A separate catalog or CDN can use the same complete inventory contract and immutable source URLs. For offline installation, use **Install Source…** with a previously downloaded package or its extracted archive.
 
 ## Source verification
 
@@ -111,7 +105,7 @@ python3 scripts/test-native-extensions.py
 python3 scripts/test-source-extensions.py --live
 ```
 
-The integration check serves the entire Translation package through a loopback catalog and uses temporary source/preferences directories with real independent JavaScript workers. It checks discovery without download, full source installation on enable, reloads after script/prompt/schema edits, invalid-source recovery, persisted settings and local edits, cancellation, and process cleanup. `--live` additionally transforms one synthetic public sentence through the configured AI service. It does not install a test tool into the user's account or access Upwork, the clipboard, or app permissions.
+The lifecycle check serves a historical fixture through a loopback catalog and uses temporary source and settings directories with the real JavaScript worker. It checks full source installation, reloads, invalid-source recovery, persisted settings and local edits, cancellation, and process cleanup. `--live` additionally transforms one synthetic public sentence through the configured AI service. The check uses an isolated profile and synthetic data.
 
 ## Native Swift source workers
 

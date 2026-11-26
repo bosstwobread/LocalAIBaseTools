@@ -99,8 +99,6 @@ final class MacHelperAppDelegate: NSObject, NSApplicationDelegate {
         let marketplaceCatalog = try? MarketplaceConfiguration.websiteURL().appendingPathComponent("catalog.json")
         sourceManager = SourceExtensionManager(workerExecutableURL: bin.appendingPathComponent("MacHelperScriptWorker"),
             helperExecutableURL: bin.appendingPathComponent("mac-helper-host"),
-            bundledCatalogURL: Bundle.main.resourceURL!.appendingPathComponent("SourceCatalog/extensions.json"),
-            bundledSeedDirectory: Bundle.main.resourceURL!.appendingPathComponent("SourceSeeds"),
             marketplaceCatalogURL: marketplaceCatalog)
         extensions = ExtensionsViewController(manager: sourceManager)
         configureExtensionsCallbacks()

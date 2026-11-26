@@ -9,7 +9,7 @@ import sys
 import zipfile
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
-from discovery import build_discovery_index, discovery_documents, read_descriptor
+from discovery import build_discovery_index, build_registered_discovery_index, discovery_documents, read_descriptor
 from build import PUBLIC_DOCUMENTS, PUBLIC_SDK_FILES, historical_files, source_runtime, validate_registered_files
 from github_publication import collect_publications
 from github_registry import read_registry
@@ -30,7 +30,6 @@ def main():
     assert data["schemaVersion"] == catalog["schemaVersion"] == 1
     assert len({tool["id"] for tool in data["extensions"]}) == len(data["extensions"])
     assert len({tool["slug"] for tool in data["extensions"]}) == len(data["extensions"])
-    folders = [p for p in (ROOT / "Extensions").iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in config.get("retiredTools", [])]
     registry = HERE / "registry.json"
     registered = registry.is_file()
     assert data.get("developmentSources", False) == args.local_sources, "Use the matching source mode."
@@ -40,6 +39,7 @@ def main():
         assert data["extensions"] == expected_tools and catalog == expected_catalog, "The published data does not match the approved source revisions."
         expected_index, _ = discovery_documents(expected_entries)
     else:
+        folders = [p for p in (ROOT / "Extensions").iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in config.get("retiredTools", [])]
         assert len(folders) == len(data["extensions"]), "The website must list every current extension directory."
         expected_index, _ = build_discovery_index(ROOT, config)
     index_bytes = (site / "discovery-index.json").read_bytes()
@@ -151,11 +151,15 @@ def main():
             bundled_index_bytes = archive.read("MacHelper.app/Contents/Resources/Discovery/discovery-index.json")
             bundled_index = json.loads(bundled_index_bytes)
             bundled_manifest = json.loads(archive.read("MacHelper.app/Contents/Resources/Discovery/discovery-manifest.json"))
-            expected_seed, _ = build_discovery_index(ROOT, config)
+            expected_seed = expected_index
+            if registered and args.local_sources:
+                expected_seed, _ = build_registered_discovery_index(read_registry(registry))
             assert bundled_index["extensions"] == expected_seed["extensions"] and bundled_index["revision"] == expected_seed["revision"], "The app discovery seed is stale."
             assert bundled_manifest["revision"] == bundled_index["revision"] and bundled_manifest["updatedAt"] == bundled_index["updatedAt"]
             assert bundled_manifest["sha256"] == hashlib.sha256(bundled_index_bytes).hexdigest() and bundled_manifest["size"] == len(bundled_index_bytes)
             assert "MacHelper.app/Contents/Resources/Discovery/discovery-config.json" in archive.namelist()
+            assert not any(name.startswith(("MacHelper.app/Contents/Resources/SourceCatalog/", "MacHelper.app/Contents/Resources/SourceSeeds/"))
+                           for name in archive.namelist()), "The app download must not contain an extension catalog or source seed."
             assert any(name.startswith("MacHelper.app/Contents/Resources/DiscoveryPrompts/") and name.endswith(".txt") for name in archive.namelist())
             assert all(Path(name).name != "AI_DEPLOYMENT.md" for name in archive.namelist()), "Private deployment runbook entered the app download."
             assert not any(name.endswith("/settings.json") or "/.env" in name for name in archive.namelist())

@@ -8,8 +8,11 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
+from github_registry import MAX_FILE_BYTES, read_registry
+
 MAX_DESCRIPTOR = 64 * 1024
 MAX_INDEX = 16 * 1024 * 1024
+MAX_PREVIEW = 128 * 1024
 LOCALE = re.compile(r'[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}')
 IDENTIFIER = re.compile(r'[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*){1,7}')
 VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?')
@@ -128,6 +131,32 @@ def discovery_entry(manifest, descriptor, slug, mac_source=True, identifier=None
     return entry
 
 
+def registered_discovery_entry(manifest, raw_descriptor, preview):
+    if not isinstance(manifest, dict):
+        raise ValueError('Invalid registered extension manifest.')
+    if len(raw_descriptor) > MAX_DESCRIPTOR:
+        raise ValueError('Published discovery descriptor exceeds 64 KiB.')
+    descriptor = validate_descriptor(json.loads(raw_descriptor))
+    identifier = manifest.get('identifier')
+    if not isinstance(identifier, str) or descriptor.get('identifier', identifier) != identifier:
+        raise ValueError('Conflicting registered extension identifiers.')
+    return discovery_entry(manifest, descriptor, preview.get('slug', identifier.replace('.', '-'))), descriptor
+
+
+def build_registered_discovery_index(sources):
+    entries = []
+    for source in sources:
+        manifest = json.loads(source.read('extension.json', MAX_FILE_BYTES))
+        descriptor = source.read('discovery.json', MAX_DESCRIPTOR)
+        raw_preview = source.read('marketplace/preview.json', MAX_PREVIEW, optional=True)
+        preview = {} if raw_preview is None else json.loads(raw_preview)
+        if not isinstance(preview, dict):
+            raise ValueError('Invalid registered extension preview.')
+        entry, _ = registered_discovery_entry(manifest, descriptor, preview)
+        entries.append(entry)
+    return discovery_documents(entries)
+
+
 def discovery_documents(entries):
     if len(entries) > 10000:
         raise ValueError('Discovery index exceeds 10,000 entries.')
@@ -156,8 +185,14 @@ def write_discovery_documents(output, index, manifest):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parent.parent)
+    inputs = parser.add_mutually_exclusive_group()
+    inputs.add_argument('--root', type=Path, help='Read a legacy fixture from its local Extensions directory.')
+    inputs.add_argument('--registry', type=Path, default=Path(__file__).resolve().with_name('registry.json'),
+                        help='Read only discovery metadata from approved GitHub revisions.')
     parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args()
-    index, _ = write_discovery_index(args.root,args.output)
+    if args.root:
+        index, _ = write_discovery_index(args.root, args.output)
+    else:
+        index, _ = write_discovery_documents(args.output, *build_registered_discovery_index(read_registry(args.registry)))
     print('Published discovery metadata for',len(index['extensions']),'extensions.')

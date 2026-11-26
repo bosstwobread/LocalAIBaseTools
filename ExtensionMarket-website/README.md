@@ -204,12 +204,10 @@ Enabling or editing a native Swift source tool separately requires Xcode
 Command Line Tools. JavaScript source tools do not need that compiler.
 
 For frontend-only development, `build.py --without-app` omits the app ZIP.
-Add `--local-sources` to test unpublished changes to first-party extension
-folders, and pass the same flag to `verify.py`. This mode is for browsing and
-previewing unpublished files. Use the default pinned GitHub sources when
-testing installation against the reviewed release or preparing a deployment.
-When both bundled tools come from the same published commit, pass that revision
-to `scripts/build-apps.py --source-ref` to pin the app’s bundled catalog as well.
+Use the default pinned GitHub sources to test installation against the
+reviewed release and prepare a deployment. Each registered first-party tool
+is developed, built, and tested in its own repository. To try an unpublished
+change, import its source folder directly in MacHelper with **Install Source…**.
 Serve `dist/` locally to test both the domain root and a mounted path prefix.
 
 ## Deploy
@@ -326,8 +324,8 @@ For example, place `preview.png` beside the following `preview.json`:
 
 An extension without preview data still gets a card and details from its
 manifest and discovery metadata. See the authored previews for the
-[lookup layout](../Extensions/Translation/marketplace/preview.json) and
-[revision layout](../Extensions/Polish-input/marketplace/preview.json).
+[lookup layout](https://github.com/bosstwobread/Translation-MacHelper/blob/main/MacHelperExtension/marketplace/preview.json) and
+[revision layout](https://github.com/bosstwobread/Polish-input-MacHelper/blob/main/MacHelperExtension/marketplace/preview.json).
 Website assets under `marketplace/` are outside the MacHelper install
 inventory.
 

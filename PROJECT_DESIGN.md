@@ -11,8 +11,8 @@ The current products are:
 | Component | Current version | What it does |
 | --- | --- | --- |
 | MacHelper | 6.9.0 (build 690) | App with Dock and menu-bar access, multilingual sidebar settings, editable prompt resources, movable result panels, extension-authoring guide, unified JavaScript/native workers, native hot reload, batch extension actions, a shared icon toolbar with guarded Apply, the website’s AI discovery service, and local AI transports. |
-| Translation | 4.5.8 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
-| Polish-input | 1.0.6 | Editable JavaScript tool that streams a polished preview and offers explicit plain selected-text replacement in supported Mac apps. |
+| Translation | 4.5.9 | Editable JavaScript tool with localized interface labels that translates selected text and single words using complete user-editable prompt files, with streamed results. |
+| Polish-input | 1.0.7 | Editable JavaScript tool that streams a polished preview and offers explicit plain selected-text replacement in supported Mac apps. |
 | Extension Market | Static website | Keyword/description search, tool details, illustrated previews, source downloads, and reviewed installation links into MacHelper. |
 
 The public marketplace is [local-ai-extension.nelson007.com](https://local-ai-extension.nelson007.com/). Version numbers above are a snapshot; the manifests and release configuration remain the source of truth.
@@ -81,10 +81,10 @@ MacHelper’s local companion service exposes bounded command invocation and ena
 | `MacHelper/ExtensionSDK/` | Legacy in-process Objective-C/AppKit interface retained as migration/development fixture. |
 | `MacHelper/Assets/` | MacHelper icon artwork and macOS icon resources. |
 | `MacHelper/Tests/` | Swift runtime and capability tests. |
-| `Extensions/Translation/` | Translation's manifest, JavaScript, settings schema, prompts, documentation, and license. Most translation wording/behavior changes belong here. |
-| `Extensions/Polish-input/` | Polishing manifest, JavaScript, source prompt, settings/localizations, discovery metadata, documentation, and license. |
+| [Translation-MacHelper](https://github.com/bosstwobread/Translation-MacHelper) | Translation's manifest, JavaScript, settings schema, prompts, documentation, and license. |
+| [Polish-input-MacHelper](https://github.com/bosstwobread/Polish-input-MacHelper) | Polishing manifest, JavaScript, source prompt, settings and localization, documentation, and license. |
 | `legacy/MessageHelper-Upwork/` | Retired Manifest V3 browser package and safe test fixture; compatibility source, not a current marketplace tool. |
-| `Extensions/*/discovery.json` | Tool-owned searchable descriptions, capabilities, examples, keywords, limitations, platforms, and translated display text. |
+| `MacHelperExtension/discovery.json` in each tool repository | Tool-owned searchable descriptions, capabilities, examples, keywords, limitations, platforms, and translated display text. |
 | `MacHelper/Runtime/Discovery*` | Verified public metadata cache/seed, keyword retrieval, and bounded AI ranking. |
 | `MacHelper/Runtime/MarketplaceLocalService*` | Loopback HTTP parsing/listener, official-origin checks, short-lived sessions, and website search/cancel routing. |
 | `catalog/extensions.json` | Source catalog with complete file inventory, sizes, hashes, and download locations. Regenerate after changing published tool files. |
@@ -97,7 +97,7 @@ MacHelper’s local companion service exposes bounded command invocation and ena
 | `examples/ExternalGreeting/` | Legacy native bundle example for migration reference. |
 | `dist/`, `ExtensionMarket-website/dist/`, `.artifacts/` | Generated builds, distribution files, or local verification artifacts. These are not the editable source of truth. |
 
-`MacHelper` and `Extensions` are separate development units. Tools use a published interface rather than importing internal application code. A tool can be authored in another repository and installed from a local folder or HTTPS catalog.
+Tools use MacHelper’s published extension interface. Each first-party tool has a separate repository and can be developed there and installed from a local folder or the Marketplace.
 
 ## 4. Shared AI connection
 
@@ -133,7 +133,7 @@ Current context limits include eight source ancestors, 2,000 UTF-16 units / 8,00
 
 ## 6. Polish-input and guarded replacement
 
-Polish-input owns its complete polishing prompt, script, schema, and localized labels in `Extensions/Polish-input/`. It uses the same selected-text input, shared provider, unchanged prompt transport, worker hot reload, and streaming result contract as Translation. It declares `selection.replace` and optional clipboard-assisted `selection.paste` in addition to `selection.read`, `ai.transform`, and `ui.panel`; both editing permissions require MacHelper 6.6 and explicit approval. `selection.paste` requires read and replace access.
+Polish-input owns its polishing prompt, script, schema, and localized labels in its independent repository. It uses the same selected-text input, shared provider, unchanged prompt transport, worker hot reload, and streaming result contract as Translation. It declares `selection.replace` and optional clipboard-assisted `selection.paste` alongside `selection.read`, `ai.transform`, and `ui.panel`. Both editing permissions require MacHelper 6.6 and explicit approval. `selection.paste` requires read and replace access.
 
 1. The shared toolbar routes the **Polish** icon to that manifest command in its current validated extension activation.
 2. MacHelper captures the original Accessibility element identity, source process, exact selected text, and numeric range. A clipboard-only selection may recover this proof from a fresh matching AX read at the tool click only while the original context remains valid; its text alone never authorizes editing. The extension receives text/settings/context, not an unrestricted AX handle.
@@ -206,7 +206,7 @@ These are per-user locations; `~` means the current user's home directory.
 
 | Path | Contents |
 | --- | --- |
-| `~/Applications/LocalAIBaseTools/MacHelper.app` | Installed application, embedded AI host/worker, bundled catalog and source seeds under `Contents/Resources/SourceSeeds/<identifier>.macsource/`. |
+| `~/Applications/LocalAIBaseTools/MacHelper.app` | Installed application with the shared AI host, worker runtimes, and public discovery metadata. |
 | `~/Library/Application Support/LocalAIBaseTools/MacHelper/settings.json` | Shared provider, model, and connection preferences. |
 | `…/MacHelper/source-extensions.json` | Source-tool state, approved permissions, and catalog locations. |
 | `…/MacHelper/Discovery/` | Verified public discovery index/manifest cache; no search queries or answers. |
@@ -245,7 +245,7 @@ Source inventories contain direct HTTPS URLs to commit-pinned GitHub files, size
 
 Current production uses a dedicated Docker container behind the existing Caddy proxy. Only the marketplace container is replaced during deployment. A candidate container's full file inventory is checked before publication, Caddy changes are validated and guarded against concurrent edits, and prior release information supports rollback. The legacy `recite.nelson007.com/extension-market` landing address redirects to the new domain; nested legacy package/catalog/download URLs remain directly accessible for older clients that reject redirects.
 
-The app builder regenerates the first-party source catalog before bundling the matching source seeds. The Mac app needs a macOS build/signing environment with Swift 6 or later command-line tools and Python 3. The published Apple Silicon download is a developer preview and is not notarized. Linux builds the static website container, not the Mac application. The public [website README](ExtensionMarket-website/README.md) and [deployment guide](ExtensionMarket-website/DEPLOYMENT.md) describe the supported packaging and Docker update workflow. Private machine-specific deployment notes are not distributed.
+The app builder uses pinned Marketplace metadata to generate the public discovery index. The extension repositories supply installable packages directly to the Marketplace. The Mac app needs a macOS build and signing environment with Swift 6 or later command-line tools and Python 3. The published Apple Silicon download is an unnotarized developer preview. Linux builds the static website container. The public [website README](ExtensionMarket-website/README.md) and [deployment guide](ExtensionMarket-website/DEPLOYMENT.md) describe the supported packaging and Docker update workflow.
 
 ### Description-based discovery (metadata 6.3; extension-free website service 6.5)
 

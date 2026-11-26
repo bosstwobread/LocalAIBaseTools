@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build MacHelper with generic capabilities and editable first-party source tools."""
+"""Build MacHelper with the shared runtime, SDK, and discovery metadata."""
 import argparse
 import json
 import plistlib
@@ -42,7 +42,6 @@ def build(package):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--signing-identity", help="Signing identity; otherwise prefer an existing Apple identity, falling back to ad hoc.")
-    parser.add_argument("--source-ref", default="main", help="Git ref for bundled source catalog download URLs.")
     config_path = ROOT / "ExtensionMarket-website/marketplace.config.json"
     default_marketplace = json.loads(config_path.read_text())["baseUrl"] if config_path.exists() else "https://local-ai-extension.nelson007.com/"
     parser.add_argument("--marketplace-url", default=default_marketplace, help="Public HTTPS URL opened by MacHelper's Marketplace entry.")
@@ -52,11 +51,10 @@ def main():
         parser.error("The marketplace URL must be a public HTTPS website URL without credentials, query, or fragment.")
     subprocess.run([sys.executable, str(ROOT / "scripts/build-app-icon.py")], check=True)
     dist = ROOT / "dist"
-    bundled_catalog = dist / "source-catalog.json"
-    subprocess.run([sys.executable, str(ROOT / "scripts/build-source-catalog.py"),
-                    "--ref", args.source_ref, "--output", str(bundled_catalog)], check=True)
     identity = signing_identity(args.signing_identity)
-    subprocess.run([sys.executable, str(ROOT / "ExtensionMarket-website/discovery.py"), "--output", str(dist)], check=True)
+    marketplace = ROOT / "ExtensionMarket-website"
+    subprocess.run([sys.executable, str(marketplace / "discovery.py"),
+                    "--registry", str(marketplace / "registry.json"), "--output", str(dist)], check=True)
     shutil.copytree(ROOT / "MacHelper/Runtime/DiscoveryPrompts", dist / "DiscoveryPrompts", dirs_exist_ok=True)
     (dist / "discovery-config.json").write_text(json.dumps({"schemaVersion": 1, "websiteURL": args.marketplace_url}) + "\n")
     helper_bin = build(ROOT / "MacHelper")
@@ -101,7 +99,6 @@ def main():
     for name in ["discovery-index.json", "discovery-manifest.json"]:
         shutil.copy2(dist / name, resources / "Discovery" / name)
     shutil.copy2(dist / "discovery-config.json", resources / "Discovery/discovery-config.json")
-    (resources / "SourceCatalog").mkdir(parents=True)
     # Explicit public documentation only; AI_DEPLOYMENT.md stays local.
     for relative in ["AI_EXTENSION_GUIDE.md", "docs/Extension-Development.md", "docs/Source-Extensions.md", "docs/Native-Extensions.md", "docs/MacHelper-Protocol.md"]:
         destination = resources / relative
@@ -110,17 +107,8 @@ def main():
     (resources / "NativeExtensionSDK").mkdir()
     shutil.copy2(ROOT / "MacHelper/NativeExtensionSDK/MacHelperNativeSDK.swift", resources / "NativeExtensionSDK/MacHelperNativeSDK.swift")
     shutil.copy2(ROOT / "MacHelper/Assets/AppIcon.icns", resources / "AppIcon.icns")
-    shutil.copy2(bundled_catalog, resources / "SourceCatalog/extensions.json")
-    for folder in sorted((ROOT / "Extensions").iterdir()):
-        manifest_path = folder / "extension.json"
-        if not folder.is_dir() or folder.is_symlink() or not manifest_path.is_file():
-            continue
-        manifest = json.loads(manifest_path.read_text())
-        shutil.copytree(folder, resources / "SourceSeeds" / (manifest["identifier"] + ".macsource"),
-                        ignore=shutil.ignore_patterns(".*", "__pycache__", "node_modules", "marketplace"))
     sign(app, identity, "com.localaibasetools.mac-helper")
     print(f"Built {app}")
-    print("Source tools install into independent editable working folders when enabled; each worker supports hot reload.")
 
 
 if __name__ == "__main__":

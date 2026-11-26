@@ -74,7 +74,7 @@ enum NativeExtensionVerification {
             try Data(#"{"schemaVersion":1,"fields":[{"key":"prefix","label":"Prefix","type":"text","default":"default"},{"key":"replyPrompt","label":"Prompt","type":"prompt","path":"prompts/reply.txt"}]}"#.utf8).write(to: author.appendingPathComponent("settings.schema.json"))
             let approvalState = root.appendingPathComponent("approval-state")
             let approvalManager = SourceExtensionManager(workerExecutableURL: workerURL, helperExecutableURL: helperURL,
-                bundledCatalogURL: catalog, stateDirectory: approvalState, nativeSDKURL: sdkURL,
+                initialCatalogURL: catalog, stateDirectory: approvalState, nativeSDKURL: sdkURL,
                 sourceDirectory: root.appendingPathComponent("approval-sources"), headless: false)
             managers.append(approvalManager)
             await approvalManager.start()
@@ -96,7 +96,7 @@ enum NativeExtensionVerification {
             checks.append("native execution defaults to denied and a rejected approval never builds or launches code")
             let probe = AIProbe()
             func makeManager() -> SourceExtensionManager {
-                let manager = SourceExtensionManager(workerExecutableURL: workerURL, helperExecutableURL: helperURL, bundledCatalogURL: catalog,
+                let manager = SourceExtensionManager(workerExecutableURL: workerURL, helperExecutableURL: helperURL, initialCatalogURL: catalog,
                     stateDirectory: state, nativeSDKURL: sdkURL, sourceDirectory: sources, headless: true,
                     testTransform: { payload in try await probe.transform(payload, progress: { _ in }) },
                     testStreamingTransform: { payload, progress in try await probe.transform(payload, progress: progress) })
@@ -202,7 +202,7 @@ enum NativeExtensionVerification {
             let companionDirectory = root.appendingPathComponent("companion", isDirectory: true)
             let companionProbe = AIProbe()
             let companionManager = SourceExtensionManager(
-                workerExecutableURL: workerURL, helperExecutableURL: helperURL, bundledCatalogURL: catalog,
+                workerExecutableURL: workerURL, helperExecutableURL: helperURL, initialCatalogURL: catalog,
                 stateDirectory: root.appendingPathComponent("companion-state"), nativeSDKURL: sdkURL,
                 sourceDirectory: root.appendingPathComponent("companion-sources"), headless: false,
                 testTransform: { try await companionProbe.transform($0, progress: { _ in }) },

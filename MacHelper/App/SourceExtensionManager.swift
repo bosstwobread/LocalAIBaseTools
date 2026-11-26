@@ -50,6 +50,8 @@ func sourcePermissionReviewText(_ permissions: [String]) -> String {
 @MainActor
 final class SourceExtensionManager {
     static let translationID = "com.localaibasetools.translation"
+    // Older bundled installations may predate the persisted update catalog.
+    private static let legacyMarketplaceIDs: Set<String> = [translationID, "com.localaibasetools.polish-input"]
     private static let maximumCatalogCount = 32
     var onChange: (() -> Void)?
     var onApproveNativeExecution: ((SourceExtensionManifest) -> Bool)?
@@ -59,8 +61,7 @@ final class SourceExtensionManager {
     var accessibilityGranted: Bool { AXIsProcessTrusted() }
     private let store: SourcePackageStore
     private let stateDirectory: URL
-    private let bundledCatalogURL: URL
-    private let bundledSeedDirectory: URL?
+    private let initialCatalogURL: URL?
     private let marketplaceCatalogURL: URL?
     private let workerURL: URL
     private let helperURL: URL
@@ -70,13 +71,11 @@ final class SourceExtensionManager {
     private let testTransform: (([String: Any]) async throws -> [String: Any])?
     private let testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])?
     private var definitions: [String: Definition] = [:]
-    private var bundledCatalogIDs: Set<String> = []
     private var updateCatalogs: [URL: [String: SourceCatalogEntry]] = [:]
     private var pendingCatalogs: [String: Int] = [:]
     private var updatesInProgress: Set<String> = []
     private var updateCheckGeneration: UUID?
     private var snapshots: [String: SourcePackageSnapshot] = [:]
-    private var bundledArtwork: [String: SourceToolArtwork?] = [:]
     private var preparedSettings: [String: PreparedSettings] = [:]
     private var configurationErrors: [String: String] = [:]
     private var active: [String: Running] = [:]
@@ -148,14 +147,14 @@ final class SourceExtensionManager {
         }
     }
 
-    init(workerExecutableURL: URL, helperExecutableURL: URL, bundledCatalogURL: URL,
-         bundledSeedDirectory: URL? = nil, marketplaceCatalogURL: URL? = nil, stateDirectory: URL? = nil, nativeSDKURL: URL? = nil,
+    init(workerExecutableURL: URL, helperExecutableURL: URL, initialCatalogURL: URL? = nil,
+         marketplaceCatalogURL: URL? = nil, stateDirectory: URL? = nil, nativeSDKURL: URL? = nil,
          sourceDirectory: URL = SourcePackageStore.defaultUserDirectory, headless: Bool = false,
          testTransform: (([String: Any]) async throws -> [String: Any])? = nil,
          testStreamingTransform: (([String: Any], @escaping @MainActor ([String: Any]) -> Void) async throws -> [String: Any])? = nil,
          companionSocketDirectory: URL? = nil) {
         workerURL = workerExecutableURL; helperURL = helperExecutableURL
-        self.bundledCatalogURL = bundledCatalogURL; self.bundledSeedDirectory = bundledSeedDirectory
+        self.initialCatalogURL = initialCatalogURL
         self.marketplaceCatalogURL = marketplaceCatalogURL
         self.stateDirectory = stateDirectory ?? HelperSettingsStore.defaultFileURL.deletingLastPathComponent()
         self.nativeSDKURL = nativeSDKURL ?? Bundle.main.resourceURL?.appendingPathComponent("NativeExtensionSDK/MacHelperNativeSDK.swift")
@@ -177,7 +176,7 @@ final class SourceExtensionManager {
                 guard let path = source.manifest.icon, let data = source.iconData,
                       let digest = source.fileHashes[path] else { return nil }
                 return SourceToolArtwork(data: data, digest: digest)
-            } ?? bundledIcon(for: id)
+            }
             return SourceToolInfo(id: id, displayName: localizedText(snapshot?.manifest.displayName ?? definition?.displayName ?? id, for: id),
                                   summary: localizedText(snapshot?.manifest.summary ?? definition?.summary ?? L("Editable source extension"), for: id),
                                   version: snapshot?.manifest.version ?? definition?.version ?? "",
@@ -190,16 +189,6 @@ final class SourceExtensionManager {
                                   status: L(statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source.")),
                                   artwork: artwork)
         }
-    }
-
-    private func bundledIcon(for id: String) -> SourceToolArtwork? {
-        guard let bundledSeedDirectory else { return nil }
-        if let cached = bundledArtwork[id] { return cached }
-        let seed = bundledSeedDirectory.appendingPathComponent(id + ".macsource", isDirectory: true)
-        let artwork = SourcePackageInspector.iconData(at: seed, matchingIdentifier: id)
-            .map { SourceToolArtwork(data: $0, digest: SourcePackageRules.digest($0)) }
-        bundledArtwork.updateValue(artwork, forKey: id)
-        return artwork
     }
 
     func start() async {
@@ -219,7 +208,7 @@ final class SourceExtensionManager {
                     try SourcePackageRules.validateIdentifier(id)
                 }
             } catch { state = State(); errors[Self.translationID] = L("Source extension preferences could not be read. Enable the tool explicitly.") }
-        } else if !headless {
+        } else if !headless, sourceURL(for: Self.translationID) != nil {
             // Translation was enabled by default in MacHelper 3. Preserve that
             // existing choice; other catalog tools remain disabled until chosen.
             let legacy = stateDirectory.appendingPathComponent("extensions.json")
@@ -231,12 +220,12 @@ final class SourceExtensionManager {
                 state.enabled[Self.translationID] = true
             }
         }
-        do { try await readCatalog(bundledCatalogURL) } catch { errors[Self.translationID] = error.localizedDescription }
+        if let initialCatalogURL { try? await readCatalog(initialCatalogURL) }
         for text in state.catalogs { if let url = URL(string: text) { try? await readCatalog(url) } }
         let discovered = store.discoverInstalled()
         for snapshot in discovered.packages { snapshots[snapshot.manifest.identifier] = snapshot }
         for issue in discovered.issues { if let id = issue.identifier { errors[id] = issue.message } }
-        for (id, enabled) in state.enabled where enabled {
+        for (id, enabled) in state.enabled where enabled && sourceURL(for: id) != nil {
             do { try await activate(id, approving: state.permissions[id] == nil) }
             catch { errors[id] = error.localizedDescription; try? await recoverLastGood(id) }
         }
@@ -257,7 +246,7 @@ final class SourceExtensionManager {
     func setEnabled(_ enabled: Bool, for id: String) async throws {
         guard !shuttingDown else { throw CancellationError() }
         if enabled {
-            try await activate(id, approving: true)
+            try await activate(id, approving: true, download: definitions[id])
         } else {
             state.enabled[id] = false
             if state.companionGrants?[id] != nil { synchronizeCompanions() }
@@ -549,9 +538,10 @@ final class SourceExtensionManager {
         let catalog = preview.request.catalogURL.absoluteString
         try reserveCatalog(catalog)
         defer { releaseCatalog(catalog) }
-        definitions[id] = Definition(entry: preview.entry, base: preview.request.catalogURL)
+        let definition = Definition(entry: preview.entry, base: preview.request.catalogURL)
+        definitions[id] = definition
         do {
-            try await activate(id, approving: true,
+            try await activate(id, approving: true, download: definition,
                 expectedFileHashes: Dictionary(uniqueKeysWithValues: preview.entry.files.map { ($0.path, $0.sha256.lowercased()) }))
         } catch MarketplaceError.existingSourceChanged { notify(); return false }
         try registerCatalog(catalog)
@@ -652,8 +642,7 @@ final class SourceExtensionManager {
 
     private func readCatalog(_ url: URL) async throws {
         let catalog = try await SourceCatalogLoader.load(from: url)
-        if url == bundledCatalogURL { bundledCatalogIDs = Set(catalog.extensions.map(\.identifier)) }
-        else { rememberUpdateCatalog(catalog, from: url) }
+        rememberUpdateCatalog(catalog, from: url)
         for entry in catalog.extensions where definitions[entry.identifier] == nil {
             definitions[entry.identifier] = Definition(entry: entry, base: url)
         }
@@ -669,7 +658,7 @@ final class SourceExtensionManager {
         let catalog: URL
         if let pinnedCatalog {
             catalog = pinnedCatalog
-        } else if bundledCatalogIDs.contains(id), let marketplaceCatalogURL {
+        } else if Self.legacyMarketplaceIDs.contains(id), let marketplaceCatalogURL {
             catalog = marketplaceCatalogURL
         } else {
             let registered = state.catalogs.compactMap { URL(string: $0) }.filter { updateCatalogs[$0]?[id] != nil }
@@ -688,27 +677,16 @@ final class SourceExtensionManager {
         state.sourceCatalogs = origins
     }
 
-    private func activate(_ id: String, approving: Bool, expectedFileHashes: [String: String]? = nil) async throws {
+    private func activate(_ id: String, approving: Bool, download: Definition? = nil,
+                          expectedFileHashes: [String: String]? = nil) async throws {
         let epoch = UUID(); epochs[id] = epoch
-        let wasMissing = sourceURL(for: id) == nil
-        statuses[id] = wasMissing ? "Downloading complete extension source…" : "Validating source…"
+        let needsDownload = sourceURL(for: id) == nil && download != nil
+        statuses[id] = needsDownload ? "Downloading complete extension source…" : "Validating source…"
         notify()
         let snapshot: SourcePackageSnapshot
         do {
-            if let definition = definitions[id] {
-                do { snapshot = try await store.materialize(entry: definition.entry, baseURL: definition.base) }
-                catch {
-                    // The bundled first-party source seed supports offline first
-                    // launch. Remote marketplace packages have no implicit seed.
-                    guard definition.base == bundledCatalogURL, sourceURL(for: id) == nil,
-                          let seeds = bundledSeedDirectory else { throw error }
-                    let candidate = seeds.appendingPathComponent(id + ".macsource", isDirectory: true)
-                    // Retain compatibility with the old Translation-only seed.
-                    let seed = FileManager.default.fileExists(atPath: candidate.appendingPathComponent("extension.json").path)
-                        ? candidate : seeds
-                    guard let verified = try? SourcePackageInspector.snapshot(at: seed), verified.manifest.identifier == id else { throw error }
-                    snapshot = try store.importSource(from: seed)
-                }
+            if let download {
+                snapshot = try await store.materialize(entry: download.entry, baseURL: download.base)
             } else { snapshot = try store.snapshot(for: id) }
             guard epochs[id] == epoch, !shuttingDown else { throw CancellationError() }
             if let expectedFileHashes, snapshot.fileHashes != expectedFileHashes { throw MarketplaceError.existingSourceChanged }
@@ -728,10 +706,7 @@ final class SourceExtensionManager {
             state.enabled[id] = true
             if approving { Self.recordApproval(snapshot.manifest, in: &state) }
             else if snapshot.manifest.companionGrant == nil { state.companionGrants?.removeValue(forKey: id) }
-            if wasMissing, let base = definitions[id]?.base,
-               let origin = base == bundledCatalogURL ? marketplaceCatalogURL : base {
-                recordCatalogOrigin(origin, for: id)
-            }
+            if needsDownload, let download { recordCatalogOrigin(download.base, for: id) }
             if state.companionGrants?[id] != nil || old?.snapshot.manifest.companionGrant != nil { synchronizeCompanions() }
             synchronizeSelectionActions()
             if let old { await old.worker.stop() }

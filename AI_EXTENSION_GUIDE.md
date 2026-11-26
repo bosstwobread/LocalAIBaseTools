@@ -238,7 +238,7 @@ A direct setter or paste request is not proof of insertion. The host reports “
 
 After an Apply attempt, the button keeps its label and becomes disabled. The status reports the outcome, and the completed preview remains available to copy. Explicit dismissal or an outside click, a new selection gesture, switching apps, or replacing/disabling the owning activation clears that retained preview. This retention does not change normal selection or language-switch invalidation.
 
-The first-party [Polish-input source](https://github.com/bosstwobread/LocalAIBaseTools/tree/main/Extensions/Polish-input) is an example: its prompt and JavaScript define polishing, while MacHelper validates the selection and presents a single Apply button for all supported editing methods. Existing read-only tools such as Translation need no new permission and never gain replacement access automatically.
+The [Polish-input source](https://github.com/bosstwobread/Polish-input-MacHelper/tree/main/MacHelperExtension) shows how its prompt and JavaScript define polishing while MacHelper validates the selection and presents a single Apply button for supported editing methods. Read-only tools such as Translation request only the capabilities they use.
 
 MacHelper handles Electron compatibility for all selection tools. Electron compatibility defaults to off. With an opt-in saved in an earlier version, a deliberate selection that Accessibility cannot read can trigger a bounded request for full Accessibility in that editor window. A new window in the same VS Code process can recover independently. MacHelper may send one initial `AXManualAccessibility = true` request and one settled refresh to the supporting app for that window. The user may need to select the text again after activation. VS Code may enter Screen Reader Optimized mode, which can change folding and minimap behavior. MacHelper leaves VS Code settings files, VoiceOver and macOS permissions alone. Extension code uses the ordinary selection command and permissions. Apply still requires independent evidence of the edit target. See the [host compatibility contract](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/docs/Source-Extensions.md#shared-toolbar-and-guarded-replacement-machelper-66).
 
@@ -312,10 +312,9 @@ For native source, compile the example against the exact SDK supplied by the app
 
 Then import a disposable uniquely identified package and explicitly test a safe selection in MacHelper: partial text arrives before completion, changing the prompt/schema updates the tool, a temporary syntax error preserves the last working generation, correcting it recovers, disabling stops it, and re-enable preserves edits. Clean up the disposable package after the test. A real AI check consumes the selected provider's usage; keep it separate from deterministic checks.
 
-When working in the LocalAIBaseTools checkout, these existing checks exercise host contracts and the first-party source tools. They are **not** a generic validator for an arbitrary package path:
+When working in the LocalAIBaseTools checkout, use these checks for the shared host contracts:
 
 ```sh
-node --test test/translation-source.test.cjs test/polish-input-source.test.cjs
 swift test --package-path MacHelper --filter 'SourcePackageTests|SourceWatcherTests|ScriptSettingsSchemaTests'
 python3 scripts/test-source-extensions.py
 python3 scripts/test-native-extensions.py
@@ -323,7 +322,7 @@ python3 scripts/test-native-extensions.py
 python3 scripts/test-source-extensions.py --live
 ```
 
-The integration script uses isolated temporary sources/preferences and real worker processes; it does not install its fixture in the user's extension directory. For a new tool, add focused mocked command tests for its behavior and perform the disposable import check. Do not claim these host/Translation tests verified untested new tool logic.
+The integration checks use temporary source and settings directories and real worker processes. For a new tool, add focused mocked command tests in its repository and perform the disposable import check. The [Translation](https://github.com/bosstwobread/Translation-MacHelper) and [Polish-input](https://github.com/bosstwobread/Polish-input-MacHelper) repositories have standalone test examples.
 
 ## 7. Share complete editable source
 
@@ -337,7 +336,7 @@ You can also distribute an independent HTTPS catalog with `schemaVersion: 1` and
 
 Catalog discovery reads metadata; enabling stages/downloads the complete inventory, checks hashes/identity/paths, then installs atomically. Remote redirects, remote-to-local URLs, and HTTPS downgrades are rejected. Local-file and loopback HTTP catalogs are development options. A previously enabled local source copy is preserved rather than silently replaced.
 
-When an installable file changes, including README or license, publish a new extension version and regenerate its full inventory. Keep the old commit and any previously published ZIP available. An edit confined to `marketplace/` can keep the extension version when the install inventory’s paths and bytes are unchanged. Submit the updated commit URL for review. When generating a standalone catalog with `scripts/build-source-catalog.py`, use `--ref` to pin the published commit. Repeat `--package NAME` to select first-party packages from this checkout or use `--base-url` to specify the HTTPS source root for a single package.
+When an installable file changes, including README or license, publish a new extension version and regenerate its full inventory. Keep the old commit and any previously published ZIP available. An edit confined to `marketplace/` can keep the extension version when the install inventory’s paths and bytes are unchanged. Submit the updated commit URL for review. The Marketplace publisher generates the inventory from that commit. A separate catalog can use the same inventory contract and immutable HTTPS source URLs.
 
 For an authorized first-party source-tool release, publish the source commit and update its URL in `ExtensionMarket-website/registry.json`. Rebuild and verify the website from the repository root:
 
@@ -362,7 +361,7 @@ Tell the user which folder/files changed, the new behavior, host requirements an
 - [MacHelper client protocols](docs/MacHelper-Protocol.md): framed native/browser AI requests and the separate loopback website discovery API.
 - [Native source extensions](docs/Native-Extensions.md) and [standalone Swift SDK](https://local-ai-extension.nelson007.com/NativeExtensionSDK/MacHelperNativeSDK.swift): native worker authoring and runtime migration.
 - [Marketplace website project](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/ExtensionMarket-website/README.md): packaging, previews, and release validation.
-- [Translation source example](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/Extensions/Translation/README.md): complete first-party tool with contextual single-word lookup.
-- [Polish-input source example](https://github.com/bosstwobread/LocalAIBaseTools/blob/main/Extensions/Polish-input/README.md): editable polishing prompt and streamed preview with host-managed Apply.
+- [Translation source example](https://github.com/bosstwobread/Translation-MacHelper/blob/main/MacHelperExtension/README.md) shows contextual single-word lookup.
+- [Polish-input source example](https://github.com/bosstwobread/Polish-input-MacHelper/blob/main/MacHelperExtension/README.md) shows an editable polishing prompt, streamed preview, and host-managed Apply.
 
 This guide is public and deliberately contains no private server installation instructions. Keep local deployment details out of extensions and their public packages.

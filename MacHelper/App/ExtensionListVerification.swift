@@ -43,7 +43,7 @@ enum ExtensionListVerification {
                     sha256: String(repeating: "0", count: 64), size: 0)])
             try JSONEncoder().encode(SourceCatalog(extensions: [entry])).write(to: catalog)
             let current = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
-                bundledCatalogURL: catalog, stateDirectory: state, sourceDirectory: sources, headless: false,
+                initialCatalogURL: catalog, stateDirectory: state, sourceDirectory: sources, headless: false,
                 testTransform: { _ in throw Failure(message: "The list verification must never request AI.") })
             manager = current
             await current.start()
@@ -346,6 +346,59 @@ enum ExtensionListVerification {
 
             try check(getpid() == hostPID, "The host restarted during list actions.")
             await current.stopAll()
+
+            let previousID = SourceExtensionManager.translationID
+            let legacyState = root.appendingPathComponent("legacy-state")
+            let legacySources = root.appendingPathComponent("legacy-extensions")
+            let marketplace = root.appendingPathComponent("official-catalog.json")
+            try writeUpdate(previousID, version: "2.0.1", root: root, catalog: marketplace)
+            try FileManager.default.createDirectory(at: legacyState, withIntermediateDirectories: true)
+            let legacyPreferences = legacyState.appendingPathComponent("source-extensions.json")
+            let preferences: [String: Any] = ["schemaVersion": 1, "enabled": [previousID: true],
+                                              "permissions": [previousID: [String]()], "catalogs": [marketplace.absoluteString]]
+            try JSONSerialization.data(withJSONObject: preferences).write(to: legacyPreferences)
+            let missing = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                marketplaceCatalogURL: marketplace, stateDirectory: legacyState, sourceDirectory: legacySources, headless: true)
+            manager = missing
+            await missing.start()
+            try check(missing.sourceURL(for: previousID) == nil && missing.workerPID(for: previousID) == nil,
+                      "An old enablement preference downloaded a missing package at launch.")
+            await missing.stopAll()
+
+            // Originally bundled copies used the same editable source and settings paths,
+            // but not all saved which catalog supplied their first installation.
+            let legacyFolder = legacySources.appendingPathComponent(previousID + ".macsource")
+            try writePackage(id: previousID, name: "Legacy installed fixture", native: false, localized: true, to: legacyFolder)
+            let legacyPrompt = Data("Keep the user's edited prompt.\n".utf8)
+            try legacyPrompt.write(to: legacyFolder.appendingPathComponent("prompts/fixture.txt"))
+            let legacySettings = legacyState.appendingPathComponent("ExtensionSettings/\(previousID)/settings.json")
+            try FileManager.default.createDirectory(at: legacySettings.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: ["choice": "two"]).write(to: legacySettings)
+            var unpinnedPreferences = preferences
+            unpinnedPreferences["catalogs"] = [String]()
+            try JSONSerialization.data(withJSONObject: unpinnedPreferences).write(to: legacyPreferences)
+
+            let legacy = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                marketplaceCatalogURL: marketplace, stateDirectory: legacyState, sourceDirectory: legacySources, headless: true)
+            manager = legacy
+            await legacy.start()
+            let legacyPID = try pid(legacy, previousID); workers.append(legacyPID)
+            try await legacy.checkForUpdates(includeConfigured: false)
+            let legacyUpdate = try await legacy.previewUpdate(previousID)
+            try check(legacyUpdate.currentVersion == "1.0.0" && legacyUpdate.manifest.version == "2.0.1" &&
+                      legacyUpdate.catalogURL == marketplace && legacy.workerPID(for: previousID) == legacyPID &&
+                      (try Data(contentsOf: legacyFolder.appendingPathComponent("prompts/fixture.txt"))) == legacyPrompt,
+                      "Checking or reviewing updates did not preserve the existing legacy package or use the official catalog.")
+            let legacyBackup = try await legacy.installUpdate(legacyUpdate)
+            workers.append(try pid(legacy, previousID))
+            let savedLegacyPreferences = try JSONSerialization.jsonObject(with: Data(contentsOf: legacyPreferences)) as? [String: Any]
+            try check((try Data(contentsOf: legacyBackup.appendingPathComponent("prompts/fixture.txt"))) == legacyPrompt &&
+                      legacy.settings(for: previousID)["choice"] as? String == "two" &&
+                      (savedLegacyPreferences?["sourceCatalogs"] as? [String: String])?[previousID] == marketplace.absoluteString,
+                      "The approved legacy update lost the edited source, saved setting, or official catalog origin.")
+            await legacy.stopAll()
+            checks.append("startup retains existing packages without downloading missing ones; an unpinned legacy tool can review an official update and keep its edited backup and settings")
+
             try await eventually("List verification left a worker process running.") { workers.allSatisfy { !processExists($0) } }
             emit(["success": true, "hostPID": Int(hostPID), "workerPIDs": workers.map(Int.init), "checks": checks])
             return 0

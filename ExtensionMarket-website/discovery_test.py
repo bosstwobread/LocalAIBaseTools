@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from discovery import build_discovery_index, write_discovery_index
+from discovery import build_discovery_index, build_registered_discovery_index, write_discovery_index
 
 
 class DiscoveryPublicationTests(unittest.TestCase):
@@ -36,6 +36,32 @@ class DiscoveryPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'requires discovery'):build_discovery_index(self.root,self.config)
         legacy,_=build_discovery_index(self.root,self.config,allow_legacy=True)
         self.assertEqual(legacy['extensions'][0]['description'],self.manifest['summary'])
+
+    def test_registry_seed_reads_only_pinned_metadata_and_preserves_the_marketplace_slug(self):
+        requests = []
+        metadata = {'extension.json': self.manifest, 'discovery.json': self.descriptor,
+                    'marketplace/preview.json': {'slug': 'example-preview'}}
+
+        class Source:
+            def read(self, path, maximum, optional=False):
+                requests.append(path)
+                value = metadata.get(path)
+                if optional and value is None:
+                    return None
+                return json.dumps(metadata[path]).encode()
+
+        index, manifest = build_registered_discovery_index([Source()])
+        self.assertEqual(requests, ['extension.json', 'discovery.json', 'marketplace/preview.json'])
+        self.assertEqual(index['extensions'][0]['slug'], 'example-preview')
+        self.assertEqual(manifest['revision'], index['revision'])
+        self.assertNotIn('files', index['extensions'][0])
+
+        del metadata['marketplace/preview.json']
+        default_index, _ = build_registered_discovery_index([Source()])
+        self.assertEqual(default_index['extensions'][0]['slug'], 'com-example-tool')
+        self.descriptor['identifier'] = 'com.example.other'
+        with self.assertRaisesRegex(ValueError, 'Conflicting'):
+            build_registered_discovery_index([Source()])
 
     def test_bad_schema_limits_types_unknown_fields_and_symlinks_rejected(self):
         cases=[('schemaVersion',True),('exampleQueries',[]),('exampleQueries',['x']*9),('description','x'*4001),('keywords',[3]),('platforms',['x'*129]),('sourceCode','injected'),('translations',{'../bad':{'x':'y'}}),('translations',{'en':{'x':'bad\0text'}})]

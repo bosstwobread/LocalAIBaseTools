@@ -4,7 +4,7 @@ import MacHelper
 
 /// Exercises the real manager, source watcher, and replaceable JavaScript
 /// processes without starting selection monitoring, showing windows, or touching
-/// the user's extension directory. The Python driver owns the loopback catalog.
+/// the user's extension directory. The Python driver supplies a fixture or a Marketplace catalog.
 @MainActor
 enum SourceExtensionVerification {
     private struct Failure: LocalizedError {
@@ -67,7 +67,7 @@ enum SourceExtensionVerification {
     }
 
     /// CLI: --verify-source-extensions --catalog-url URL --workspace-root DIR
-    ///      --worker PATH --helper PATH [--live]
+    ///      --worker PATH --helper PATH [--live | --marketplace-install --extension-id ID ...]
     /// The workspace must have the Python driver's marker and no existing state.
     static func run() async -> Int32 {
         var managers: [SourceExtensionManager] = []
@@ -84,6 +84,16 @@ enum SourceExtensionVerification {
             return pid
         }
         func note(_ value: String) { checks.append(value) }
+        func finish() async throws -> Int32 {
+            for manager in managers { await manager.stopAll() }
+            try await eventually("Final cleanup left worker processes running.") { workerPIDs.allSatisfy { !processExists($0) } }
+            try check(getpid() == hostPID, "The verification host unexpectedly changed.")
+            report["success"] = true
+            report["checks"] = checks
+            report["workerPIDs"] = workerPIDs.map(Int.init)
+            emit(report)
+            return 0
+        }
         do {
             let args = CommandLine.arguments
             func option(_ key: String) throws -> String {
@@ -91,9 +101,18 @@ enum SourceExtensionVerification {
                       !args[index + 1].hasPrefix("--") else { throw Failure(message: "Missing verification argument: " + key) }
                 return args[index + 1]
             }
-            guard let catalogURL = URL(string: try option("--catalog-url")),
-                  catalogURL.scheme == "http", ["127.0.0.1", "localhost"].contains(catalogURL.host ?? "") else {
-                throw Failure(message: "The verification catalog must use loopback HTTP.")
+            let marketplace = args.contains("--marketplace-install")
+            guard let catalogURL = URL(string: try option("--catalog-url")) else {
+                throw Failure(message: "The verification catalog URL is invalid.")
+            }
+            let loopback = catalogURL.scheme == "http" && ["127.0.0.1", "localhost"].contains(catalogURL.host ?? "")
+            try check(loopback || (marketplace && catalogURL.scheme == "https"),
+                      "The verification catalog must use loopback HTTP or Marketplace HTTPS.")
+            let marketplaceIDs = try args.indices.filter { args[$0] == "--extension-id" }.map { index in
+                guard args.indices.contains(index + 1), !args[index + 1].hasPrefix("--") else {
+                    throw Failure(message: "Missing Marketplace verification extension identifier.")
+                }
+                return args[index + 1]
             }
             let workspace = URL(fileURLWithPath: try option("--workspace-root"), isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
             let marker = workspace.appendingPathComponent(".mac-helper-source-verification")
@@ -105,16 +124,30 @@ enum SourceExtensionVerification {
             let helper = URL(fileURLWithPath: try option("--helper"))
             try check(FileManager.default.isExecutableFile(atPath: worker.path), "The script worker executable is missing.")
             try check(FileManager.default.isExecutableFile(atPath: helper.path), "The helper executable is missing.")
+            let probe = AIProbe()
+            if marketplace {
+                try check(!marketplaceIDs.isEmpty && Set(marketplaceIDs).count == marketplaceIDs.count && !args.contains("--live"),
+                          "Marketplace verification needs distinct extension identifiers and a deterministic AI provider.")
+                let manager = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
+                    stateDirectory: state, sourceDirectory: sources, headless: true,
+                    testTransform: { payload in try await probe.transform(payload) })
+                managers.append(manager)
+                let verified = try await verifyMarketplace(marketplaceIDs, catalogURL: catalogURL, allowLoopback: loopback,
+                                                            manager: manager, probe: probe)
+                for pid in verified.workerPIDs { _ = try remember(pid) }
+                checks += verified.checks
+                report["extensions"] = verified.packages
+                return try await finish()
+            }
             let requestLogURL = catalogURL.deletingLastPathComponent().appendingPathComponent("__requests")
             let catalog = try await SourceCatalogLoader.load(from: catalogURL)
             let id = SourceExtensionManager.translationID
             guard let entry = catalog.extensions.first(where: { $0.identifier == id }) else { throw Failure(message: "The fixture must contain Translation.") }
             let expectedPaths = Set(entry.files.map { "/Translation/" + $0.path })
-            let probe = AIProbe()
             func makeManager(live: Bool = false) -> SourceExtensionManager {
                 let transform: (([String: Any]) async throws -> [String: Any])? = live ? nil : { payload in try await probe.transform(payload) }
                 let manager = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
-                    bundledCatalogURL: catalogURL, stateDirectory: state, sourceDirectory: sources,
+                    initialCatalogURL: catalogURL, stateDirectory: state, sourceDirectory: sources,
                     headless: true, testTransform: transform,
                     testStreamingTransform: live ? nil : { payload, onProgress in
                         try await probe.transformStreaming(payload, onProgress: onProgress)
@@ -667,7 +700,7 @@ enum SourceExtensionVerification {
             await restarted.stopAll()
 
             let market = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
-                bundledCatalogURL: catalogURL, stateDirectory: workspace.appendingPathComponent("market-state"),
+                initialCatalogURL: catalogURL, stateDirectory: workspace.appendingPathComponent("market-state"),
                 sourceDirectory: workspace.appendingPathComponent("market-source"), headless: true,
                 testTransform: { payload in try await probe.transform(payload) })
             managers.append(market)
@@ -701,7 +734,6 @@ enum SourceExtensionVerification {
             await market.stopAll()
 
             let brokenMarket = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
-                bundledCatalogURL: catalogURL, bundledSeedDirectory: source,
                 stateDirectory: workspace.appendingPathComponent("broken-market-state"),
                 sourceDirectory: workspace.appendingPathComponent("broken-market-source"), headless: true,
                 testTransform: { payload in try await probe.transform(payload) })
@@ -713,8 +745,8 @@ enum SourceExtensionVerification {
             do { _ = try await brokenMarket.installReviewedMarketplaceTool(brokenPreview) }
             catch { rejectedBrokenPackage = true }
             try check(rejectedBrokenPackage && brokenMarket.sourceURL(for: id) == nil && brokenMarket.workerPID(for: id) == nil,
-                      "A failed reviewed source download installed partial code or silently substituted the bundled seed.")
-            note("a reviewed download hash failure installs nothing and never substitutes the bundled offline seed")
+                      "A failed reviewed source download left installed source or a running worker.")
+            note("a reviewed download hash failure leaves no installed source or running worker")
             await brokenMarket.stopAll()
 
             let limitedState = workspace.appendingPathComponent("limited-catalog-state", isDirectory: true)
@@ -730,7 +762,7 @@ enum SourceExtensionVerification {
                                                      "catalogs": registeredCatalogs.map(\.absoluteString)]
             try JSONSerialization.data(withJSONObject: initialPreferences).write(to: preferencesURL)
             let limited = SourceExtensionManager(workerExecutableURL: worker, helperExecutableURL: helper,
-                bundledCatalogURL: catalogURL, stateDirectory: limitedState,
+                initialCatalogURL: catalogURL, stateDirectory: limitedState,
                 sourceDirectory: workspace.appendingPathComponent("limited-catalog-source"), headless: true)
             managers.append(limited)
             await limited.start()
@@ -789,14 +821,7 @@ enum SourceExtensionVerification {
                 note("real local AI streams a synthetic Chinese translation before the final answer without any Upwork interaction")
                 await live.stopAll()
             } else { report["liveAI"] = false }
-            for manager in managers { await manager.stopAll() }
-            try await eventually("Final cleanup left worker processes running.") { workerPIDs.allSatisfy { !processExists($0) } }
-            try check(getpid() == hostPID, "The verification host unexpectedly changed.")
-            report["success"] = true
-            report["checks"] = checks
-            report["workerPIDs"] = workerPIDs.map(Int.init)
-            emit(report)
-            return 0
+            return try await finish()
         } catch {
             for manager in managers { await manager.stopAll() }
             report["success"] = false
@@ -806,6 +831,86 @@ enum SourceExtensionVerification {
             emit(report)
             return 1
         }
+    }
+
+    private static func verifyMarketplace(_ ids: [String], catalogURL: URL, allowLoopback: Bool,
+                                          manager: SourceExtensionManager, probe: AIProbe) async throws
+        -> (packages: [[String: Any]], checks: [String], workerPIDs: [Int32]) {
+        var packages: [[String: Any]] = []
+        var checks: [String] = []
+        var workerPIDs: [Int32] = []
+        await manager.start()
+        guard manager.tools.isEmpty else { throw Failure(message: "A clean MacHelper unexpectedly started with installed or bundled tools.") }
+
+        for id in ids {
+            var link = URLComponents()
+            link.scheme = "machelper"
+            link.host = "install"
+            link.queryItems = [URLQueryItem(name: "catalog", value: catalogURL.absoluteString), URLQueryItem(name: "extension", value: id)]
+            guard let url = link.url else { throw Failure(message: "Could not construct a Marketplace install link for \(id).") }
+            let request = try MarketplaceInstallRequest(url: url, allowLocalDevelopment: allowLoopback)
+            let callsBeforeInstall = probe.calls
+            let preview = try await manager.previewMarketplaceInstall(request)
+            let manifest = preview.manifest
+            guard manifest.runtime == "javascript", manifest.companion == nil,
+                  let selectionCommand = manifest.commands.first(where: { $0.trigger == "selection" }),
+                  manifest.permissions.contains("ai.transform") else {
+                throw Failure(message: "\(id) does not declare a standalone JavaScript selection tool with AI access.")
+            }
+            let unpinnedFile = Failure(message: "\(id) has a source file without an immutable GitHub path or a declared size.")
+            let packagePins = try Set(preview.entry.files.map { file in
+                guard let url = URL(string: file.url), url.scheme == "https", url.host == "raw.githubusercontent.com",
+                      file.size != nil else { throw unpinnedFile }
+                let parts = url.pathComponents
+                let repositoryPath = parts.dropFirst(4).joined(separator: "/")
+                guard parts.count > 4, parts[3].range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
+                      repositoryPath == file.path || repositoryPath.hasSuffix("/" + file.path) else { throw unpinnedFile }
+                return parts[1...3].joined(separator: "/")
+            })
+            guard packagePins.count == 1 else { throw Failure(message: "\(id) must come from one immutable GitHub checkout.") }
+            guard manager.sourceURL(for: id) == nil, manager.workerPID(for: id) == nil, probe.calls == callsBeforeInstall else {
+                throw Failure(message: "Reviewing \(id) unexpectedly installed source, started a worker, or ran AI.")
+            }
+            guard try await manager.installReviewedMarketplaceTool(preview), let source = manager.sourceURL(for: id),
+                  let pid = manager.workerPID(for: id), pid > 1, !workerPIDs.contains(pid),
+                  manager.tools.contains(where: { $0.id == id && $0.isEnabled && $0.isRunning }),
+                  probe.calls == callsBeforeInstall else {
+                throw Failure(message: "\(id) did not install and enable a separate worker without running AI.")
+            }
+            workerPIDs.append(pid)
+            let expectedHashes = Dictionary(uniqueKeysWithValues: preview.entry.files.map { ($0.path, $0.sha256.lowercased()) })
+            guard try SourcePackageInspector.snapshot(at: source).fileHashes == expectedHashes else {
+                throw Failure(message: "The installed files for \(id) differ from the Marketplace catalog.")
+            }
+            let result = try await manager.performCommand(for: id, text: "The library opens at nine.", commandIdentifier: selectionCommand.identifier)
+            guard probe.calls == callsBeforeInstall + 1, let requestText = probe.latest["text"] as? String,
+                  result.model == "fixture-model", result.text == "AI:" + requestText else {
+                throw Failure(message: "\(id) did not return its result through MacHelper's shared AI capability.")
+            }
+            checks.append("\(manifest.displayName) \(manifest.version) reviews and installs \(expectedHashes.count) GitHub-pinned files, then runs the selection command")
+            packages.append(["id": id, "version": manifest.version, "fileCount": expectedHashes.count])
+
+            try await manager.setEnabled(false, for: id)
+            try await manager.prepareSettings(for: id)
+            guard let schema = manager.settingsSchema(for: id), let prompt = schema.fields.first(where: { $0.type == "prompt" }) else {
+                throw Failure(message: "\(id) does not expose an editable prompt.")
+            }
+            let originalPrompt = try manager.promptValue(prompt.key, for: id)
+            let editedPrompt = originalPrompt + "\nKeep this local customization."
+            try await manager.updatePrompt(prompt.key, value: editedPrompt, expectedValue: originalPrompt, for: id)
+            let language = schema.fields.first(where: { $0.key == "targetLanguage" })
+            if let language { try await manager.updateSetting(language.key, value: "ja", for: id) }
+
+            let repeatedReview = try await manager.previewMarketplaceInstall(request)
+            guard !(try await manager.installReviewedMarketplaceTool(repeatedReview)), manager.workerPID(for: id) == nil,
+                  manager.tools.contains(where: { $0.id == id && !$0.isEnabled }),
+                  try manager.promptValue(prompt.key, for: id) == editedPrompt,
+                  language.map({ manager.settings(for: id)[$0.key] as? String == "ja" }) ?? true else {
+                throw Failure(message: "A repeated Marketplace install changed \(id)'s local settings or disabled state.")
+            }
+            checks.append("\(manifest.displayName) preserves its edited prompt, settings, and disabled state on a repeated Marketplace install")
+        }
+        return (packages, checks, workerPIDs)
     }
 
     private static func eventually(_ message: String, timeout: TimeInterval = 8,

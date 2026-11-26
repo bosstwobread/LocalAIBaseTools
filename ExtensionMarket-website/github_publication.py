@@ -4,9 +4,8 @@ import json
 import re
 from urllib.parse import quote
 
-from discovery import LOCALE, MAX_DESCRIPTOR, discovery_entry, text, validate_descriptor
+from discovery import LOCALE, MAX_PREVIEW as PREVIEW_LIMIT, registered_discovery_entry, text
 
-PREVIEW_LIMIT = 128 * 1024
 PREVIEW_FIELDS = {
     "lookup": set(("description editorTitle documentHeading sentenceBefore word sentenceAfter meaningLabel "
                    "meaning sentenceLabel sentenceTranslation settings copy selectStep reviewStep resultStep").split()),
@@ -122,15 +121,10 @@ def collect_publications(sources, validate_files):
         manifest = json.loads(files["extension.json"])
         if not isinstance(manifest, dict):
             raise ValueError("Invalid registered extension manifest.")
-        if len(files["discovery.json"]) > MAX_DESCRIPTOR:
-            raise ValueError("Published discovery descriptor exceeds 64 KiB.")
-        descriptor = validate_descriptor(json.loads(files["discovery.json"]))
-        identifier = manifest.get("identifier")
-        if not isinstance(identifier, str) or descriptor.get("identifier", identifier) != identifier:
-            raise ValueError("Conflicting registered extension identifiers.")
         validate_files(manifest, files)
         preview, listing = presentation(source, source.read("marketplace/preview.json", PREVIEW_LIMIT, optional=True))
-        entry = discovery_entry(manifest, descriptor, listing.get("slug", identifier.replace(".", "-")))
+        entry, descriptor = registered_discovery_entry(manifest, files["discovery.json"], listing)
+        identifier = entry["id"]
         discovery.append(entry)
 
         inventory = [
