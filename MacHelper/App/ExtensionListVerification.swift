@@ -61,21 +61,55 @@ enum ExtensionListVerification {
             var opened: [[URL]] = []
             var reviewedUpdates: [SourceExtensionUpdatePreview] = []
             var approveUpdate = false
-            let chrome = root.appendingPathComponent("Google Chrome.app")
-            let edge = root.appendingPathComponent("Microsoft Edge.app")
-            var installedBrowsers = [SourceCompanionBrowser.chrome.appBundleIdentifier: chrome]
-            let discovered = BrowserCompanionDiscovery { installedBrowsers[$0] }
+            let applications = root.appendingPathComponent("Applications", isDirectory: true)
+            let userApplications = root.appendingPathComponent("User/Applications", isDirectory: true)
+            let chrome = applications.appendingPathComponent("Google Chrome.app")
+            let edge = userApplications.appendingPathComponent("Browsers/Microsoft Edge.app")
+            let missingEdge = applications.appendingPathComponent("Old Microsoft Edge.app")
+            let foreignBundle = applications.appendingPathComponent("Example.app")
+            let updaterCopy = root.appendingPathComponent("User/Library/Application Support/Microsoft/EdgeUpdater/apps/Microsoft Edge.app")
+            let stagingCopy = root.appendingPathComponent("Applications Backup/Microsoft Edge.app")
+            let nestedCopy = applications.appendingPathComponent("Setup.app/Contents/Resources/Microsoft Edge.app")
+            let chromeID = SourceCompanionBrowser.chrome.appBundleIdentifier
+            let edgeID = SourceCompanionBrowser.edge.appBundleIdentifier
+            try writeBrowser(chrome, identifier: chromeID)
+            try writeBrowser(foreignBundle, identifier: "com.example.not-edge")
+            for copy in [updaterCopy, stagingCopy, nestedCopy] {
+                try writeBrowser(copy, identifier: edgeID)
+            }
+            var registeredBrowsers = [chromeID: [chrome], edgeID: [updaterCopy, stagingCopy, nestedCopy, missingEdge, foreignBundle]]
+            var runningBrowsers: [String: [URL]] = [:]
+            let discovered = BrowserCompanionDiscovery(applicationDirectories: [applications, userApplications],
+                registeredApplications: { registeredBrowsers[$0] ?? [] }, runningApplications: { runningBrowsers[$0] ?? [] })
             var detectionChanges = 0
             discovered.onChange = { detectionChanges += 1 }
-            try check(discovered.applications == [.chrome: chrome], "Starting browser inventory was incorrect.")
+            try check(discovered.applications == [.chrome: chrome], "An updater, staging, missing, or unrelated bundle was detected as installed.")
+            discovered.refresh(launched: .edge, at: foreignBundle)
+            try check(discovered.applications[.edge] == nil && detectionChanges == 0, "A launch with a mismatched bundle was accepted.")
+            try writeBrowser(edge, identifier: edgeID)
+            registeredBrowsers[edgeID]?.append(edge)
             discovered.refresh(launched: .edge, at: edge)
             try check(discovered.applications[.edge] == edge && detectionChanges == 1,
-                      "A browser launched later did not become available immediately.")
-            installedBrowsers[SourceCompanionBrowser.edge.appBundleIdentifier] = edge
+                      "A browser installed and launched later did not replace unrelated registrations.")
             discovered.refresh(launched: .edge, at: edge)
             discovered.refresh()
             try check(detectionChanges == 1, "Activating the same browser repeated setup.")
-            checks.append("browser setup detects a newly launched browser in the current session and avoids duplicate changes")
+            let movedEdge = root.appendingPathComponent("Microsoft Edge.app")
+            try FileManager.default.moveItem(at: edge, to: movedEdge)
+            discovered.refresh()
+            try check(discovered.applications[.edge] == nil && detectionChanges == 2,
+                      "A removed browser remained available while Launch Services still listed it.")
+            discovered.refresh(launched: .edge, at: movedEdge)
+            try check(discovered.applications[.edge] == movedEdge && detectionChanges == 3,
+                      "A valid browser launched outside Applications did not become available.")
+            runningBrowsers[edgeID] = [movedEdge]
+            discovered.refresh()
+            try check(detectionChanges == 3, "Refreshing a browser that stayed running repeated setup.")
+            runningBrowsers[edgeID] = nil
+            discovered.refresh()
+            try check(discovered.applications[.edge] == nil && detectionChanges == 4,
+                      "A non-installed browser remained available after it stopped running.")
+            checks.append("browser setup rejects updater, staged and stale registrations, detects later installs and running browsers, and avoids duplicate changes")
             let controller = ExtensionsViewController(manager: current, sourceFolderOpener: { urls, completion in
                 opened.append(urls)
                 completion(nil)
@@ -87,7 +121,11 @@ enum ExtensionListVerification {
             controller.view.frame = NSRect(x: 0, y: 0, width: 820, height: 700)
             controller.view.layoutSubtreeIfNeeded()
             try check(try field("batch-selection-count", in: controller).stringValue == "0 selected", "New tools were selected automatically.")
-            try check(find("select-extension-" + catalogID, in: controller.view) == nil, "A catalog-only tool received a batch checkbox.")
+            try check(current.tools.contains { $0.id == catalogID && $0.sourceURL == nil }, "Missing catalog metadata fixture.")
+            try check(find("source-tool-" + catalogID, in: controller.view) == nil &&
+                      find("select-extension-" + catalogID, in: controller.view) == nil,
+                      "A catalog-only tool appeared in the installed list.")
+            checks.append("Extensions shows installed tools and excludes catalog-only entries")
             for id in ["batch-reload", "batch-edit-source", "batch-enable", "batch-disable"] {
                 try check(!(try button(id, in: controller)).isEnabled, "A batch action was enabled without a selection.")
             }
@@ -317,6 +355,14 @@ enum ExtensionListVerification {
                   "checks": checks, "error": error.localizedDescription])
             return 1
         }
+    }
+
+    private static func writeBrowser(_ app: URL, identifier: String) throws {
+        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let plist = ["CFBundleIdentifier": identifier, "CFBundlePackageType": "APPL"]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
     }
 
     private static func writePackage(id: String, name: String, native: Bool, localized: Bool = false,

@@ -39,11 +39,11 @@ final class SelectionMenuPasteTests: XCTestCase {
     func testWordAndParagraphKeepOriginalEdgeSeparators() {
         let result = "I have finished the update."
         for (prefix, suffix) in [("", ""), ("", " "), ("", "\r\n"), ("\t", "\r"), ("　", "\u{2029}")] {
-            XCTAssertEqual(SelectionMenuPasteTransaction.preservingSelectionEdges("\n" + result + "  ",
+            XCTAssertEqual(SelectionReplacementText.preservingSelectionEdges("\n" + result + "  ",
                 original: prefix + "I has finished the update." + suffix), prefix + result + suffix)
         }
-        XCTAssertNil(SelectionMenuPasteTransaction.preservingSelectionEdges(" ", original: "draft"))
-        XCTAssertNil(SelectionMenuPasteTransaction.preservingSelectionEdges("result", original: "\n"))
+        XCTAssertNil(SelectionReplacementText.preservingSelectionEdges(" ", original: "draft"))
+        XCTAssertNil(SelectionReplacementText.preservingSelectionEdges("result", original: "\n"))
     }
 
     @MainActor

@@ -27,29 +27,42 @@ extension SourceCompanionBrowser {
 final class BrowserCompanionDiscovery {
     var onChange: (() -> Void)?
     private let workspace = NSWorkspace.shared
-    private let lookup: (String) -> URL?
+    private let registeredApplications: (String) -> [URL]
+    private let runningApplications: (String) -> [URL]
+    private let applicationDirectories: [URL]
     private var observers: [NSObjectProtocol] = []
     private(set) var applications: [SourceCompanionBrowser: URL] = [:]
 
-    init(lookup: ((String) -> URL?)? = nil) {
-        self.lookup = lookup ?? { identifier in
-            let workspace = NSWorkspace.shared
-            return workspace.urlForApplication(withBundleIdentifier: identifier)
-                ?? workspace.runningApplications.first { $0.bundleIdentifier == identifier }?.bundleURL
-        }
-        if lookup != nil { refresh(); return }
+    convenience init() {
+        let directories = FileManager.default.urls(for: .applicationDirectory, in: [.userDomainMask, .localDomainMask, .systemDomainMask])
+        let systemAppDirectory = URL(fileURLWithPath: "/System/Cryptexes/App/System/Applications", isDirectory: true)
+        // Safari ships here on newer macOS versions. Launch Services can return its real bundle URL.
+        self.init(applicationDirectories: directories + [systemAppDirectory, systemAppDirectory.resolvingSymlinksInPath()],
+                  registeredApplications: { NSWorkspace.shared.urlsForApplications(withBundleIdentifier: $0) },
+                  runningApplications: { identifier in
+                      NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+                          .filter { !$0.isTerminated }.compactMap(\.bundleURL)
+                  })
         let names: [NSNotification.Name] = [
             NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification,
+            NSWorkspace.didTerminateApplicationNotification,
         ]
         observers = names.map { name in
             workspace.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] notice in
                 guard let app = notice.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                       let browser = SourceCompanionBrowser.allCases.first(where: { $0.appBundleIdentifier == app.bundleIdentifier })
                 else { return }
-                let url = app.bundleURL
+                let url = name == NSWorkspace.didTerminateApplicationNotification ? nil : app.bundleURL
                 Task { @MainActor in self?.refresh(launched: browser, at: url) }
             }
         }
+    }
+
+    init(applicationDirectories: [URL], registeredApplications: @escaping (String) -> [URL],
+         runningApplications: @escaping (String) -> [URL]) {
+        self.applicationDirectories = applicationDirectories.map(\.standardizedFileURL)
+        self.registeredApplications = registeredApplications
+        self.runningApplications = runningApplications
         refresh()
     }
 
@@ -58,13 +71,38 @@ final class BrowserCompanionDiscovery {
     }
 
     func refresh(launched browser: SourceCompanionBrowser? = nil, at url: URL? = nil) {
-        let next = Dictionary(uniqueKeysWithValues: SourceCompanionBrowser.allCases.compactMap { candidate in
-            (lookup(candidate.appBundleIdentifier)
-                ?? (candidate == browser ? url : nil)).map { (candidate, $0) }
-        })
+        var next: [SourceCompanionBrowser: URL] = [:]
+        for candidate in SourceCompanionBrowser.allCases {
+            let identifier = candidate.appBundleIdentifier
+            let installed = registeredApplications(identifier).first { url in
+                isInApplicationDirectory(url) && isBrowserBundle(url, identifier: identifier)
+            }
+            let running = runningApplications(identifier).first { isBrowserBundle($0, identifier: identifier) }
+            let justLaunched = candidate == browser ? url : nil
+            next[candidate] = installed ?? running ?? justLaunched.flatMap { url in
+                isBrowserBundle(url, identifier: identifier) ? url : nil
+            }
+        }
         guard next != applications else { return }
         applications = next
         onChange?()
+    }
+
+    private func isInApplicationDirectory(_ url: URL) -> Bool {
+        // Launch Services also registers copies inside update caches, downloads, and mounted installers.
+        let components = url.standardizedFileURL.pathComponents
+        return applicationDirectories.contains { directory in
+            let parent = directory.pathComponents
+            guard components.count > parent.count, components.starts(with: parent) else { return false }
+            return !components.dropFirst(parent.count).dropLast().contains {
+                $0.hasPrefix(".") || $0.lowercased().hasSuffix(".app")
+            }
+        }
+    }
+
+    private func isBrowserBundle(_ url: URL, identifier: String) -> Bool {
+        url.isFileURL && url.pathExtension.lowercased() == "app" &&
+            (try? url.checkResourceIsReachable()) == true && Bundle(url: url)?.bundleIdentifier == identifier
     }
 }
 

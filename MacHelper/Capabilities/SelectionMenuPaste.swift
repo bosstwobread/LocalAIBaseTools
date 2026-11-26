@@ -140,22 +140,9 @@ struct SelectionMenuPasteTransaction {
         cutEnabled == true && pasteEnabled != nil && (!afterStagingText || pasteEnabled == true)
     }
 
-    nonisolated static func preservingSelectionEdges(_ result: String, original: String) -> String? {
-        guard !original.isEmpty, original.utf8.count <= 96_000,
-              result.utf8.count <= 96_000, !result.contains("\0"),
-              let first = original.firstIndex(where: { !$0.isWhitespace }),
-              let last = original.lastIndex(where: { !$0.isWhitespace }),
-              let resultStart = result.firstIndex(where: { !$0.isWhitespace }),
-              let resultEnd = result.lastIndex(where: { !$0.isWhitespace }) else { return nil }
-        // Double-click often includes a trailing space and selecting a paragraph
-        // may include its terminator. Preserve exactly the captured separators.
-        let pending = String(original[..<first]) + result[resultStart...resultEnd] + original[original.index(after: last)...]
-        return pending.utf8.count <= 96_000 ? String(pending) : nil
-    }
-
     func perform(_ result: String, original: String, validate: (_ afterStagingText: Bool) -> Bool,
                  requestPaste: () -> Bool) throws -> SelectionReplacementOutcome {
-        guard let text = Self.preservingSelectionEdges(result, original: original) else {
+        guard let text = SelectionReplacementText.preservingSelectionEdges(result, original: original) else {
             throw SelectionPasteFailure.invalidResult
         }
         guard validate(false) else { throw SelectionPasteFailure.changedTarget }

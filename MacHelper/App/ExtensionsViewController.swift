@@ -2,7 +2,7 @@ import AppKit
 import MacHelper
 
 /// Overview navigation is independent of the schema form. Status/reload updates
-/// never recreate a field the user is editing or silently select a catalog tool.
+/// never recreate a field the user is editing or silently select a tool.
 @MainActor
 final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     typealias SourceFolderOpener = @MainActor ([URL], @escaping @MainActor (Error?) -> Void) -> Void
@@ -19,10 +19,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let overviewDocument = SourceSettingsDocumentView()
     private let overviewStack = NSStackView()
     private let installedList = NSStackView()
-    private let availableSection = NSStackView()
-    private let availableList = NSStackView()
     private let installedCount = NSTextField(labelWithString: "")
-    private let availableCount = NSTextField(labelWithString: "")
     private let checkForUpdatesButton = NSButton(title: L("Check for Updates"), target: nil, action: nil)
     private let selectAllButton = NSButton(checkboxWithTitle: L("Select All"), target: nil, action: nil)
     private let selectionCount = NSTextField(labelWithString: L("%ld selected", 0))
@@ -65,7 +62,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
     private let form = NSStackView()
     private var permissionTimer: Timer?
     private var selectedID: String?
-    private var overviewSignature = ""
+    private var overviewSignature: String?
     private var cards: [String: SourceToolCard] = [:]
     private var overviewSelection = ExtensionBatchSelection()
     private var selectionCheckboxes: [String: NSButton] = [:]
@@ -235,16 +232,6 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         addFullWidth(batchActions, to: overviewStack)
         configureList(installedList)
         addFullWidth(installedList, to: overviewStack)
-        let availableHeading = sectionHeading(L("Available from catalogs"), count: availableCount)
-        overviewStack.setCustomSpacing(25, after: installedList)
-        configureList(availableSection)
-        addFullWidth(availableHeading, to: availableSection)
-        let note = Self.label(L("Open a tool to learn more, then enable it to install its source."), size: 12, color: .secondaryLabelColor)
-        note.maximumNumberOfLines = 2
-        addFullWidth(note, to: availableSection)
-        configureList(availableList)
-        addFullWidth(availableList, to: availableSection)
-        addFullWidth(availableSection, to: overviewStack)
     }
 
     private func buildDetail() {
@@ -534,21 +521,18 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
 
     private func refreshOverview(_ tools: [SourceToolInfo]) {
         let installed = tools.filter { $0.sourceURL != nil }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        let available = tools.filter { $0.sourceURL == nil }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        availableSection.isHidden = available.isEmpty
         installedCount.stringValue = installed.count == 1 ? L("%ld tool", installed.count) : L("%ld tools", installed.count)
-        availableCount.stringValue = available.count == 1 ? L("%ld tool", available.count) : L("%ld tools", available.count)
         overviewSelection.reconcile(items: batchItems)
         overviewMessage.stringValue = globalError.map { L("Extension error: %@", L($0)) } ?? workingTitle ?? batchSummary ?? ""
         overviewMessage.textColor = globalError == nil ? .secondaryLabelColor : .systemRed
         overviewMessage.isHidden = overviewMessage.stringValue.isEmpty
-        let signature = tools.map { tool in
-            [tool.id, tool.displayName, tool.summary, tool.version, tool.runtime, tool.availableVersion ?? "", String(tool.sourceURL != nil),
+        let signature = installed.map { tool in
+            [tool.id, tool.displayName, tool.summary, tool.version, tool.runtime, tool.availableVersion ?? "",
              String(tool.isEnabled), String(tool.isRunning), String(tool.isLocallyModified),
              tool.artwork?.digest ?? "", tool.error ?? "", tool.status,
              operationErrors[tool.id]?.message ?? ""].joined(separator: "\u{1f}")
         }.joined(separator: "\u{1e}")
-        guard signature != overviewSignature || cards.isEmpty else { refreshBatchControls(); return }
+        guard signature != overviewSignature else { refreshBatchControls(); return }
         overviewSignature = signature
         let focusID = (view.window?.firstResponder as? SourceToolCard)?.toolID
         let checkboxFocusID = selectionCheckboxes.first { $0.value === view.window?.firstResponder }?.key
@@ -556,64 +540,58 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         cards.removeAll()
         selectionCheckboxes.removeAll()
         updateButtons.removeAll()
-        for (list, items, emptyTitle, emptyText) in [
-            (installedList, installed, "No tools installed yet", "Browse the marketplace or install a source folder to add your first tool."),
-            (availableList, available, "No additional catalog tools", "Add another catalog or browse the marketplace to discover more tools.")
-        ] {
-            list.arrangedSubviews.forEach { list.removeArrangedSubview($0); $0.removeFromSuperview() }
-            if items.isEmpty {
-                addFullWidth(SourceToolEmptyView(title: L(emptyTitle), message: L(emptyText)), to: list)
-            } else {
-                for tool in items {
-                    let card = SourceToolCard(tool: tool, error: operationErrors[tool.id]?.message,
-                                              target: self, action: #selector(openTool(_:)))
-                    cards[tool.id] = card
-                    if tool.sourceURL != nil {
-                        let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(selectInstalled(_:)))
-                        checkbox.setAccessibilityLabel(L("Select %@", tool.displayName))
-                        checkbox.toolTip = L("Select this extension for list actions.")
-                        checkbox.identifier = NSUserInterfaceItemIdentifier("select-extension-" + tool.id)
-                        checkbox.widthAnchor.constraint(equalToConstant: 18).isActive = true
-                        selectionCheckboxes[tool.id] = checkbox
-                        // The card and its update action are separate keyboard and accessibility controls.
-                        let cardContainer = NSView()
-                        card.translatesAutoresizingMaskIntoConstraints = false
-                        cardContainer.addSubview(card)
-                        let row = NSStackView(views: [checkbox, cardContainer])
-                        row.spacing = 10; row.alignment = .centerY
-                        if let version = tool.availableVersion {
-                            let button = NSButton(title: "", target: self, action: #selector(updateListedTool(_:)))
-                            button.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)?
-                                .withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))
-                            button.imagePosition = .imageOnly
-                            button.isBordered = false
-                            button.contentTintColor = .controlAccentColor
-                            button.identifier = NSUserInterfaceItemIdentifier("update-extension-" + tool.id)
-                            button.setAccessibilityLabel(L("Update %@…", tool.displayName))
-                            let availability = L("Version %@ available", version)
-                            button.setAccessibilityHelp(availability)
-                            button.toolTip = availability
-                            button.translatesAutoresizingMaskIntoConstraints = false
-                            cardContainer.addSubview(button)
-                            NSLayoutConstraint.activate([
-                                button.topAnchor.constraint(equalTo: cardContainer.topAnchor, constant: 8),
-                                button.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -10),
-                                button.widthAnchor.constraint(equalToConstant: 26),
-                                button.heightAnchor.constraint(equalToConstant: 26)
-                            ])
-                            updateButtons[tool.id] = button
-                        }
-                        NSLayoutConstraint.activate([
-                            card.leadingAnchor.constraint(equalTo: cardContainer.leadingAnchor),
-                            card.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor),
-                            card.topAnchor.constraint(equalTo: cardContainer.topAnchor),
-                            card.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor),
-                            cardContainer.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -28)
-                        ])
-                        addFullWidth(row, to: list)
-                    } else { addFullWidth(card, to: list) }
-                }
+        installedList.arrangedSubviews.forEach { installedList.removeArrangedSubview($0); $0.removeFromSuperview() }
+        if installed.isEmpty {
+            let empty = SourceToolEmptyView(title: L("No tools installed yet"),
+                message: L("Browse the marketplace or install a source folder to add your first tool."))
+            addFullWidth(empty, to: installedList)
+        }
+        for tool in installed {
+            let card = SourceToolCard(tool: tool, error: operationErrors[tool.id]?.message,
+                                      target: self, action: #selector(openTool(_:)))
+            cards[tool.id] = card
+            let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(selectInstalled(_:)))
+            checkbox.setAccessibilityLabel(L("Select %@", tool.displayName))
+            checkbox.toolTip = L("Select this extension for list actions.")
+            checkbox.identifier = NSUserInterfaceItemIdentifier("select-extension-" + tool.id)
+            checkbox.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            selectionCheckboxes[tool.id] = checkbox
+            // The card and its update action are separate keyboard and accessibility controls.
+            let cardContainer = NSView()
+            card.translatesAutoresizingMaskIntoConstraints = false
+            cardContainer.addSubview(card)
+            let row = NSStackView(views: [checkbox, cardContainer])
+            row.spacing = 10; row.alignment = .centerY
+            if let version = tool.availableVersion {
+                let button = NSButton(title: "", target: self, action: #selector(updateListedTool(_:)))
+                button.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))
+                button.imagePosition = .imageOnly
+                button.isBordered = false
+                button.contentTintColor = .controlAccentColor
+                button.identifier = NSUserInterfaceItemIdentifier("update-extension-" + tool.id)
+                button.setAccessibilityLabel(L("Update %@…", tool.displayName))
+                let availability = L("Version %@ available", version)
+                button.setAccessibilityHelp(availability)
+                button.toolTip = availability
+                button.translatesAutoresizingMaskIntoConstraints = false
+                cardContainer.addSubview(button)
+                NSLayoutConstraint.activate([
+                    button.topAnchor.constraint(equalTo: cardContainer.topAnchor, constant: 8),
+                    button.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -10),
+                    button.widthAnchor.constraint(equalToConstant: 26),
+                    button.heightAnchor.constraint(equalToConstant: 26)
+                ])
+                updateButtons[tool.id] = button
             }
+            NSLayoutConstraint.activate([
+                card.leadingAnchor.constraint(equalTo: cardContainer.leadingAnchor),
+                card.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor),
+                card.topAnchor.constraint(equalTo: cardContainer.topAnchor),
+                card.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor),
+                cardContainer.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -28)
+            ])
+            addFullWidth(row, to: installedList)
         }
         if let focusID, let card = cards[focusID] { view.window?.makeFirstResponder(card) }
         if let checkboxFocusID, let checkbox = selectionCheckboxes[checkboxFocusID] { view.window?.makeFirstResponder(checkbox) }
@@ -1107,17 +1085,19 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
             refreshDisplay()
             return
         }
-        let previous = Set(manager.tools.map(\.id))
+        let previous = Set(manager.tools.filter { $0.sourceURL != nil }.map(\.id))
         enqueue(title: L("Installing source…"), operation: { [manager] in try await manager.importSource(from: source) }, success: { [weak self] in
             guard let self else { return }
-            if let item = self.manager.tools.first(where: { !previous.contains($0.id) }) { self.selectTool(item.id) }
+            if let item = self.manager.tools.first(where: { $0.sourceURL != nil && !previous.contains($0.id) }) {
+                self.selectTool(item.id)
+            }
         })
     }
 
     @objc private func addCatalog() {
         let alert = NSAlert()
         alert.messageText = L("Add a tool catalog")
-        alert.informativeText = L("Enter the catalog JSON URL. Tools are downloaded when you enable them.")
+        alert.informativeText = L("Enter a catalog JSON URL to check for updates to installed extensions.")
         alert.addButton(withTitle: L("Add Catalog"))
         alert.addButton(withTitle: L("Cancel"))
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
@@ -1428,9 +1408,8 @@ private final class SourceToolCard: NSButton {
         layer?.cornerRadius = 12
         layer?.borderWidth = 1
         identifier = NSUserInterfaceItemIdentifier("source-tool-" + tool.id)
-        let installed = tool.sourceURL != nil
         let problem = error ?? tool.error
-        let state = problem != nil ? L("Needs attention") : !installed ? L("Available")
+        let state = problem != nil ? L("Needs attention")
             : tool.isRunning ? L("Running") : tool.isEnabled ? L("Enabled") : L("Disabled")
         let availableVersion = tool.availableVersion.map { L("Version %@ available", $0) }
         setAccessibilityLabel(tool.displayName + ", " + state + ". " + tool.summary

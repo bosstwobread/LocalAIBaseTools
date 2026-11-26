@@ -70,6 +70,23 @@ final class SelectionReplacementTests: XCTestCase {
             currentRange: evidence.range, currentText: evidence.text, protected: false, settable: true, enabled: false))
     }
 
+    func testExactReplacementKeepsTheSelectedParagraphBreak() throws {
+        let source = "Before\nThe library open at nine and I want borrow a book.\nAfter"
+        let original = "The library open at nine and I want borrow a book.\n"
+        let range = (source as NSString).range(of: original)
+        let evidence = SelectionReplacementEvidence(processIdentifier: 42, range: range, text: original)
+        let replacement = try XCTUnwrap(evidence.replacementText(for: "The library opens at nine, and I want to borrow a book."))
+        XCTAssertEqual((source as NSString).replacingCharacters(in: range, with: replacement),
+                       "Before\nThe library opens at nine, and I want to borrow a book.\nAfter")
+    }
+
+    func testExactReplacementRangeAccountsForRestoredWhitespace() {
+        let evidence = SelectionReplacementEvidence(processIdentifier: 42,
+            range: NSRange(location: Int.max - 2, length: 2), text: "a\n")
+        XCTAssertEqual(evidence.replacementText(for: "b"), "b\n")
+        XCTAssertNil(evidence.replacementText(for: "bc"))
+    }
+
     func testCanonicalEquivalenceDoesNotAuthorizeDifferentEditorBytes() {
         let decomposed = "e\u{301}"
         let captured = SelectionReplacementEvidence(processIdentifier: 42,

@@ -9,6 +9,12 @@ struct SelectionReplacementEvidence {
     let range: NSRange
     let text: String
 
+    func replacementText(for result: String) -> String? {
+        guard let replacement = SelectionReplacementText.preservingSelectionEdges(result, original: text),
+              range.location <= Int.max - replacement.utf16.count else { return nil }
+        return replacement
+    }
+
     func accepts(processIdentifier: Int32?, sameFocusedElement: Bool,
                  currentRange: NSRange?, currentText: String?, protected: Bool,
                  settable: Bool, enabled: Bool = true) -> Bool {
@@ -25,6 +31,20 @@ struct SelectionReplacementEvidence {
               range.location >= 0, range.length > 0, range.length == text.utf16.count,
               currentText.utf16.elementsEqual(text.utf16) else { return .changed }
         return focus
+    }
+}
+
+enum SelectionReplacementText {
+    static func preservingSelectionEdges(_ result: String, original: String) -> String? {
+        guard !original.isEmpty, original.utf8.count <= 96_000,
+              result.utf8.count <= 96_000, !result.contains("\0"),
+              let first = original.firstIndex(where: { !$0.isWhitespace }),
+              let last = original.lastIndex(where: { !$0.isWhitespace }),
+              let resultStart = result.firstIndex(where: { !$0.isWhitespace }),
+              let resultEnd = result.lastIndex(where: { !$0.isWhitespace }) else { return nil }
+        // A selection can include its surrounding spaces or paragraph terminator.
+        let replacement = String(original[..<first]) + result[resultStart...resultEnd] + original[original.index(after: last)...]
+        return replacement.utf8.count <= 96_000 ? replacement : nil
     }
 }
 
@@ -299,10 +319,8 @@ final class AccessibilitySelectionEditTarget {
         return stillSource() ? status : .changed
     }
 
-    func replace(with text: String, validateInvocation: () -> Bool = { true }) throws -> SelectionReplacementOutcome {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              text.utf8.count <= 96_000, !text.contains("\0"),
-              evidence.range.location <= Int.max - text.utf16.count, validateInvocation() else {
+    func replace(with result: String, validateInvocation: () -> Bool = { true }) throws -> SelectionReplacementOutcome {
+        guard let text = evidence.replacementText(for: result), validateInvocation() else {
             throw CapabilityError.invalid(L("The original selection changed. Select the text again, or use Copy."))
         }
         switch readiness() {
