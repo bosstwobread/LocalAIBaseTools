@@ -130,11 +130,37 @@ enum ExtensionListVerification {
                 try check(!(try button(id, in: controller)).isEnabled, "A batch action was enabled without a selection.")
             }
 
+            let enabledCard = try button("source-tool-" + a, in: controller)
+            let disabledCard = try button("source-tool-" + b, in: controller)
+            try check(labelValues(in: enabledCard).contains("Enabled") && labelValues(in: disabledCard).contains("Disabled") &&
+                      enabledCard.accessibilityLabel()?.contains(", Enabled.") == true &&
+                      disabledCard.accessibilityLabel()?.contains(", Disabled.") == true,
+                      "The installed badges did not reflect enablement.")
+            try check(Darwin.kill(initialA, SIGTERM) == 0, "Could not stop the disposable fixture worker.")
+            try await eventually("The stopped worker did not clear its running state.", timeout: 5) {
+                current.tools.contains { $0.id == a && $0.isEnabled && !$0.isRunning }
+            }
+            controller.refreshDisplay()
+            try check(try button("source-tool-" + a, in: controller) === enabledCard,
+                      "A worker exit changed the enabled card.")
+            let resumed = try await current.performCommand(for: a, text: "worker recovery fixture")
+            let resumedA = try pid(current, a); workers.append(resumedA)
+            try check(resumed.text == "worker recovery fixture" && resumedA != initialA &&
+                      (try button("source-tool-" + a, in: controller)) === enabledCard,
+                      "A request did not restore the worker or changed the enabled card.")
+            controller.selectTool(a)
+            try await drain(controller)
+            try check(!labelValues(in: controller.view).contains("Running · watching local source for changes."),
+                      "The extension details still show a routine worker-running label.")
+            controller.showOverview()
+            try await drain(controller)
+            checks.append("Enabled and Disabled badges reflect the saved setting through worker exit and on-demand restart")
+
             try await select([a, b], manager: current, controller: controller)
             try check(try button("batch-select-all", in: controller).state == .mixed, "Partial selection was not reflected by Select All.")
             try await click("batch-reload", in: controller)
             let reloadedA = try pid(current, a); workers.append(reloadedA)
-            try check(reloadedA != initialA && current.workerPID(for: b) == nil && current.workerPID(for: c) == stableC,
+            try check(reloadedA != resumedA && current.workerPID(for: b) == nil && current.workerPID(for: c) == stableC,
                       "Batch reload enabled a disabled tool or touched an unselected worker.")
             try check(!(current.tools.first { $0.id == b }?.isEnabled ?? true), "Disabled reload changed enablement.")
             checks.append("real list selection reloads only enabled selected tools and leaves unselected workers unchanged")
@@ -174,6 +200,10 @@ enum ExtensionListVerification {
                 current.tools.first { $0.id == a }?.error != nil
             }
             try check(current.workerPID(for: a) == reloadedA, "Watcher failure replaced the working fixture.")
+            let failedCard = try button("source-tool-" + a, in: controller)
+            try check(labelValues(in: failedCard).contains("Enabled") &&
+                      failedCard.toolTip == current.tools.first(where: { $0.id == a })?.error,
+                      "A reload error replaced the enabled badge or hid the diagnostic.")
             try await click("batch-reload", in: controller)
             let secondB = try pid(current, b); workers.append(secondB)
             try check(current.workerPID(for: a) == reloadedA && secondB != firstB && current.workerPID(for: c) == stableC,

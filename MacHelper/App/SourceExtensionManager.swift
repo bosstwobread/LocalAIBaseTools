@@ -24,7 +24,7 @@ struct SourceToolInfo {
     let isLocallyModified: Bool
     let reloadCount: Int
     let error: String?
-    let status: String
+    let detailMessage: String?
     let artwork: SourceToolArtwork?
 }
 
@@ -85,7 +85,17 @@ final class SourceExtensionManager {
     private var reloadTasks: [String: Task<Void, Never>] = [:]
     private var epochs: [String: UUID] = [:]
     private var errors: [String: String] = [:]
-    private var statuses: [String: String] = [:]
+    private enum DetailMessage: Equatable {
+        case activity(String)
+        case notice(String)
+
+        var localizedText: String {
+            switch self {
+            case .activity(let key), .notice(let key): return L(key)
+            }
+        }
+    }
+    private var detailMessages: [String: DetailMessage] = [:]
     private var counts: [String: Int] = [:]
     private var state = State()
     private var shuttingDown = false
@@ -188,7 +198,7 @@ final class SourceExtensionManager {
                                   sourceURL: exists ? try? store.installedURL(for: id) : nil,
                                   isLocallyModified: snapshot?.isLocallyModified ?? false, reloadCount: counts[id] ?? 0,
                                   error: errors[id] ?? configurationErrors[id],
-                                  status: L(statuses[id] ?? (exists ? "Source installed locally." : "Enable to download the complete source.")),
+                                  detailMessage: detailMessages[id]?.localizedText,
                                   artwork: artwork)
         }
     }
@@ -254,7 +264,7 @@ final class SourceExtensionManager {
             if state.companionGrants?[id] != nil { synchronizeCompanions() }
             try saveState()
             await stop(id)
-            if state.enabled[id] == false { statuses[id] = "Disabled. Your editable source and settings are retained." }
+            if state.enabled[id] == false { detailMessages[id] = nil }
         }
         notify()
     }
@@ -386,7 +396,6 @@ final class SourceExtensionManager {
     func importSource(from url: URL) async throws {
         let snapshot = try store.importSource(from: url)
         snapshots[snapshot.manifest.identifier] = snapshot
-        statuses[snapshot.manifest.identifier] = "Complete source installed. Enable to run it."
         notify()
     }
     func addCatalog(from url: URL) async throws {
@@ -461,7 +470,8 @@ final class SourceExtensionManager {
         epochs[id] = epoch
         reloadTasks.removeValue(forKey: id)?.cancel()
         let enabled = state.enabled[id] == true
-        let previousStatus = statuses[id]
+        if case .activity = detailMessages[id] { detailMessages[id] = nil }
+        let previousMessage = detailMessages[id]
         let configuration = try settingsConfiguration(staged, id: id)
         var candidate: (ScriptWorkerClient, Gate)?
         var backupURL: URL
@@ -494,7 +504,7 @@ final class SourceExtensionManager {
             preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: configuration.schema, values: configuration.values)
             configurationErrors.removeValue(forKey: id)
             errors.removeValue(forKey: id)
-            statuses[id] = enabled ? "Running · watching local source for changes." : "Disabled. Your editable source and settings are retained."
+            detailMessages[id] = nil
             if let (worker, gate) = candidate {
                 active[id] = Running(snapshot: snapshot, worker: worker, gate: gate,
                                      schema: configuration.schema, settings: configuration.values)
@@ -510,7 +520,7 @@ final class SourceExtensionManager {
                 await worker.stop()
             }
             if epochs[id] == epoch, !shuttingDown {
-                statuses[id] = previousStatus
+                detailMessages[id] = previousMessage
                 notify()
             }
             throw error
@@ -683,7 +693,14 @@ final class SourceExtensionManager {
                           expectedFileHashes: [String: String]? = nil) async throws {
         let epoch = UUID(); epochs[id] = epoch
         let needsDownload = sourceURL(for: id) == nil && download != nil
-        statuses[id] = needsDownload ? "Downloading complete extension source…" : "Validating source…"
+        let activity = DetailMessage.activity(needsDownload ? "Downloading complete extension source…" : "Validating source…")
+        detailMessages[id] = activity
+        defer {
+            if epochs[id] == epoch, !shuttingDown, detailMessages[id] == activity {
+                detailMessages[id] = nil
+                notify()
+            }
+        }
         notify()
         let snapshot: SourcePackageSnapshot
         do {
@@ -715,7 +732,7 @@ final class SourceExtensionManager {
             if let old { await old.worker.stop() }
             guard epochs[id] == epoch, active[id] === runtime, !shuttingDown else { throw CancellationError() }
             counts[id, default: 0] += 1
-            statuses[id] = "Running · watching local source for changes."
+            detailMessages[id] = nil
             errors.removeValue(forKey: id)
             try saveState()
             try saveSettings(values, id: id)
@@ -724,7 +741,7 @@ final class SourceExtensionManager {
         } catch {
             if epochs[id] == epoch, !shuttingDown, !(error is CancellationError),
                (error as? MarketplaceError) != .existingSourceChanged {
-                statuses[id] = active[id] == nil ? "Not running." : "Running the last working version."
+                detailMessages[id] = active[id] == nil ? nil : .notice("Running the last working version.")
                 errors[id] = error.localizedDescription
                 notify()
             }
@@ -752,9 +769,9 @@ final class SourceExtensionManager {
         }
         if manifest.runtime == "native", !(approved ?? []).contains("native.execute") {
             guard approving, onApproveNativeExecution?(manifest) == true else {
-                statuses[id] = active[id] == nil
+                detailMessages[id] = .notice(active[id] == nil
                     ? "Native execution was not approved. The extension remains disabled."
-                    : "Running the last working version; native execution was not approved."
+                    : "Running the last working version; native execution was not approved.")
                 notify()
                 throw CancellationError()
             }
@@ -781,7 +798,16 @@ final class SourceExtensionManager {
             let loader = NativePrebuiltWorkerLoader(cacheDirectory: stateDirectory.appendingPathComponent("NativePrebuiltCache", isDirectory: true))
             executable = try await loader.load(snapshot: snapshot)
         } else if snapshot.manifest.runtime == "native" {
-            statuses[id] = "Building native extension…"; notify()
+            let previousMessage = detailMessages[id]
+            let activity = DetailMessage.activity("Building native extension…")
+            detailMessages[id] = activity
+            notify()
+            defer {
+                if epochs[id] == epoch, !shuttingDown, detailMessages[id] == activity {
+                    detailMessages[id] = previousMessage
+                    notify()
+                }
+            }
             let builder = NativeSourceBuilder(sdkURL: nativeSDKURL,
                 cacheDirectory: stateDirectory.appendingPathComponent("NativeBuildCache", isDirectory: true))
             executable = try await builder.build(snapshot: snapshot)
@@ -986,7 +1012,7 @@ final class SourceExtensionManager {
         preparedSettings[id] = PreparedSettings(snapshot: snapshot, schema: schema, values: values)
         if pending[id] === worker { pending.removeValue(forKey: id) }
         synchronizeSelectionActions()
-        statuses[id] = "Running the last working version while local edits are invalid."
+        detailMessages[id] = .notice("Running the last working version while local edits are invalid.")
         watch(id)
     }
     private func synchronizeSelectionActions(invalidateCurrent: Bool = false) {

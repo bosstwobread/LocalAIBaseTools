@@ -440,7 +440,8 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         toggle.title = item?.sourceURL == nil ? L("Install & Enable") : L("Enabled")
         toggle.state = item?.isEnabled == true ? .on : .off
         status.stringValue = (workingToolID == nil || workingToolID == selectedID ? workingTitle : nil)
-            ?? item.map { L($0.status) } ?? ""
+            ?? item?.detailMessage ?? ""
+        status.isHidden = status.stringValue.isEmpty
         if let item {
             sourceState.stringValue = item.sourceURL == nil ? L("Complete editable source will be downloaded when you enable this tool.")
                 : (item.isLocallyModified ? L("Source edited locally") : L("Local source ready")) + "  ·  " + (item.reloadCount == 1 ? L("%ld reload", item.reloadCount) : L("%ld reloads", item.reloadCount))
@@ -532,8 +533,7 @@ final class ExtensionsViewController: NSViewController, NSTextFieldDelegate {
         overviewMessage.isHidden = overviewMessage.stringValue.isEmpty
         let signature = installed.map { tool in
             [tool.id, tool.displayName, tool.summary, tool.version, tool.runtime, tool.availableVersion ?? "",
-             String(tool.isEnabled), String(tool.isRunning), String(tool.isLocallyModified),
-             tool.artwork?.digest ?? "", tool.error ?? "", tool.status,
+             String(tool.isEnabled), String(tool.isLocallyModified), tool.artwork?.digest ?? "", tool.error ?? "",
              operationErrors[tool.id]?.message ?? ""].joined(separator: "\u{1f}")
         }.joined(separator: "\u{1e}")
         guard signature != overviewSignature else { refreshBatchControls(); return }
@@ -1413,12 +1413,11 @@ private final class SourceToolCard: NSButton {
         layer?.borderWidth = 1
         identifier = NSUserInterfaceItemIdentifier("source-tool-" + tool.id)
         let problem = error ?? tool.error
-        let state = problem != nil ? L("Needs attention")
-            : tool.isRunning ? L("Running") : tool.isEnabled ? L("Enabled") : L("Disabled")
+        let state = tool.isEnabled ? L("Enabled") : L("Disabled")
         let availableVersion = tool.availableVersion.map { L("Version %@ available", $0) }
         setAccessibilityLabel(tool.displayName + ", " + state + ". " + tool.summary
             + (availableVersion.map { " " + $0 } ?? ""))
-        setAccessibilityHelp(L("Open tool details and settings"))
+        setAccessibilityHelp(problem ?? L("Open tool details and settings"))
         toolTip = problem ?? tool.summary
 
         let icon = SourceToolIconView()
@@ -1432,7 +1431,7 @@ private final class SourceToolCard: NSButton {
         description.maximumNumberOfLines = 2
         let badge = NSTextField(labelWithString: state)
         badge.font = .systemFont(ofSize: 11, weight: .medium)
-        badge.textColor = problem != nil ? .systemOrange : tool.isRunning ? .systemGreen : .secondaryLabelColor
+        badge.textColor = problem != nil ? .systemOrange : tool.isEnabled ? .systemGreen : .secondaryLabelColor
         let metadata = NSTextField(labelWithString: (tool.version.isEmpty ? "" : L("Version %@", tool.version))
             + (tool.isLocallyModified ? "  ·  " + L("Edited locally") : ""))
         metadata.font = .systemFont(ofSize: 11)
